@@ -3,7 +3,7 @@ version: 0.1.0
 description: "Local-first, provenance-backed memory for ATLAS."
 author: "Abidin Yildiz"
 kind: standalone
-manifest_version: 2
+manifest_version: 1
 api_version: 1
 platforms:
   - macos
@@ -15,7 +15,7 @@ config_schema:
   inbox_path:
     type: str
     default: "~/Nexus/Inbox"
-    description: "Human drop folder; Phase 1 only validates this path."
+    description: "Human drop folder; ingestion remains dry-run in Phase 3."
   data_path:
     type: str
     default: "~/.local/share/nexus"

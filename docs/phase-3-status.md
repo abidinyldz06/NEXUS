@@ -36,7 +36,7 @@ were not modified.
 
 ## Verification
 
-- Hermes Python 3.11: 46 unit tests passed.
+- Hermes Python 3.11: 47 unit tests passed.
 - Python bytecode compilation passed.
 - NEXUS record and extraction JSON Schemas passed Draft 2020-12 meta-validation.
 - `hermes plugins doctor . --ci` passed discovery, import and registration.
