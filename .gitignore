@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+.venv/
+
+# Private evaluation data and local runtime state must never be committed.
+eval/private/
+.nexus/
+nexus.db*
+
+# Local editor/OS files.
+.DS_Store
+.idea/
+.vscode/

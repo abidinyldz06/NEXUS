@@ -1,0 +1,16 @@
+# These values belong under plugins.entries.nexus.settings in ~/.hermes/config.yaml.
+# This file is documentation only; NEXUS does not read or mutate Hermes config in Phase 1.
+plugins:
+  entries:
+    nexus:
+      settings:
+        vault_path: "/absolute/path/to/existing/obsidian-vault"
+        inbox_path: "~/Nexus/Inbox"
+        data_path: "~/.local/share/nexus"
+        timezone: "Europe/Istanbul"
+        raw_retention_days: 90
+        rejected_retention_days: 30
+        max_source_bytes: 52428800
+        source_stable_seconds: 5
+        auto_publish_enabled: false
+        sensitive_auto_publish: false

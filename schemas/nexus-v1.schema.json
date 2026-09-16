@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexus.local/schemas/nexus-v1.schema.json",
+  "title": "NEXUS v1 domain records",
+  "oneOf": [
+    { "$ref": "#/$defs/source" },
+    { "$ref": "#/$defs/memory" },
+    { "$ref": "#/$defs/entity" },
+    { "$ref": "#/$defs/relation" },
+    { "$ref": "#/$defs/commitment" },
+    { "$ref": "#/$defs/reviewItem" }
+  ],
+  "$defs": {
+    "schemaVersion": { "const": 1 },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "impact": { "enum": ["low", "medium", "high"] },
+    "recordStatus": { "enum": ["active", "superseded", "retracted"] },
+    "reviewStatus": {
+      "enum": ["auto", "approved", "edited", "pending", "rejected", "expired"]
+    },
+    "sourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "conversation_id", "span_ids", "span_sha256"],
+      "properties": {
+        "source_id": { "type": "string", "pattern": "^src_[0-9a-f]{32}$" },
+        "conversation_id": { "type": "string", "minLength": 1 },
+        "span_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "span_sha256": { "$ref": "#/$defs/sha256" },
+        "excerpt": { "type": "string", "maxLength": 500, "default": "" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "source_type", "content_sha256", "ingested_at", "revision",
+        "message_count", "source_started_at", "source_ended_at", "original_name",
+        "locator", "parser", "retained_until", "availability", "schema_version"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^src_[0-9a-f]{32}$" },
+        "source_type": { "enum": ["chatgpt", "hermes", "manual"] },
+        "content_sha256": { "$ref": "#/$defs/sha256" },
+        "ingested_at": { "type": "string", "format": "date-time" },
+        "external_id": { "type": ["string", "null"] },
+        "revision": { "type": "integer", "minimum": 1 },
+        "message_count": { "type": "integer", "minimum": 0 },
+        "source_started_at": { "type": ["string", "null"], "format": "date-time" },
+        "source_ended_at": { "type": ["string", "null"], "format": "date-time" },
+        "original_name": { "type": "string" },
+        "locator": { "type": "string" },
+        "parser": { "type": "object", "additionalProperties": { "type": "string" } },
+        "retained_until": { "type": ["string", "null"], "format": "date" },
+        "availability": { "enum": ["available", "excerpt_only", "deleted"] },
+        "schema_version": { "$ref": "#/$defs/schemaVersion" }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "type", "summary", "source_refs", "confidence", "impact",
+        "review_status", "status", "entity_ids", "supersedes", "superseded_by",
+        "extractor", "schema_version"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^mem_[0-9a-f]{32}$" },
+        "type": { "enum": ["fact", "event", "decision", "preference"] },
+        "summary": { "type": "string", "minLength": 1 },
+        "source_refs": {
+          "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/sourceRef" }
+        },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "impact": { "$ref": "#/$defs/impact" },
+        "review_status": { "$ref": "#/$defs/reviewStatus" },
+        "status": { "$ref": "#/$defs/recordStatus" },
+        "entity_ids": {
+          "type": "array", "items": { "type": "string", "pattern": "^ent_[0-9a-f]{32}$" }
+        },
+        "supersedes": {
+          "type": "array", "items": { "type": "string", "pattern": "^mem_[0-9a-f]{32}$" }
+        },
+        "superseded_by": {
+          "type": ["string", "null"], "pattern": "^mem_[0-9a-f]{32}$"
+        },
+        "extractor": { "type": "object" },
+        "schema_version": { "$ref": "#/$defs/schemaVersion" }
+      }
+    },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "type", "display_name", "normalized_name", "aliases", "linked_notes",
+        "source_refs", "schema_version"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^ent_[0-9a-f]{32}$" },
+        "type": { "enum": ["person", "organization", "project", "asset", "place"] },
+        "display_name": { "type": "string", "minLength": 1 },
+        "normalized_name": { "type": "string", "minLength": 1 },
+        "aliases": { "type": "array", "items": { "type": "string" } },
+        "linked_notes": { "type": "array", "items": { "type": "string" } },
+        "source_refs": { "type": "array", "items": { "$ref": "#/$defs/sourceRef" } },
+        "schema_version": { "$ref": "#/$defs/schemaVersion" }
+      }
+    },
+    "relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "from_entity_id", "predicate", "source_refs", "confidence", "impact",
+        "to_entity_id", "literal", "status", "schema_version"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^rel_[0-9a-f]{32}$" },
+        "from_entity_id": { "type": "string", "pattern": "^ent_[0-9a-f]{32}$" },
+        "predicate": { "type": "string", "minLength": 1 },
+        "source_refs": {
+          "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/sourceRef" }
+        },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "impact": { "$ref": "#/$defs/impact" },
+        "to_entity_id": {
+          "type": ["string", "null"], "pattern": "^ent_[0-9a-f]{32}$"
+        },
+        "literal": { "type": ["string", "null"] },
+        "status": { "$ref": "#/$defs/recordStatus" },
+        "schema_version": { "$ref": "#/$defs/schemaVersion" }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "to_entity_id": { "type": "string", "pattern": "^ent_[0-9a-f]{32}$" },
+            "literal": { "type": "null" }
+          }
+        },
+        {
+          "properties": {
+            "to_entity_id": { "type": "null" },
+            "literal": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "commitment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "summary", "actor_entity_id", "source_refs", "confidence", "impact",
+        "review_status", "timezone", "due_date", "due_time", "due_precision",
+        "target_entity_ids", "status", "notify", "notified_at", "schema_version"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^com_[0-9a-f]{32}$" },
+        "summary": { "type": "string", "minLength": 1 },
+        "actor_entity_id": { "type": "string", "pattern": "^ent_[0-9a-f]{32}$" },
+        "source_refs": {
+          "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/sourceRef" }
+        },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "impact": { "$ref": "#/$defs/impact" },
+        "review_status": { "$ref": "#/$defs/reviewStatus" },
+        "timezone": { "type": "string", "minLength": 1 },
+        "due_date": { "type": ["string", "null"], "format": "date" },
+        "due_time": { "type": ["string", "null"], "format": "time" },
+        "due_precision": { "enum": ["exact", "day", "range", "ambiguous"] },
+        "target_entity_ids": {
+          "type": "array", "items": { "type": "string", "pattern": "^ent_[0-9a-f]{32}$" }
+        },
+        "status": { "enum": ["open", "done", "cancelled", "overdue"] },
+        "notify": { "type": "boolean" },
+        "notified_at": { "type": ["string", "null"], "format": "date-time" },
+        "schema_version": { "$ref": "#/$defs/schemaVersion" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "due_precision": { "const": "ambiguous" } } },
+          "then": { "properties": { "notify": { "const": false } } }
+        }
+      ]
+    },
+    "reviewItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "candidate_kind", "candidate_fingerprint", "reason_codes", "candidate",
+        "source_refs", "status", "decision", "schema_version"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^rev_[0-9a-f]{32}$" },
+        "candidate_kind": { "type": "string", "minLength": 1 },
+        "candidate_fingerprint": { "type": "string", "minLength": 1 },
+        "reason_codes": {
+          "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }
+        },
+        "candidate": { "type": "object" },
+        "source_refs": {
+          "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/sourceRef" }
+        },
+        "status": { "$ref": "#/$defs/reviewStatus" },
+        "decision": { "type": ["object", "null"] },
+        "schema_version": { "$ref": "#/$defs/schemaVersion" }
+      }
+    }
+  }
+}

@@ -1,0 +1,39 @@
+[
+  {
+    "id": "chat-conv-1",
+    "title": "Synthetic planning chat",
+    "create_time": 1700000000,
+    "update_time": 1700000002,
+    "current_node": "node-assistant",
+    "mapping": {
+      "node-root": {
+        "id": "node-root",
+        "parent": null,
+        "children": ["node-user"],
+        "message": null
+      },
+      "node-user": {
+        "id": "node-user",
+        "parent": "node-root",
+        "children": ["node-assistant"],
+        "message": {
+          "id": "chat-msg-1",
+          "author": {"role": "user", "name": null},
+          "create_time": 1700000001,
+          "content": {"content_type": "text", "parts": ["Planı yarın gözden geçir."]}
+        }
+      },
+      "node-assistant": {
+        "id": "node-assistant",
+        "parent": "node-user",
+        "children": [],
+        "message": {
+          "id": "chat-msg-2",
+          "author": {"role": "assistant", "name": null},
+          "create_time": 1700000002,
+          "content": {"content_type": "text", "parts": ["Tamam."]}
+        }
+      }
+    }
+  }
+]

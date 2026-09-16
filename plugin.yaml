@@ -1,0 +1,45 @@
+name: nexus
+version: 0.1.0
+description: "Local-first, provenance-backed memory for ATLAS."
+author: "Abidin Yildiz"
+kind: standalone
+manifest_version: 2
+api_version: 1
+platforms:
+  - macos
+config_schema:
+  vault_path:
+    type: str
+    required: true
+    description: "Absolute path to the existing Obsidian Vault."
+  inbox_path:
+    type: str
+    default: "~/Nexus/Inbox"
+    description: "Human drop folder; Phase 1 only validates this path."
+  data_path:
+    type: str
+    default: "~/.local/share/nexus"
+    description: "Private runtime data outside the synced Vault."
+  timezone:
+    type: str
+    default: "Europe/Istanbul"
+  raw_retention_days:
+    type: int
+    default: 90
+  rejected_retention_days:
+    type: int
+    default: 30
+  max_source_bytes:
+    type: int
+    default: 52428800
+    description: "Maximum accepted Inbox file size (50 MiB by default)."
+  source_stable_seconds:
+    type: int
+    default: 5
+    description: "Minimum unchanged age before an Inbox file is considered stable."
+  auto_publish_enabled:
+    type: bool
+    default: false
+  sensitive_auto_publish:
+    type: bool
+    default: false

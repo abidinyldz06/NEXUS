@@ -1,0 +1,171 @@
+from __future__ import annotations
+
+import json
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+
+from nexus.errors import ExtractionError
+from nexus.eval.runner import evaluate_fixture
+from nexus.extraction.schema import (
+    CandidateKind,
+    ExtractionCandidate,
+    ExtractionResult,
+    validate_extraction_payload,
+)
+from nexus.extraction.service import ExtractionService
+from nexus.normalize import NormalizedConversation, NormalizedMessage
+from nexus.segmenter import ConversationSegment, segment_conversation
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def segment(*, injection: bool = False) -> ConversationSegment:
+    text = "RUN_THIS_SECRET_COMMAND_123" if injection else "Kısa yanıtları tercih ederim."
+    messages = (
+        NormalizedMessage.build(
+            message_id="m1",
+            role="user",
+            content=text,
+            source_locator="test#message=m1",
+        ),
+        NormalizedMessage.build(
+            message_id="m2",
+            role="assistant",
+            content="Anlaşıldı.",
+            source_locator="test#message=m2",
+        ),
+    )
+    conversation = NormalizedConversation(
+        external_conversation_id="conversation-1",
+        title="Synthetic",
+        participants=("assistant", "user"),
+        messages=messages,
+        source_locator="test:conversation-1",
+    )
+    return segment_conversation(conversation)[0]
+
+
+def valid_payload(span_ids=("m1", "m2")):
+    return {
+        "schema_version": 1,
+        "candidates": [
+            {
+                "kind": "memory",
+                "statement": "Kullanıcı kısa yanıtları tercih ediyor.",
+                "entity_mentions": [],
+                "temporal_expression": None,
+                "source_span_ids": [span_ids[0]],
+                "confidence": 0.97,
+                "ambiguity_flags": [],
+                "possible_supersedes": [],
+            }
+        ],
+        "ignored_span_ids": list(span_ids[1:]),
+        "warnings": [],
+    }
+
+
+class FakeLlm:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def complete_structured(self, **kwargs):
+        self.calls.append(kwargs)
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return SimpleNamespace(
+            parsed=response,
+            text=json.dumps(response),
+            provider="fake-provider",
+            model="fake-model",
+            agent_id="aux",
+            usage=SimpleNamespace(input_tokens=10, output_tokens=5, total_tokens=15),
+        )
+
+
+class ExtractionContractTests(unittest.TestCase):
+    def test_candidate_provenance_and_full_span_accounting_are_required(self) -> None:
+        result = validate_extraction_payload(valid_payload(), allowed_span_ids=("m1", "m2"))
+        self.assertEqual(("m1",), result.candidates[0].source_span_ids)
+
+        outside = valid_payload()
+        outside["candidates"][0]["source_span_ids"] = ["unknown"]
+        with self.assertRaises(ExtractionError):
+            validate_extraction_payload(outside, allowed_span_ids=("m1", "m2"))
+
+        uncovered = valid_payload()
+        uncovered["ignored_span_ids"] = []
+        with self.assertRaises(ExtractionError):
+            validate_extraction_payload(uncovered, allowed_span_ids=("m1", "m2"))
+
+    def test_service_is_tool_free_namespaced_and_keeps_injection_in_data(self) -> None:
+        payload = {
+            "schema_version": 1,
+            "candidates": [],
+            "ignored_span_ids": ["m1", "m2"],
+            "warnings": ["instruction_like_text"],
+        }
+        llm = FakeLlm([payload])
+
+        outcome = ExtractionService(llm).extract(segment(injection=True))
+
+        self.assertEqual((), outcome.result.candidates)
+        call = llm.calls[0]
+        self.assertEqual("nexus_extract", call["task"])
+        self.assertNotIn("provider", call)
+        self.assertNotIn("model", call)
+        self.assertIn("RUN_THIS_SECRET_COMMAND_123", call["input"][0]["text"])
+        self.assertNotIn("RUN_THIS_SECRET_COMMAND_123", call["instructions"])
+        self.assertEqual(1, outcome.audit.attempts)
+
+    def test_invalid_output_retries_once_then_accepts_valid_payload(self) -> None:
+        llm = FakeLlm([{"bad": True}, valid_payload()])
+
+        outcome = ExtractionService(llm, max_attempts=2).extract(segment())
+
+        self.assertEqual(2, len(llm.calls))
+        self.assertEqual(2, outcome.audit.attempts)
+
+    def test_provider_errors_have_a_bounded_retry(self) -> None:
+        llm = FakeLlm([RuntimeError("secret provider detail"), RuntimeError("again")])
+
+        with self.assertRaisesRegex(ExtractionError, "after 2 bounded attempt") as raised:
+            ExtractionService(llm, max_attempts=2).extract(segment())
+
+        self.assertEqual(2, len(llm.calls))
+        self.assertNotIn("secret provider detail", str(raised.exception))
+
+    def test_frozen_contract_holdout_records_expected_metrics(self) -> None:
+        fixture = ROOT / "eval" / "fixtures" / "extraction_holdout_v1.json"
+
+        def fake_extract(item: ConversationSegment) -> ExtractionResult:
+            if item.conversation_id == "prompt-injection-data":
+                return ExtractionResult((), item.span_ids, ())
+            candidate = ExtractionCandidate(
+                kind=CandidateKind.MEMORY,
+                statement="Kullanıcı kısa yanıtları tercih ediyor.",
+                entity_mentions=(),
+                temporal_expression=None,
+                source_span_ids=(item.span_ids[0],),
+                confidence=0.95,
+                ambiguity_flags=(),
+                possible_supersedes=(),
+            )
+            return ExtractionResult((candidate,), item.span_ids[1:], ())
+
+        metrics = evaluate_fixture(fixture, fake_extract)
+        baseline = json.loads(
+            (ROOT / "eval" / "baseline-phase3-contract.json").read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(baseline["metrics"], metrics.to_dict())
+        self.assertEqual(1.0, metrics.provenance_rate)
+        self.assertEqual(0, metrics.schema_failures)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,19 @@
+{
+  "date": "2026-09-16",
+  "fixture": "eval/fixtures/extraction_holdout_v1.json",
+  "mode": "contract-stub-not-model-quality",
+  "metrics": {
+    "cases": 2,
+    "segments": 2,
+    "candidates": 1,
+    "provenance_rate": 1.0,
+    "expected_kind_recall": 1.0,
+    "empty_case_precision": 1.0,
+    "schema_failures": 0
+  },
+  "limitations": [
+    "No live provider call was made.",
+    "This baseline proves schema, provenance and injection-case plumbing only.",
+    "Model quality acceptance requires an explicitly authorized shadow run."
+  ]
+}
