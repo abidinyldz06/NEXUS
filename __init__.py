@@ -8,7 +8,7 @@ from .nexus.cli import configure_parser, run_command
 
 
 def register(ctx: Any) -> None:
-    """Register the read-only Phase 3 CLI and extraction route."""
+    """Register the Phase 4 CLI and tool-free extraction route."""
     ctx.register_auxiliary_task(
         "nexus_extract",
         display_name="NEXUS memory extraction",
@@ -24,7 +24,7 @@ def register(ctx: Any) -> None:
     ctx.register_cli_command(
         name="nexus",
         help="Inspect and manage the NEXUS memory foundation",
-        description="Read-only ingestion and shadow extraction foundation for NEXUS v0.1.",
+        description="Shadow extraction and private review foundation for NEXUS v0.1.",
         setup_fn=setup_fn,
         handler_fn=handler_fn,
     )

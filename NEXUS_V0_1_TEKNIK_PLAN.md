@@ -1,8 +1,8 @@
 # NEXUS v0.1 — Nihai Teknik Plan
 
 Tarih: 16 Eylül 2026
-Durum: Plan onaylandı; Phase 3 shadow-mode canlı contract eval ile doğrulandı
-Güncel kanıt: `docs/phase-3-status.md`
+Durum: Plan onaylandı; Phase 4 yerel policy/review acceptance'ı doğrulandı
+Güncel kanıt: `docs/phase-4-status.md`
 
 ## A. Executive decision
 
