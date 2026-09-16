@@ -28,22 +28,27 @@ were not modified.
 - Maximum 1–3 bounded attempts with sanitized terminal failure.
 - Provider/model/task/prompt/schema/segment/token audit metadata without raw content.
 - Frozen multi-turn and instruction-like-text contract fixture.
+- Explicit `hermes nexus eval --shadow` safety gate for the packaged frozen
+  fixture; no candidate content is persisted or printed.
+- Provider, model, agent, prompt/schema version, fixture hash and token-usage
+  audit summary for live shadow runs.
 - Transparent contract-stub baseline; it is not presented as model-quality evidence.
 
 ## Verification
 
-- Hermes Python 3.11: 43 unit tests passed.
+- Hermes Python 3.11: 46 unit tests passed.
 - Python bytecode compilation passed.
 - NEXUS record and extraction JSON Schemas passed Draft 2020-12 meta-validation.
 - `hermes plugins doctor . --ci` passed discovery, import and registration.
-- Wheel build passed and includes all nested packages plus `prompt_v1.txt`.
+- Wheel build passed and includes all nested packages, `prompt_v1.txt` and the
+  packaged frozen holdout fixture.
 - Contract holdout: provenance 100%, expected-kind recall 100%, empty injection case
   100%, schema failures 0 using a deterministic stub.
 - Invalid spans, uncovered spans, malformed output and provider failures fail closed.
 
 ## Remaining acceptance gates
 
-- Run the frozen holdout through a configured live `nexus_extract` model in explicit
-  shadow mode and record provider/model/version plus quality metrics.
+- Run `hermes nexus eval --shadow --json` through a configured live
+  `nexus_extract` model and retain its provider/model/version plus quality metrics.
 - Inspect one real ChatGPT export and rerun the source-to-segment pipeline.
 - Keep auto-publish disabled; Phase 4 policy/review must not be started implicitly.

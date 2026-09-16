@@ -14,6 +14,7 @@ include = ["nexus*"]
 
 [tool.setuptools.package-data]
 "nexus.extraction" = ["prompt_v1.txt"]
+"nexus.eval" = ["fixtures/*.json"]
 
 [tool.ruff]
 target-version = "py311"

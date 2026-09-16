@@ -1,6 +1,6 @@
 {
   "date": "2026-09-16",
-  "fixture": "eval/fixtures/extraction_holdout_v1.json",
+  "fixture": "nexus/eval/fixtures/extraction_holdout_v1.json",
   "mode": "contract-stub-not-model-quality",
   "metrics": {
     "cases": 2,

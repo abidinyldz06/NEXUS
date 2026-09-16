@@ -9,7 +9,7 @@ only return JSON matching the NEXUS candidate schema.
 ## Fail-closed defaults
 
 - `vault_path` has no default and must identify an existing Vault.
-- Writes are disabled during Phase 1.
+- Writes are disabled throughout the current Phase 3 shadow-mode implementation.
 - Auto-publish is disabled.
 - Sensitive auto-publish is rejected even if configured true.
 - Relative storage paths are rejected.

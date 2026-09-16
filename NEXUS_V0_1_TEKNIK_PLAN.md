@@ -770,7 +770,7 @@ nexus/extraction/service.py
 nexus/extraction/schema.py
 nexus/extraction/prompt_v1.txt
 nexus/eval/runner.py
-eval/fixtures/*
+nexus/eval/fixtures/*
 tests/test_segmenter.py
 tests/test_extraction_contract.py
 ```

@@ -1,5 +1,5 @@
 # These values belong under plugins.entries.nexus.settings in ~/.hermes/config.yaml.
-# This file is documentation only; NEXUS does not read or mutate Hermes config in Phase 1.
+# This file is documentation only; NEXUS does not mutate Hermes config in Phase 3 shadow mode.
 plugins:
   entries:
     nexus:
