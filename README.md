@@ -16,6 +16,10 @@ export doğrulanana kadar experimental'dır. Aktif Hermes CLI hâlâ:
 - yalnız açık `eval --shadow` komutunda paketlenmiş sentetik fixture ile model çağrısı yapar,
 - notification göndermez.
 
+Paketlenmiş iki-vakalı frozen holdout, aktif `ollama-cloud` / `glm-5.3` rotasında
+shadow modda başarıyla çalışmıştır. Bu sonuç Phase 3 contract kapısını doğrular;
+geniş model-kalitesi kanıtı veya auto-publish yetkisi değildir.
+
 Makinece okunabilir v1 kayıt contract'ı
 [`schemas/nexus-v1.schema.json`](schemas/nexus-v1.schema.json) dosyasındadır.
 
