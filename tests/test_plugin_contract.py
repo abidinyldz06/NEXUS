@@ -20,6 +20,13 @@ class FakeContext:
 
 
 class PluginContractTests(unittest.TestCase):
+    def test_manifest_stays_compatible_with_the_active_hermes_installer(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        manifest = (root / "plugin.yaml").read_text(encoding="utf-8")
+
+        self.assertIn("manifest_version: 1", manifest)
+        self.assertIn("api_version: 1", manifest)
+
     def test_registers_one_cli_and_namespaced_auxiliary_task(self) -> None:
         root = Path(__file__).resolve().parents[1]
         spec = importlib.util.spec_from_file_location(

@@ -1,14 +1,16 @@
-"""Read-only Phase 2 Hermes CLI surface."""
+"""Read-only ingestion and explicit Phase 3 shadow-eval CLI surface."""
 
 from __future__ import annotations
 
 import json
 from argparse import ArgumentParser, Namespace
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from . import __version__
 from .config import from_plugin_context
 from .errors import ConfigurationError
+from .eval import evaluate_with_llm_report, frozen_fixture_path
 from .ingest import plan_inbox
 
 
@@ -30,6 +32,16 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
         help="Required safety gate; parse and report without archiving or publishing",
     )
     ingest.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
+
+    eval_command = subcommands.add_parser(
+        "eval", help="Run the packaged frozen holdout without publishing"
+    )
+    eval_command.add_argument(
+        "--shadow",
+        action="store_true",
+        help="Required safety gate; call the model but do not persist candidates",
+    )
+    eval_command.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
 
     parser.set_defaults(func=handler)
 
@@ -105,7 +117,14 @@ def run_command(args: Namespace, ctx: Any) -> int:
             }
         _print_ingest_payload(payload, as_json=bool(getattr(args, "as_json", False)))
         return 0 if payload["ok"] else 2
-    print("Usage: hermes nexus {status|config validate|ingest --dry-run}")
+    if command == "eval":
+        if not bool(getattr(args, "shadow", False)):
+            print("Phase 3 only supports: hermes nexus eval --shadow")
+            return 2
+        payload = _shadow_eval_payload(ctx)
+        _print_eval_payload(payload, as_json=bool(getattr(args, "as_json", False)))
+        return 0 if payload["ok"] else 2
+    print("Usage: hermes nexus {status|config validate|ingest --dry-run|eval --shadow}")
     return 2
 
 
@@ -124,6 +143,48 @@ def _print_ingest_payload(payload: dict[str, Any], *, as_json: bool) -> None:
     for item in payload.get("rejected", []):
         if isinstance(item, dict):
             print(f"rejected: {item.get('relative_path')} — {item.get('reason')}")
+    for error in payload.get("errors", []):
+        print(f"error: {error}")
+
+
+def _shadow_eval_payload(ctx: Any) -> dict[str, Any]:
+    try:
+        report = evaluate_with_llm_report(frozen_fixture_path(), ctx.llm)
+    except Exception:
+        return {
+            "ok": False,
+            "mode": "shadow",
+            "writes_performed": False,
+            "candidates_published": False,
+            "errors": ["shadow evaluation failed without exposing provider details"],
+        }
+    return {
+        "ok": report.accepted,
+        "mode": "shadow",
+        "writes_performed": False,
+        "candidates_published": False,
+        "report": report.to_dict(),
+        "errors": [] if report.accepted else ["frozen holdout acceptance thresholds were not met"],
+    }
+
+
+def _print_eval_payload(payload: dict[str, Any], *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return
+    print("NEXUS frozen evaluation — shadow mode; no candidates published")
+    report = payload.get("report", {})
+    if isinstance(report, dict):
+        metrics = report.get("metrics", {})
+        print(f"accepted: {report.get('accepted', False)}")
+        print(f"providers: {', '.join(report.get('providers', [])) or '<unavailable>'}")
+        print(f"models: {', '.join(report.get('models', [])) or '<unavailable>'}")
+        if isinstance(metrics, dict):
+            print(
+                f"provenance: {metrics.get('provenance_rate', 0):.2f}, "
+                f"expected-kind recall: {metrics.get('expected_kind_recall', 0):.2f}, "
+                f"schema failures: {metrics.get('schema_failures', 0)}"
+            )
     for error in payload.get("errors", []):
         print(f"error: {error}")
 

@@ -1,0 +1,36 @@
+{
+  "date": "2026-09-16",
+  "source_commit": "bd0cb5aff63081ae3e868e87ecf3466aa96b9c91",
+  "fixture": "nexus/eval/fixtures/extraction_holdout_v1.json",
+  "fixture_sha256": "58dfe5935d760a9b5f17d1c2cda78530985f9a261028f38c3e2b1be7ded3100a",
+  "mode": "live-shadow-no-publish",
+  "accepted": true,
+  "provider": "ollama-cloud",
+  "model": "glm-5.3",
+  "agent_id": "default",
+  "prompt_version": "nexus-extraction-prompt-v1",
+  "prompt_sha256": "baa7e0fa9c2268d2994c09bd063cf1e8e1ea5a8c1833fb07ffb64a5e6396cb82",
+  "schema_version": 1,
+  "successful_calls": 2,
+  "metrics": {
+    "cases": 2,
+    "segments": 2,
+    "candidates": 2,
+    "provenance_rate": 1.0,
+    "expected_kind_recall": 1.0,
+    "empty_case_precision": 1.0,
+    "schema_failures": 0
+  },
+  "usage": {
+    "input_tokens": 1447,
+    "output_tokens": 3459,
+    "total_tokens": 4906
+  },
+  "writes_performed": false,
+  "candidates_published": false,
+  "limitations": [
+    "The frozen holdout contains two synthetic cases.",
+    "Candidate statements and source content are intentionally not recorded.",
+    "This result does not authorize auto-publish or Phase 4 writes."
+  ]
+}

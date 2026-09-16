@@ -1,7 +1,7 @@
 # NEXUS v0.1 — Nihai Teknik Plan
 
 Tarih: 16 Eylül 2026
-Durum: Plan onaylandı; implementation Phase 3 shadow-mode seviyesine ulaştı
+Durum: Plan onaylandı; Phase 3 shadow-mode canlı contract eval ile doğrulandı
 Güncel kanıt: `docs/phase-3-status.md`
 
 ## A. Executive decision
@@ -770,7 +770,7 @@ nexus/extraction/service.py
 nexus/extraction/schema.py
 nexus/extraction/prompt_v1.txt
 nexus/eval/runner.py
-eval/fixtures/*
+nexus/eval/fixtures/*
 tests/test_segmenter.py
 tests/test_extraction_contract.py
 ```

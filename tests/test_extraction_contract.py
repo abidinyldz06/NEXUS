@@ -6,7 +6,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from nexus.errors import ExtractionError
-from nexus.eval.runner import evaluate_fixture
+from nexus.eval.runner import (
+    evaluate_fixture,
+    evaluate_with_llm_report,
+    frozen_fixture_path,
+)
 from nexus.extraction.schema import (
     CandidateKind,
     ExtractionCandidate,
@@ -16,7 +20,6 @@ from nexus.extraction.schema import (
 from nexus.extraction.service import ExtractionService
 from nexus.normalize import NormalizedConversation, NormalizedMessage
 from nexus.segmenter import ConversationSegment, segment_conversation
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -140,7 +143,7 @@ class ExtractionContractTests(unittest.TestCase):
         self.assertNotIn("secret provider detail", str(raised.exception))
 
     def test_frozen_contract_holdout_records_expected_metrics(self) -> None:
-        fixture = ROOT / "eval" / "fixtures" / "extraction_holdout_v1.json"
+        fixture = frozen_fixture_path()
 
         def fake_extract(item: ConversationSegment) -> ExtractionResult:
             if item.conversation_id == "prompt-injection-data":
@@ -165,6 +168,28 @@ class ExtractionContractTests(unittest.TestCase):
         self.assertEqual(baseline["metrics"], metrics.to_dict())
         self.assertEqual(1.0, metrics.provenance_rate)
         self.assertEqual(0, metrics.schema_failures)
+
+    def test_live_report_contains_audit_metadata_but_no_candidate_content(self) -> None:
+        responses = [
+            valid_payload(("p1", "p2", "p3")),
+            {
+                "schema_version": 1,
+                "candidates": [],
+                "ignored_span_ids": ["i1", "i2"],
+                "warnings": ["instruction_like_text"],
+            },
+        ]
+
+        report = evaluate_with_llm_report(frozen_fixture_path(), FakeLlm(responses))
+        payload = report.to_dict()
+
+        self.assertTrue(report.accepted)
+        self.assertEqual(("fake-provider",), report.providers)
+        self.assertEqual(("fake-model",), report.models)
+        self.assertEqual(2, report.successful_calls)
+        self.assertEqual(30, report.total_tokens)
+        self.assertNotIn("candidates", payload)
+        self.assertNotIn("Kullanıcı kısa", json.dumps(payload, ensure_ascii=False))
 
 
 if __name__ == "__main__":

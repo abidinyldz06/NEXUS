@@ -13,8 +13,12 @@ export doğrulanana kadar experimental'dır. Aktif Hermes CLI hâlâ:
 
 - Obsidian Vault'a veya private raw store'a yazmaz,
 - Hermes config/cron/gateway dosyalarını değiştirmez,
-- model çağrısı yapmaz,
+- yalnız açık `eval --shadow` komutunda paketlenmiş sentetik fixture ile model çağrısı yapar,
 - notification göndermez.
+
+Paketlenmiş iki-vakalı frozen holdout, aktif `ollama-cloud` / `glm-5.3` rotasında
+shadow modda başarıyla çalışmıştır. Bu sonuç Phase 3 contract kapısını doğrular;
+geniş model-kalitesi kanıtı veya auto-publish yetkisi değildir.
 
 Makinece okunabilir v1 kayıt contract'ı
 [`schemas/nexus-v1.schema.json`](schemas/nexus-v1.schema.json) dosyasındadır.
@@ -47,16 +51,20 @@ Phase kanıtları: [`docs/phase-0-1-status.md`](docs/phase-0-1-status.md) ve
 
 ## Mevcut CLI
 
-Üç read-only komut vardır:
+Dört güvenli komut vardır:
 
 ```bash
 hermes nexus status
 hermes nexus config validate
 hermes nexus ingest --dry-run
+hermes nexus eval --shadow
 ```
 
-Mutating ingest, review, rebuild, search ve reminders komutları sonraki fazlarda,
-kendi acceptance testleri tamamlandıkça açılacaktır.
+`eval --shadow` yalnız paketlenmiş sentetik frozen holdout'u aktif
+`nexus_extract` model yoluna gönderir; aday içeriği yazmaz veya yayınlamaz ve
+yalnız kalite/audit ölçümlerini ekrana verir. Mutating ingest, review, rebuild,
+search ve reminders komutları sonraki fazlarda, kendi acceptance testleri
+tamamlandıkça açılacaktır.
 
 Extraction servisi yalnız plugin-owned `nexus_extract` auxiliary task'ını kullanır;
 provider/model override istemez ve adayları hiçbir yere yayınlamaz.

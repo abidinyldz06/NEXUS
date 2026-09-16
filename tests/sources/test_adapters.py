@@ -6,7 +6,6 @@ from pathlib import Path
 from nexus.errors import ParseError
 from nexus.sources import ChatGPTAdapter, HermesAdapter, ManualAdapter
 
-
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 
 
@@ -41,7 +40,7 @@ class AdapterTests(unittest.TestCase):
         text = parsed.conversations[0].messages[0].content_text
 
         self.assertIn("Kısa yanıtları", text)
-        self.assertNotIn("ignore previous", text)
+        self.assertNotIn("syntheticFixtureMustNotRender", text)
         self.assertNotIn("display: none", text)
 
     def test_malformed_exports_fail_closed(self) -> None:
