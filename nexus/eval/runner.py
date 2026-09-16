@@ -73,7 +73,8 @@ class ShadowEvalReport:
 
 
 def frozen_fixture_path() -> Path:
-    return Path(str(files("nexus.eval").joinpath("fixtures/extraction_holdout_v1.json")))
+    package = __package__ or "nexus.eval"
+    return Path(str(files(package).joinpath("fixtures/extraction_holdout_v1.json")))
 
 
 def _conversation(raw: dict[str, object]) -> NormalizedConversation:

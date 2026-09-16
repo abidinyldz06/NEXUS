@@ -12,7 +12,6 @@ from ..errors import ExtractionError
 from ..segmenter import ConversationSegment
 from .schema import EXTRACTION_JSON_SCHEMA, ExtractionResult, validate_extraction_payload
 
-
 PROMPT_VERSION = "nexus-extraction-prompt-v1"
 
 
@@ -55,11 +54,9 @@ class ExtractionService:
         self.max_attempts = max_attempts
         self.timeout_seconds = timeout_seconds
         self.max_tokens = max_tokens
+        package = __package__ or "nexus.extraction"
         self.instructions = (
-            files("nexus.extraction")
-            .joinpath("prompt_v1.txt")
-            .read_text(encoding="utf-8")
-            .strip()
+            files(package).joinpath("prompt_v1.txt").read_text(encoding="utf-8").strip()
         )
         self.prompt_sha256 = sha256(self.instructions.encode("utf-8")).hexdigest()
 
