@@ -35,3 +35,7 @@ class HermesExportError(SourceError):
 
 class ExtractionError(NexusError):
     """Structured extraction failed without producing a trusted result."""
+
+
+class ReviewStoreError(NexusError):
+    """The append-only review event store is invalid or unsafe."""

@@ -6,10 +6,12 @@ rebuild edilebilir SQLite indeks ve commitments hatırlatmalarını kapsar.
 
 ## Güncel durum
 
-Phase 3'ün shadow-mode implementation'ı hazırdır. Mevcut kod güvenli plugin/CLI
-iskeleti, source adapter'ları, idempotent source state, deterministik segmenter ve
-provenance zorunlu structured extraction servisi içerir. ChatGPT adapter gerçek
-export doğrulanana kadar experimental'dır. Aktif Hermes CLI hâlâ:
+Phase 4'ün yerel implementation'ı hazırdır. Mevcut kod güvenli plugin/CLI
+iskeleti, source adapter'ları, idempotent source state, deterministik segmenter,
+provenance zorunlu structured extraction, exact-only entity resolver,
+deterministik policy ve tekrar oynatılabilir review kuyruğu içerir. ChatGPT
+adapter gerçek export doğrulanana kadar experimental'dır. Aktif Hermes kurulumu
+henüz bu yerel Phase 4 dalına yükseltilmedi ve hâlâ:
 
 - Obsidian Vault'a veya private raw store'a yazmaz,
 - Hermes config/cron/gateway dosyalarını değiştirmez,
@@ -19,6 +21,10 @@ export doğrulanana kadar experimental'dır. Aktif Hermes CLI hâlâ:
 Paketlenmiş iki-vakalı frozen holdout, aktif `ollama-cloud` / `glm-5.3` rotasında
 shadow modda başarıyla çalışmıştır. Bu sonuç Phase 3 contract kapısını doğrular;
 geniş model-kalitesi kanıtı veya auto-publish yetkisi değildir.
+
+Phase 4 review kararları yalnız Vault dışındaki private data dizininde `0600`
+append-only JSONL olayları olarak saklanır. Approve/edit kararı canonical kayıt
+yayınlamaz; bu yetki Phase 5 Vault writer kabulüne kadar kapalıdır.
 
 Makinece okunabilir v1 kayıt contract'ı
 [`schemas/nexus-v1.schema.json`](schemas/nexus-v1.schema.json) dosyasındadır.
@@ -47,24 +53,31 @@ aktif kullanıcı config'ini veya Vault'u değiştirmez.
 
 Phase kanıtları: [`docs/phase-0-1-status.md`](docs/phase-0-1-status.md) ve
 [`docs/phase-2-status.md`](docs/phase-2-status.md),
-[`docs/phase-3-status.md`](docs/phase-3-status.md).
+[`docs/phase-3-status.md`](docs/phase-3-status.md) ve
+[`docs/phase-4-status.md`](docs/phase-4-status.md).
 
 ## Mevcut CLI
 
-Dört güvenli komut vardır:
+Kaynak dalda aşağıdaki güvenli komut yüzeyleri vardır:
 
 ```bash
 hermes nexus status
 hermes nexus config validate
 hermes nexus ingest --dry-run
 hermes nexus eval --shadow
+hermes nexus review list
+hermes nexus review show REV_ID
+hermes nexus review approve REV_ID
+hermes nexus review reject REV_ID
+hermes nexus review edit REV_ID --candidate-file /absolute/path/candidate.json
 ```
 
 `eval --shadow` yalnız paketlenmiş sentetik frozen holdout'u aktif
 `nexus_extract` model yoluna gönderir; aday içeriği yazmaz veya yayınlamaz ve
-yalnız kalite/audit ölçümlerini ekrana verir. Mutating ingest, review, rebuild,
-search ve reminders komutları sonraki fazlarda, kendi acceptance testleri
-tamamlandıkça açılacaktır.
+yalnız kalite/audit ölçümlerini ekrana verir. Review komutları yalnız private
+olay kaydını değiştirir ve `vault_writes: false` raporlar. Mutating ingest,
+canonical Vault publish, rebuild, search ve reminders komutları sonraki
+fazlarda, kendi acceptance testleri tamamlandıkça açılacaktır.
 
 Extraction servisi yalnız plugin-owned `nexus_extract` auxiliary task'ını kullanır;
 provider/model override istemez ve adayları hiçbir yere yayınlamaz.

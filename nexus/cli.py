@@ -1,4 +1,4 @@
-"""Read-only ingestion and explicit Phase 3 shadow-eval CLI surface."""
+"""NEXUS CLI with explicit shadow and private-review safety boundaries."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from .config import from_plugin_context
 from .errors import ConfigurationError
 from .eval import evaluate_with_llm_report, frozen_fixture_path
 from .ingest import plan_inbox
+from .review.commands import configure_review_parser, run_review_command
 
 
 def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]) -> None:
@@ -43,6 +44,11 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
     )
     eval_command.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
 
+    review = subcommands.add_parser(
+        "review", help="Inspect or decide private review items without publishing"
+    )
+    configure_review_parser(review)
+
     parser.set_defaults(func=handler)
 
 
@@ -53,7 +59,7 @@ def _status_payload(ctx: Any) -> dict[str, Any]:
         return {
             "ok": False,
             "version": __version__,
-            "phase": "0-3-shadow",
+            "phase": "0-4-review",
             "write_enabled": False,
             "errors": [str(exc)],
         }
@@ -62,7 +68,7 @@ def _status_payload(ctx: Any) -> dict[str, Any]:
     return {
         "ok": not errors,
         "version": __version__,
-        "phase": "0-3-shadow",
+        "phase": "0-4-review",
         "write_enabled": False,
         "auto_publish_enabled": config.auto_publish_enabled,
         "sensitive_auto_publish": config.sensitive_auto_publish,
@@ -84,7 +90,7 @@ def _print_payload(payload: dict[str, Any], *, as_json: bool) -> None:
 
     state = "ready" if payload["ok"] else "not ready"
     print(f"NEXUS v{payload['version']} — Phase {payload['phase']} — {state}")
-    print("Writes: disabled (Phase 3 shadow-mode safety gate)")
+    print("Vault writes: disabled (Phase 4 review safety gate)")
     for key, value in payload.get("paths", {}).items():
         print(f"{key}: {value or '<not configured>'}")
     for error in payload.get("errors", []):
@@ -124,7 +130,22 @@ def run_command(args: Namespace, ctx: Any) -> int:
         payload = _shadow_eval_payload(ctx)
         _print_eval_payload(payload, as_json=bool(getattr(args, "as_json", False)))
         return 0 if payload["ok"] else 2
-    print("Usage: hermes nexus {status|config validate|ingest --dry-run|eval --shadow}")
+    if command == "review":
+        try:
+            config = from_plugin_context(ctx)
+            result, payload = run_review_command(args, data_path=config.data_path)
+        except ConfigurationError as exc:
+            result, payload = 2, {
+                "ok": False,
+                "errors": [str(exc)],
+                "vault_writes": False,
+            }
+        _print_review_payload(payload, as_json=bool(getattr(args, "as_json", False)))
+        return result
+    print(
+        "Usage: hermes nexus "
+        "{status|config validate|ingest --dry-run|eval --shadow|review ...}"
+    )
     return 2
 
 
@@ -187,6 +208,30 @@ def _print_eval_payload(payload: dict[str, Any], *, as_json: bool) -> None:
             )
     for error in payload.get("errors", []):
         print(f"error: {error}")
+
+
+def _print_review_payload(payload: dict[str, Any], *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return
+    if not payload.get("ok", False):
+        for error in payload.get("errors", []):
+            print(f"error: {error}")
+        return
+    if "items" in payload:
+        items = payload.get("items", [])
+        print(f"NEXUS review queue — {len(items)} item(s); no Vault writes")
+        for item in items:
+            if isinstance(item, dict):
+                print(
+                    f"{item.get('id')}  {item.get('status')}  "
+                    f"{item.get('candidate_kind')}  {','.join(item.get('reason_codes', []))}"
+                )
+        return
+    item = payload.get("item", {})
+    if isinstance(item, dict):
+        print(json.dumps(item, ensure_ascii=False, sort_keys=True, indent=2))
+    print("Vault writes: false")
 
 
 __all__ = ["configure_parser", "run_command"]

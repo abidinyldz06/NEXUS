@@ -8,10 +8,14 @@ import os
 import tempfile
 import time
 import unittest
+from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 
 from nexus.cli import configure_parser, run_command
+from nexus.contracts import SourceRef
+from nexus.ids import IdPrefix, new_id
+from nexus.review import ReviewStore, create_review_item
 
 
 class FakeContext:
@@ -157,6 +161,90 @@ class CliTests(unittest.TestCase):
         self.assertFalse(payload["writes_performed"])
         self.assertFalse(payload["candidates_published"])
         self.assertEqual(["fixture-model"], payload["report"]["models"])
+
+    def test_review_cli_lists_and_approves_without_vault_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ReviewStore(root)
+            item = store.enqueue(
+                create_review_item(
+                    candidate_kind="memory",
+                    candidate={"statement": "Kısa yanıt tercihi"},
+                    reason_codes=("medium_confidence",),
+                    source_refs=(
+                        SourceRef(
+                            source_id=new_id(IdPrefix.SOURCE),
+                            conversation_id="conversation-1",
+                            span_ids=("msg_1",),
+                            span_sha256=sha256(b"msg_1").hexdigest(),
+                        ),
+                    ),
+                )
+            )
+            parser = parser_for(FakeContext({"data_path": str(root)}))
+
+            list_args = parser.parse_args(["review", "list", "--json"])
+            list_stream = io.StringIO()
+            with contextlib.redirect_stdout(list_stream):
+                list_result = list_args.func(list_args)
+
+            approve_args = parser.parse_args(
+                ["review", "approve", item.id, "--reason", "Kaynak açık", "--json"]
+            )
+            approve_stream = io.StringIO()
+            with contextlib.redirect_stdout(approve_stream):
+                approve_result = approve_args.func(approve_args)
+
+            listed = json.loads(list_stream.getvalue())
+            approved = json.loads(approve_stream.getvalue())
+            self.assertEqual(0, list_result)
+            self.assertEqual([item.id], [value["id"] for value in listed["items"]])
+            self.assertEqual(0, approve_result)
+            self.assertEqual("approved", approved["item"]["status"])
+            self.assertFalse(approved["vault_writes"])
+
+    def test_review_cli_edit_requires_absolute_regular_json_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ReviewStore(root)
+            item = store.enqueue(
+                create_review_item(
+                    candidate_kind="memory",
+                    candidate={"statement": "Eski"},
+                    reason_codes=("candidate_ambiguous",),
+                    source_refs=(
+                        SourceRef(
+                            source_id=new_id(IdPrefix.SOURCE),
+                            conversation_id="conversation-1",
+                            span_ids=("msg_1",),
+                            span_sha256=sha256(b"msg_1").hexdigest(),
+                        ),
+                    ),
+                )
+            )
+            edited_path = root / "edited.json"
+            edited_path.write_text('{"statement":"Yeni"}', encoding="utf-8")
+            parser = parser_for(FakeContext({"data_path": str(root)}))
+            args = parser.parse_args(
+                [
+                    "review",
+                    "edit",
+                    item.id,
+                    "--candidate-file",
+                    str(edited_path),
+                    "--json",
+                ]
+            )
+            stream = io.StringIO()
+
+            with contextlib.redirect_stdout(stream):
+                result = args.func(args)
+
+            payload = json.loads(stream.getvalue())
+            self.assertEqual(0, result)
+            self.assertEqual("edited", payload["item"]["status"])
+            self.assertEqual("Yeni", payload["item"]["candidate"]["statement"])
+            self.assertFalse(payload["vault_writes"])
 
 
 if __name__ == "__main__":
