@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -44,12 +45,20 @@ class HermesExportWrapperTests(unittest.TestCase):
             def fake_run(command, **kwargs):
                 output.write_text("{}\n", encoding="utf-8")
                 self.assertNotIn("shell", kwargs)
+                self.assertEqual(0o077, kwargs["umask"])
                 return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
             with patch("nexus.sources.hermes_export.subprocess.run", side_effect=fake_run):
                 result = export_sessions(output)
+            self.assertEqual(output, result)
+            self.assertEqual(0o600, output.stat().st_mode & 0o777)
 
-        self.assertEqual(output, result)
+    def test_export_parent_must_be_owner_only(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            os.chmod(parent, 0o755)
+            with self.assertRaisesRegex(HermesExportError, "owner-only"):
+                build_export_command(parent / "sessions.jsonl")
 
 
 if __name__ == "__main__":

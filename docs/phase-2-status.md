@@ -33,6 +33,14 @@ user configuration were not modified. The exposed CLI remains dry-run only.
 - `hermes plugins doctor . --ci` passed real discovery, import and registration.
 - Isolated Hermes runtime discovered the enabled plugin and parsed one synthetic
   Hermes JSONL file as 1 conversation / 4 messages with `writes_performed: false`.
+- One real ended Hermes session was exported through the official CLI with
+  `--redact` into an owner-only temporary directory. The adapter parsed one
+  conversation and two messages, both eligible for extraction, without printing
+  content; the temporary export was removed immediately after validation.
+- The real CLI initially created the JSONL as `0644`. The wrapper now rejects
+  non-owner-only parent directories, starts the export under `umask 077` and
+  tightens the output through a no-follow descriptor to `0600`; the same
+  real-session canary then passed at `0600`.
 - Repeating one source three times kept one source ID and revision 1.
 - A changed conversation kept its source ID and advanced to revision 2.
 - Symlink, oversize, format mismatch, malformed export and post-discovery mutation
@@ -45,5 +53,6 @@ user configuration were not modified. The exposed CLI remains dry-run only.
 - Re-run the Phase 2 suite and isolated Hermes dry-run before marking Phase 2
   fully accepted.
 
-The user explicitly chose to proceed on 2026-09-16 with ChatGPT support marked
-experimental. This source-format gate remains open and is not silently waived.
+The Hermes official-export shape is accepted. The user explicitly chose to
+proceed on 2026-09-16 with ChatGPT support marked experimental. That separate
+source-format gate remains open and is not silently waived.
