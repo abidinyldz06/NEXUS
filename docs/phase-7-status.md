@@ -4,14 +4,14 @@ Date: 2026-09-17
 
 ## Outcome
 
-Phase 7 is implemented and locally validated on
-`codex/nexus-phase7-commitments-pulse`. It adds deterministic commitment date
-resolution and an output-only local reminder scanner without adding a notifier,
-activating a cron job or sending a Telegram message.
+Phase 7 is implemented, merged through PR #6 and installed from the exact merge
+commit `90fd4f5629c63dbd850d57db7e1a721a21f6097b`. It adds deterministic
+commitment date resolution and an output-only local reminder scanner without
+adding a notifier, activating a cron job or sending a Telegram message.
 
 No write was made to the configured production Obsidian Vault. Production has
-no canonical commitments, and the active Hermes plugin remains on the merged
-Phase 6 commit until this branch is reviewed and deliberately installed.
+no canonical commitments. The empty production canary exited successfully with
+no output and left the derived SQLite index byte-for-byte unchanged.
 
 ## Implemented
 
@@ -38,13 +38,21 @@ Phase 6 commit until this branch is reviewed and deliberately installed.
 - A 21-item queue emitted bounded 20-item and 1-item digests without duplicates.
 - Empty no-agent output stayed silent; wrapper commands used no shell.
 - Scoped Ruff, bytecode compilation and diff whitespace checks passed.
+- PR #6 was squash-merged to `main`; GitHub has no configured status checks.
+- Active Hermes plugin is pinned to the exact Phase 7 merge commit and Plugin
+  Doctor passes on the installed copy.
+- Gateway restarted onto Phase 7 and `hermes nexus status` reports
+  `Phase 0-7-pulse-local`.
+- Empty production `hermes nexus reminders --emit-local` canary exited `0`,
+  emitted no output, created no canonical namespace and did not change the
+  empty derived index.
 
 ## Remaining acceptance gates
 
-- Review, commit, push and merge this branch; no PR exists yet.
-- Install the exact merged commit and run an empty production local-output canary.
 - Copy the fixed wrapper into Hermes's scripts directory and create only a
   paused/local no-agent cron job after separate approval.
 - Complete a 7-day local-only canary before requesting Telegram delivery.
 - A Telegram canary requires explicit approval and user-observed delivery; it is
   not accepted by unit tests or an HTTP response alone.
+- Repair or reinstall the stale launchd service definition before relying on
+  service-managed gateway restarts; the restarted detached gateway is running.

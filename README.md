@@ -6,15 +6,16 @@ rebuild edilebilir SQLite indeks ve commitments hatırlatmalarını kapsar.
 
 ## Güncel durum
 
-Phase 7'nin yerel implementation'ı hazırdır. Mevcut kod güvenli plugin/CLI
+Phase 7 kodu `main` dalına birleştirilmiş ve tam merge commit'i aktif Hermes
+plugin'ine kurulmuştur. Mevcut kod güvenli plugin/CLI
 iskeleti, source adapter'ları, idempotent source state, deterministik segmenter,
 provenance zorunlu structured extraction, exact-only entity resolver,
 deterministik policy, tekrar oynatılabilir review kuyruğu ve atomik canonical
 Vault writer, disposable SQLite FTS5 indeks ve local-only Pulse scanner içerir.
 ChatGPT adapter gerçek
-export doğrulanana kadar experimental'dır. Phase 6 kaynak kodu `main` dalına
-birleştirilmiştir; aktif Hermes kurulumu ayrı bir teslim kapısıdır ve her seferinde
-installed plugin SHA ile ayrıca doğrulanır. Sistem hâlâ:
+export doğrulanana kadar experimental'dır. Aktif kurulum Phase 7 merge commit'i
+`90fd4f5629c63dbd850d57db7e1a721a21f6097b` ile sabitlenmiş, Plugin Doctor ve
+boş production local-output canary ile doğrulanmıştır. Sistem hâlâ:
 
 - canonical record auto-publish yapmaz; yalnız explicit local reminder komutu
   mevcut commitment'ın `notified_at` state'ini güncelleyebilir,
