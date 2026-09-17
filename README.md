@@ -16,9 +16,10 @@ deterministik policy, tekrar oynatılabilir review kuyruğu ve atomik canonical
 Vault writer, disposable SQLite FTS5 indeks ve local-only Pulse scanner içerir.
 ChatGPT adapter gerçek
 export doğrulanana kadar experimental'dır. Aktif kurulum merge commit'i
-`74ebf71ea5f065c6b133543b5440cf88d847af83` ile sabitlenmiş; Plugin Doctor,
+`ad73a45c08ee3016e1d5cc899587f59b7d5c4c92` ile sabitlenmiş; Plugin Doctor,
 local/no-agent reminder canary, retention dry-run ve salt-okunur production
-permission audit ile iki synthetic drill kullanılarak doğrulanmıştır. Sistem
+permission audit, iki synthetic drill ve yazmasız canonical forget dry-run ile
+doğrulanmıştır. Sistem
 hâlâ:
 
 - canonical record auto-publish yapmaz; yalnız explicit local reminder komutu
@@ -47,7 +48,8 @@ Beşinci Phase 8 dilimi tek canonical kayıt için hedefe özel forget workflow'
 ekler. Dry-run bağımlılık etkisini yazmadan gösterir; apply ancak hedef ID ikinci
 kez birebir doğrulanırsa ve başka canonical kayıt hedefe bağlı değilse çalışır.
 Silme, generated memory view ve disposable SQLite indeks birlikte güncellenir;
-hata durumunda önceki byte'lar geri yüklenir.
+hata durumunda önceki byte'lar geri yüklenir. Workflow kurulu kopyada sentetik
+testlerle kabul edilmiştir; production canonical kayıt silinmemiştir.
 
 Paketlenmiş iki-vakalı frozen holdout, aktif `ollama-cloud` / `glm-5.3` rotasında
 shadow modda başarıyla çalışmıştır. Bu sonuç Phase 3 contract kapısını doğrular;

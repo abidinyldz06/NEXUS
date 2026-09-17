@@ -37,4 +37,6 @@ external change.
 
 Installing the command does not authorize a production deletion. Each real
 target still requires a target-specific dry-run followed by the exact-ID apply
-command. No production target is used during Phase 8 synthetic acceptance.
+command. The workflow is installed from merge commit
+`ad73a45c08ee3016e1d5cc899587f59b7d5c4c92`; Phase 8 acceptance used synthetic
+apply tests and a missing-target production dry-run, never a production target.
