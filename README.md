@@ -6,8 +6,9 @@ rebuild edilebilir SQLite indeks ve commitments hatırlatmalarını kapsar.
 
 ## Güncel durum
 
-Phase 7 ile Phase 8 retention ve permission-audit dilimleri `main` dalına
-birleştirilmiş ve tam merge commit'i aktif Hermes plugin'ine kurulmuştur. Mevcut
+Phase 7 ile Phase 8 retention, permission-audit ve synthetic restore-drill
+dilimleri `main` dalına birleştirilmiş ve tam merge commit'i aktif Hermes
+plugin'ine kurulmuştur. Mevcut
 kod güvenli plugin/CLI iskeleti, source adapter'ları, idempotent source state,
 deterministik segmenter,
 provenance zorunlu structured extraction, exact-only entity resolver,
@@ -15,9 +16,9 @@ deterministik policy, tekrar oynatılabilir review kuyruğu ve atomik canonical
 Vault writer, disposable SQLite FTS5 indeks ve local-only Pulse scanner içerir.
 ChatGPT adapter gerçek
 export doğrulanana kadar experimental'dır. Aktif kurulum merge commit'i
-`7cac1228facff63e08aae85053763720ba5c61be` ile sabitlenmiş; Plugin Doctor,
+`6690fd83c4f0d63bb2df21e8761b781c2f2bc458` ile sabitlenmiş; Plugin Doctor,
 local/no-agent reminder canary, retention dry-run ve salt-okunur production
-permission audit ile doğrulanmıştır. Sistem
+permission audit ile synthetic restore drill kullanılarak doğrulanmıştır. Sistem
 hâlâ:
 
 - canonical record auto-publish yapmaz; yalnız explicit local reminder komutu
@@ -33,9 +34,9 @@ rejected candidate'ları yalnız toplu sayılarla raporlar; audit komutu private
 ve Inbox metadata'sını kontrol eder. İki komut da içerik/yol/ID göstermez ve silme,
 yeniden yazma veya izin değiştirme yapmaz.
 
-Üçüncü Phase 8 dilimi kaynak dalda yalnız sentetik verilerle çalışan geçici restore
-drill'i ekler. Drill kullanıcı config'ini ve production yollarını okumaz; canonical
-hash, derived-index, private permission ve cleanup eşliğini doğrular.
+Üçüncü Phase 8 dilimi yalnız sentetik verilerle çalışan geçici restore drill'i
+ekler. Drill kullanıcı config'ini ve production yollarını okumaz; canonical hash,
+derived-index, private permission ve cleanup eşliğini doğrular.
 
 Paketlenmiş iki-vakalı frozen holdout, aktif `ollama-cloud` / `glm-5.3` rotasında
 shadow modda başarıyla çalışmıştır. Bu sonuç Phase 3 contract kapısını doğrular;
