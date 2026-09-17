@@ -27,6 +27,14 @@ Git rollback operations.
 - Symlinked data path failed closed; nested symlink entries were not followed.
 - CLI refused retention without `--dry-run`.
 - Bytecode compilation and diff whitespace checks passed.
+- PR #9 was squash-merged to `main` as
+  `0d6216ffc64e995a268afc9c20faa8111fadbb1b` and the active Hermes plugin is
+  pinned to that exact commit.
+- Plugin Doctor passed on the installed copy and the gateway restarted under
+  launchd with a fresh PID.
+- Production dry-run returned zero raw, quarantine and rejected candidates,
+  reported `writes_performed=false`, and left both the SQLite hash and private
+  file count unchanged.
 
 ## Not yet delivered
 
@@ -34,11 +42,11 @@ Git rollback operations.
 - No forget workflow.
 - No sensitive-backup encryption/exclusion decision or restore drill.
 - No external git-dir rollback canary.
-- No production installation or production retention scan.
 - Phase 7 local-only reminder canary remains time-gated through seven scheduled
   runs before final v0.1 acceptance.
 
 ## Delivery state
 
-The implementation is local on `codex/nexus-phase8-retention-dry-run`. It has
-not been committed, pushed, merged or installed in the active Hermes plugin.
+The retention dry-run slice is merged and installed. Production acceptance is
+limited to the zero-data read-only scan above; no retention deletion capability
+exists.
