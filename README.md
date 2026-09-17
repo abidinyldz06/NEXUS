@@ -16,10 +16,10 @@ deterministik policy, tekrar oynatılabilir review kuyruğu ve atomik canonical
 Vault writer, disposable SQLite FTS5 indeks ve local-only Pulse scanner içerir.
 ChatGPT adapter gerçek
 export doğrulanana kadar experimental'dır. Aktif kurulum merge commit'i
-`ad73a45c08ee3016e1d5cc899587f59b7d5c4c92` ile sabitlenmiş; Plugin Doctor,
+`3c70434749b066d00daff92e01416cf1ba63b1ee` ile sabitlenmiş; Plugin Doctor,
 local/no-agent reminder canary, retention dry-run ve salt-okunur production
-permission audit, iki synthetic drill ve yazmasız canonical forget dry-run ile
-doğrulanmıştır. Sistem
+permission audit, iki synthetic drill, yazmasız canonical forget ve approved
+memory publish dry-run'ları ile doğrulanmıştır. Sistem
 hâlâ:
 
 - canonical record auto-publish yapmaz; yalnız explicit local reminder komutu
@@ -63,13 +63,15 @@ shadow modda başarıyla çalışmıştır. Bu sonuç Phase 3 contract kapısın
 geniş model-kalitesi kanıtı veya auto-publish yetkisi değildir.
 
 Phase 4 review kararları yalnız Vault dışındaki private data dizininde `0600`
-append-only JSONL olayları olarak saklanır. Approve/edit kararı canonical kayıt
-yayınlamaz; production canary ve ayrı publish yetkisi verilene kadar kapalıdır.
+append-only JSONL olayları olarak saklanır. Approve/edit kararı tek başına
+canonical kayıt yayınlamaz; yayın ayrıca açık dry-run/apply komutu, exact review
+ID doğrulaması ve production için hedefe özel operasyon onayı gerektirir.
 
 Phase 5 writer yalnız immutable ID tabanlı sabit `Nexus/` yolları üretir;
 create/update precondition, symlink containment, rollback ve run audit uygular.
-Writer kütüphanesinin hazır olması production auto-publish yetkisi vermez:
-aktif config'te `write_enabled: false` ve `auto_publish_enabled: false` kalır.
+Writer kütüphanesinin hazır olması production auto-publish yetkisi vermez.
+Aktif config'te `auto_publish_enabled: false` kalır; canonical mutation yalnız
+açık publish/forget veya reminder-state komutlarının dar güvenlik kapılarındadır.
 
 Phase 6 `rebuild` komutu canonical Markdown kayıtlarını salt okunur tarar ve
 Vault dışındaki SQLite indeksini yan dosyada tamamen kurduktan sonra atomik

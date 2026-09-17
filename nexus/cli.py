@@ -163,7 +163,11 @@ def _status_payload(ctx: Any) -> dict[str, Any]:
         "version": __version__,
         "phase": "0-7-pulse-local",
         "write_enabled": not errors and config.write_ready,
-        "write_scope": "reminder-state-only" if not errors and config.write_ready else "none",
+        "write_scope": (
+            "explicit-confirmed-operations"
+            if not errors and config.write_ready
+            else "none"
+        ),
         "reminder_delivery": "local-only",
         "auto_publish_enabled": config.auto_publish_enabled,
         "sensitive_auto_publish": config.sensitive_auto_publish,
@@ -186,7 +190,10 @@ def _print_payload(payload: dict[str, Any], *, as_json: bool) -> None:
     state = "ready" if payload["ok"] else "not ready"
     print(f"NEXUS v{payload['version']} — Phase {payload['phase']} — {state}")
     if payload.get("write_enabled", False):
-        print("Vault writes: explicit reminder-state updates only; canonical publish disabled")
+        print(
+            "Vault writes: explicit confirmed publish/forget and reminder-state "
+            "operations only; auto-publish disabled"
+        )
     else:
         print("Vault writes: disabled; SQLite index is derived and rebuildable")
     for key, value in payload.get("paths", {}).items():
