@@ -22,6 +22,10 @@ permission audit, iki synthetic drill, yazmasız canonical forget ve approved
 memory publish dry-run'ları ile doğrulanmıştır. Sistem
 hâlâ:
 
+Hermes official JSONL adapter'ı gerçek, tek-session ve `--redact` export ile
+içerik yazdırmadan doğrulanmıştır. Export wrapper yalnız owner-only dizine yazar
+ve resmi CLI'ın oluşturduğu dosyayı descriptor üzerinden `0600`e sıkılaştırır.
+
 - canonical record auto-publish yapmaz; yalnız explicit local reminder komutu
   mevcut commitment'ın `notified_at` state'ini güncelleyebilir,
 - retention komutundan Hermes config/cron/gateway dosyalarını değiştirmez;

@@ -59,6 +59,8 @@ dry-run or exact ID-confirmed apply, and does not enable unattended publishing.
 ## Verification
 
 - Python 3.11 unit tests: 120 passed on `main` and the installed plugin copy.
+- Hermes export permission hardening source branch: 121 tests passed; installed
+  acceptance remains pending until merge.
 - Approved-memory publication coverage includes CLI dry-run/apply, provenance,
   idempotency, rollback, audit retry and legacy v1 schema compatibility.
 - Old/fresh raw and quarantine boundaries passed.
