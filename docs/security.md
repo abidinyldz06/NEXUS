@@ -18,8 +18,9 @@ only return JSON matching the NEXUS candidate schema.
 - Sensitive auto-publish is rejected even if configured true.
 - Relative storage paths are rejected.
 - Official Hermes exports must target an existing owner-only, non-symlink
-  directory. Successful JSONL output is opened without following symlinks and
-  tightened to `0600` before the wrapper returns it.
+  directory. The subprocess runs under `umask 077`; successful JSONL output is
+  opened without following symlinks and tightened to `0600` before the wrapper
+  returns it.
 - Review edit input must be an absolute, regular, non-symlink JSON file no larger
   than 1 MiB and must preserve the candidate's existing fields.
 - Phase 5 canonical writer accepts only generated relative paths below `Nexus/`,

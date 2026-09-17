@@ -45,6 +45,7 @@ class HermesExportWrapperTests(unittest.TestCase):
             def fake_run(command, **kwargs):
                 output.write_text("{}\n", encoding="utf-8")
                 self.assertNotIn("shell", kwargs)
+                self.assertEqual(0o077, kwargs["umask"])
                 return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
             with patch("nexus.sources.hermes_export.subprocess.run", side_effect=fake_run):

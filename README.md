@@ -24,7 +24,8 @@ hâlâ:
 
 Hermes official JSONL adapter'ı gerçek, tek-session ve `--redact` export ile
 içerik yazdırmadan doğrulanmıştır. Export wrapper yalnız owner-only dizine yazar
-ve resmi CLI'ın oluşturduğu dosyayı descriptor üzerinden `0600`e sıkılaştırır.
+ve alt süreci `umask 077` ile başlatıp çıktıyı descriptor üzerinden `0600`e
+sıkılaştırır.
 
 - canonical record auto-publish yapmaz; yalnız explicit local reminder komutu
   mevcut commitment'ın `notified_at` state'ini güncelleyebilir,

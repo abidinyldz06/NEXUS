@@ -38,8 +38,9 @@ user configuration were not modified. The exposed CLI remains dry-run only.
   conversation and two messages, both eligible for extraction, without printing
   content; the temporary export was removed immediately after validation.
 - The real CLI initially created the JSONL as `0644`. The wrapper now rejects
-  non-owner-only parent directories and tightens the output through a no-follow
-  descriptor to `0600`; the same real-session canary then passed at `0600`.
+  non-owner-only parent directories, starts the export under `umask 077` and
+  tightens the output through a no-follow descriptor to `0600`; the same
+  real-session canary then passed at `0600`.
 - Repeating one source three times kept one source ID and revision 1.
 - A changed conversation kept its source ID and advanced to revision 2.
 - Symlink, oversize, format mismatch, malformed export and post-discovery mutation

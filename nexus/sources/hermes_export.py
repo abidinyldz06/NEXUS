@@ -48,6 +48,7 @@ def export_sessions(
             capture_output=True,
             text=True,
             timeout=timeout_seconds,
+            umask=0o077,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise HermesExportError("Hermes session export failed to start or timed out") from exc
