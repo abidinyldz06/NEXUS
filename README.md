@@ -38,6 +38,10 @@ yeniden yazma veya izin değiştirme yapmaz.
 ekler. Drill kullanıcı config'ini ve production yollarını okumaz; canonical hash,
 derived-index, private permission ve cleanup eşliğini doğrular.
 
+Dördüncü Phase 8 dilimi kaynak dalda altı sentetik dosyayla external git-dir
+rollback drill'i ekler. Git metadata geçici worktree dışında tutulur; kullanıcı ve
+sistem Git config/template/hook kaynakları yüklenmez.
+
 Paketlenmiş iki-vakalı frozen holdout, aktif `ollama-cloud` / `glm-5.3` rotasında
 shadow modda başarıyla çalışmıştır. Bu sonuç Phase 3 contract kapısını doğrular;
 geniş model-kalitesi kanıtı veya auto-publish yetkisi değildir.
@@ -116,6 +120,7 @@ hermes nexus reminders --emit-local
 hermes nexus retention --dry-run
 hermes nexus audit permissions
 hermes nexus drill restore --synthetic
+hermes nexus drill git-rollback --synthetic
 ```
 
 `eval --shadow` yalnız paketlenmiş sentetik frozen holdout'u aktif
@@ -134,6 +139,9 @@ isim veya içerik basmaz ve izinleri değiştirmez.
 `drill restore --synthetic` yalnız sistem geçici dizininde sentetik kayıt, snapshot
 ve iki derived indeks oluşturur; production yollarını okumadan hash/index eşliğini
 doğrular ve geçici alanı komut bitmeden siler.
+`drill git-rollback --synthetic` altı geçici dosyayı worktree dışındaki Git
+metadata ile commit eder, kontrollü mutation'ı exact commit'e geri alır, hash ve
+clean-worktree eşliğini doğrular ve tüm geçici alanı siler.
 
 Backup sınıflandırması ve restore güvenlik sınırı:
 [`docs/backup-policy.md`](docs/backup-policy.md).

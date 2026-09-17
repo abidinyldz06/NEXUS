@@ -44,6 +44,9 @@ only return JSON matching the NEXUS candidate schema.
 - Derived SQLite is excluded from authoritative backup. Private raw/review data
   is excluded by default and requires encrypted, owner-only staging plus an
   explicitly approved destination before backup.
+- Synthetic Git rollback uses argument-vector commands without a shell, disables
+  system/global config and templates/hooks, keeps metadata outside its temporary
+  worktree and never reads the configured production Vault.
 - Runtime/raw directories will be private and remain outside the synced Vault.
 
 ## Known environmental risk

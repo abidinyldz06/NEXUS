@@ -8,6 +8,8 @@ Three merged Phase 8 slices implement a fail-closed, read-only retention planner
 a metadata-only permission audit and a temporary synthetic restore drill. They
 do not implement deletion, event-log
 compaction, forget, production backup/restore or Git rollback operations.
+A fourth source-branch slice adds a temporary synthetic external git-dir rollback
+drill without enabling production Vault history.
 
 ## Implemented
 
@@ -28,10 +30,16 @@ compaction, forget, production backup/restore or Git rollback operations.
 - Four deterministic synthetic canonical records, private temporary snapshot and
   restore trees, exact file-hash comparison and independent SQLite rebuild parity.
 - Fail-closed restore corruption detection and verified temporary-directory cleanup.
+- Explicit `drill git-rollback --synthetic` gate that ignores plugin config and
+  production paths.
+- Six private synthetic files committed through metadata outside the temporary
+  worktree, mutation detection, exact-commit rollback, hash parity and clean-tree
+  verification.
+- Isolated Git execution with no shell, system/global config, templates or hooks.
 
 ## Verification
 
-- Python 3.11 unit tests: 105 passed.
+- Python 3.11 unit tests: 109 passed on the source branch.
 - Old/fresh raw and quarantine boundaries passed.
 - Rejected candidate expiry passed while preserving the append-only event log.
 - Symlinked data path failed closed; nested symlink entries were not followed.
@@ -68,6 +76,9 @@ compaction, forget, production backup/restore or Git rollback operations.
 - The drill reported no production path access or writes. The production SQLite
   mode, size, SHA-256 and private file count remained unchanged, and no temporary
   drill directory remained.
+- Synthetic Git rollback tests cover six-file parity, external metadata, absence
+  of a worktree `.git` entry, missing-Git failure, symlinked-parent rejection and
+  the CLI safety gate without reading user config.
 
 ## Not yet delivered
 
@@ -75,7 +86,8 @@ compaction, forget, production backup/restore or Git rollback operations.
 - No forget workflow.
 - No production backup archive or real-data restore; the encryption/exclusion
   policy is exercised only with temporary synthetic data.
-- No external git-dir rollback canary.
+- No production Vault external git-dir rollback canary; the source-branch drill
+  uses temporary synthetic files only.
 - Phase 7 local-only reminder canary remains time-gated through seven scheduled
   runs before final v0.1 acceptance.
 
@@ -86,3 +98,7 @@ slices are merged, installed and accepted within their narrow safety boundaries.
 Retention found no expiry candidates, permission audit found no insecure or
 unsafe entries, and restore verification used temporary synthetic data only. No
 retention deletion, permission repair or production backup capability exists.
+
+The synthetic Git rollback slice is local on
+`codex/nexus-phase8-git-rollback-drill` and published as PR #15; it has not been
+merged or installed in the active Hermes plugin.
