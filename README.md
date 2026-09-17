@@ -43,6 +43,12 @@ ekler. Git metadata geçici worktree dışında tutulur; kullanıcı ve sistem G
 config/template/hook kaynakları yüklenmez. Bu dilim kurulu kopyada kabul
 edilmiştir; production Vault için Git geçmişi oluşturmaz.
 
+Beşinci Phase 8 dilimi tek canonical kayıt için hedefe özel forget workflow'u
+ekler. Dry-run bağımlılık etkisini yazmadan gösterir; apply ancak hedef ID ikinci
+kez birebir doğrulanırsa ve başka canonical kayıt hedefe bağlı değilse çalışır.
+Silme, generated memory view ve disposable SQLite indeks birlikte güncellenir;
+hata durumunda önceki byte'lar geri yüklenir.
+
 Paketlenmiş iki-vakalı frozen holdout, aktif `ollama-cloud` / `glm-5.3` rotasında
 shadow modda başarıyla çalışmıştır. Bu sonuç Phase 3 contract kapısını doğrular;
 geniş model-kalitesi kanıtı veya auto-publish yetkisi değildir.
@@ -119,6 +125,8 @@ hermes nexus rebuild
 hermes nexus search "Türk kahvesi" --kind memory
 hermes nexus reminders --emit-local
 hermes nexus retention --dry-run
+hermes nexus forget RECORD_ID --dry-run
+hermes nexus forget RECORD_ID --apply --confirm RECORD_ID
 hermes nexus audit permissions
 hermes nexus drill restore --synthetic
 hermes nexus drill git-rollback --synthetic
@@ -134,7 +142,12 @@ yalnız local output üretir ve işlenen canonical commitment'ın notification s
 güvenli biçimde günceller.
 
 `retention --dry-run` yalnız aggregate expiry sayıları üretir. Apply/delete modu
-yoktur; forget workflow ve gerçek retention temizliği ayrı güvenlik kapılarıdır.
+yoktur; gerçek retention temizliği ayrı güvenlik kapısıdır.
+`forget RECORD_ID --dry-run` hedef canonical kaydın türünü ve bağımlılık sayısını
+yazmadan inceler. `--apply` yalnız aynı ID `--confirm` ile tekrar verildiğinde ve
+bağımlılık sayısı sıfırken hedefi siler, memory view'i yeniler, indeksi rebuild eder
+ve içeriksiz private audit olayı yazar. Bu kayıt-bazlı workflow raw/quarantine
+dosyalarını veya subject-wide kişisel veri kopyalarını temizlemez.
 `audit permissions` yalnız metadata ve toplu sorun sayılarını okur; dosya yolu,
 isim veya içerik basmaz ve izinleri değiştirmez.
 `drill restore --synthetic` yalnız sistem geçici dizininde sentetik kayıt, snapshot
@@ -146,6 +159,8 @@ clean-worktree eşliğini doğrular ve tüm geçici alanı siler.
 
 Backup sınıflandırması ve restore güvenlik sınırı:
 [`docs/backup-policy.md`](docs/backup-policy.md).
+Canonical kayıt unutma güvenlik akışı:
+[`docs/forget-workflow.md`](docs/forget-workflow.md).
 
 Extraction servisi yalnız plugin-owned `nexus_extract` auxiliary task'ını kullanır;
 provider/model override istemez ve adayları hiçbir yere yayınlamaz.

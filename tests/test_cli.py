@@ -133,6 +133,46 @@ class CliTests(unittest.TestCase):
             self.assertEqual(1, payload["raw"]["expired_files"])
             self.assertTrue(old.exists())
 
+    def test_forget_requires_explicit_mode_and_exact_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            vault = root / "vault"
+            vault.mkdir()
+            target_id = new_id(IdPrefix.MEMORY)
+            parser = parser_for(
+                FakeContext(
+                    {
+                        "vault_path": str(vault),
+                        "data_path": str(root / "private"),
+                    }
+                )
+            )
+
+            dry_run = parser.parse_args(["forget", target_id, "--dry-run", "--json"])
+            dry_stream = io.StringIO()
+            with contextlib.redirect_stdout(dry_stream):
+                dry_result = dry_run.func(dry_run)
+
+            apply = parser.parse_args(
+                [
+                    "forget",
+                    target_id,
+                    "--apply",
+                    "--confirm",
+                    new_id(IdPrefix.MEMORY),
+                    "--json",
+                ]
+            )
+            apply_stream = io.StringIO()
+            with contextlib.redirect_stdout(apply_stream):
+                apply_result = apply.func(apply)
+
+            self.assertEqual(2, dry_result)
+            self.assertIn("not found", dry_stream.getvalue())
+            self.assertEqual(2, apply_result)
+            self.assertIn("exactly match", apply_stream.getvalue())
+            self.assertFalse((root / "private").exists())
+
     def test_permission_audit_reports_aggregate_metadata_only(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

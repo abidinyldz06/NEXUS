@@ -38,6 +38,11 @@ only return JSON matching the NEXUS candidate schema.
 - Retention starts as aggregate-only dry-run: raw/quarantine paths are scanned
   without following symlinks, rejected candidate IDs/content are not printed,
   and no delete, rewrite or apply mode exists.
+- Canonical forget starts with a read-only impact plan. Apply requires the exact
+  target ID a second time, refuses any canonical dependency, rechecks the target
+  content hash immediately before deletion, rebuilds the disposable index and
+  writes a content-free private audit event. View/index/audit failure restores
+  exact prior bytes; concurrent changes prevent unsafe rollback.
 - Permission audit reads metadata only, reports aggregate issue counts and
   treats symlinks, non-regular entries, ownership mismatch and group/world
   access as failures without changing modes.
@@ -48,6 +53,10 @@ only return JSON matching the NEXUS candidate schema.
   system/global config and templates/hooks, keeps metadata outside its temporary
   worktree and never reads the configured production Vault.
 - Runtime/raw directories will be private and remain outside the synced Vault.
+
+The canonical forget command is record-scoped, not a subject-wide privacy erase.
+It does not remove raw/quarantine exports or arbitrary copies outside generated
+canonical records; those remain separate destructive workflows.
 
 ## Known environmental risk
 

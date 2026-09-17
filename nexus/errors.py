@@ -69,6 +69,10 @@ class RetentionError(NexusError):
     """A retention plan cannot be produced without crossing a safety boundary."""
 
 
+class ForgetError(NexusError):
+    """A requested forget operation cannot be completed safely."""
+
+
 class RestoreDrillError(NexusError):
     """An isolated synthetic restore drill failed its parity checks."""
 
