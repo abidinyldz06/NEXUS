@@ -59,6 +59,8 @@ dry-run or exact ID-confirmed apply, and does not enable unattended publishing.
 ## Verification
 
 - Python 3.11 unit tests: 121 passed on `main` and the installed plugin copy.
+- Expanded eval holdout source branch: 122 tests passed; installed live-shadow
+  acceptance remains pending until merge.
 - Approved-memory publication coverage includes CLI dry-run/apply, provenance,
   idempotency, rollback, audit retry and legacy v1 schema compatibility.
 - Old/fresh raw and quarantine boundaries passed.

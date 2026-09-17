@@ -21,6 +21,8 @@ class EvalMetrics:
     candidates: int
     provenance_rate: float
     expected_kind_recall: float
+    expected_kind_precision: float
+    exact_case_match_rate: float
     empty_case_precision: float
     schema_failures: int
 
@@ -48,6 +50,8 @@ class ShadowEvalReport:
         return (
             self.metrics.provenance_rate == 1.0
             and self.metrics.expected_kind_recall >= 0.80
+            and self.metrics.expected_kind_precision >= 0.90
+            and self.metrics.exact_case_match_rate >= 0.80
             and self.metrics.empty_case_precision == 1.0
             and self.metrics.schema_failures == 0
         )
@@ -74,7 +78,7 @@ class ShadowEvalReport:
 
 def frozen_fixture_path() -> Path:
     package = __package__ or "nexus.eval"
-    return Path(str(files(package).joinpath("fixtures/extraction_holdout_v1.json")))
+    return Path(str(files(package).joinpath("fixtures/extraction_holdout_v2.json")))
 
 
 def _conversation(raw: dict[str, object]) -> NormalizedConversation:
@@ -123,6 +127,7 @@ def evaluate_fixture(
     expected_matched = 0
     empty_cases = 0
     empty_cases_correct = 0
+    exact_case_matches = 0
     schema_failures = 0
 
     for raw_case in cases:
@@ -170,6 +175,8 @@ def evaluate_fixture(
             if kind in remaining:
                 expected_matched += 1
                 remaining.remove(kind)
+        if sorted(actual_kinds) == sorted(expected):
+            exact_case_matches += 1
         if not expected:
             empty_cases += 1
             if case_candidate_count == 0:
@@ -181,6 +188,10 @@ def evaluate_fixture(
         candidates=candidate_count,
         provenance_rate=(candidates_with_provenance / candidate_count if candidate_count else 1.0),
         expected_kind_recall=(expected_matched / expected_total if expected_total else 1.0),
+        expected_kind_precision=(
+            expected_matched / candidate_count if candidate_count else 1.0
+        ),
+        exact_case_match_rate=exact_case_matches / len(cases),
         empty_case_precision=(empty_cases_correct / empty_cases if empty_cases else 1.0),
         schema_failures=schema_failures,
     )

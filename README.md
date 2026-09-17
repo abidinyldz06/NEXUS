@@ -63,9 +63,10 @@ kullanır, source reference'ları korur, Current-Memory view'i ve derived indeks
 yeniler ve private publication audit'i ekler. Bu komut otomatik yayın değildir;
 production apply ayrıca hedefe özel operasyon onayı gerektirir.
 
-Paketlenmiş iki-vakalı frozen holdout, aktif `ollama-cloud` / `glm-5.3` rotasında
-shadow modda başarıyla çalışmıştır. Bu sonuç Phase 3 contract kapısını doğrular;
-geniş model-kalitesi kanıtı veya auto-publish yetkisi değildir.
+İlk iki-vakalı frozen holdout, aktif `ollama-cloud` / `glm-5.3` rotasında shadow
+modda başarıyla çalışmıştır. Güncel paketlenmiş holdout 12 sentetik vakaya ve
+expected-kind precision/exact-case metriklerine genişletilmiştir; canlı v2 shadow
+koşusu yapılmadan geniş model-kalitesi kanıtı veya auto-publish yetkisi değildir.
 
 Phase 4 review kararları yalnız Vault dışındaki private data dizininde `0600`
 append-only JSONL olayları olarak saklanır. Approve/edit kararı tek başına

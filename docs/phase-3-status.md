@@ -30,7 +30,9 @@ modified; the gateway was not restarted.
 - No provider/model override and no filesystem, tool, notification or publish action.
 - Maximum 1–3 bounded attempts with sanitized terminal failure.
 - Provider/model/task/prompt/schema/segment/token audit metadata without raw content.
-- Frozen multi-turn and instruction-like-text contract fixture.
+- Twelve-case frozen contract fixture covering all candidate kinds, durable and
+  temporary statements, assistant-only claims, prompt injection, ambiguous time
+  and high-risk user facts.
 - Explicit `hermes nexus eval --shadow` safety gate for the packaged frozen
   fixture; no candidate content is persisted or printed.
 - Provider, model, agent, prompt/schema version, fixture hash and token-usage
@@ -45,8 +47,11 @@ modified; the gateway was not restarted.
 - `hermes plugins doctor . --ci` passed discovery, import and registration.
 - Wheel build passed and includes all nested packages, `prompt_v1.txt` and the
   packaged frozen holdout fixture.
-- Contract holdout: provenance 100%, expected-kind recall 100%, empty injection case
-  100%, schema failures 0 using a deterministic stub.
+- Expanded contract holdout: 12 cases, 12 segments, provenance 100%,
+  expected-kind recall/precision 100%, exact-case match 100%, empty-case
+  precision 100% and schema failures 0 using a deterministic stub.
+- A deliberately over-extracting test now fails expected-kind precision,
+  exact-case match and empty-case precision instead of passing on recall alone.
 - Live shadow holdout on `ollama-cloud` / `glm-5.3`: 2 cases, 2 segments,
   provenance 100%, expected-kind recall 100%, empty instruction-like case 100%,
   schema failures 0, 4,906 total tokens. Installed source commit:
@@ -58,7 +63,8 @@ modified; the gateway was not restarted.
 ## Remaining acceptance gates
 
 - Inspect one real ChatGPT export and rerun the source-to-segment pipeline.
-- Expand the current two-case synthetic contract holdout before treating it as
-  broad model-quality evidence; it is sufficient for the Phase 3 contract gate,
-  not the later full golden-dataset acceptance.
+- Run the expanded 12-case fixture through the configured live model in shadow
+  mode and record only aggregate/audit metadata.
+- The expanded synthetic set remains smaller than the planned private golden
+  dataset and is not by itself full real-world model-quality acceptance.
 - Keep auto-publish disabled; Phase 4 policy/review must not be started implicitly.
