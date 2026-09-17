@@ -52,11 +52,21 @@ no output and left the derived SQLite index byte-for-byte unchanged.
 
 ## Remaining acceptance gates
 
-- Copy the fixed wrapper into Hermes's scripts directory and create only a
-  paused/local no-agent cron job after separate approval.
-- Complete a 7-day local-only canary before requesting Telegram delivery.
+- The fixed wrapper is installed in Hermes's scripts directory and cron job
+  `92d731abc081` is active as local/no-agent at 09:00 Europe/Istanbul.
+- Complete the running 7-day local-only canary before requesting Telegram
+  delivery. The first automatic scheduled run is 2026-09-18.
 - A Telegram canary requires explicit approval and user-observed delivery; it is
   not accepted by unit tests or an HTTP response alone.
+
+## Operational update — 2026-09-17
+
+- The active Hermes plugin has advanced to Phase 8 merge commit
+  `7cac1228facff63e08aae85053763720ba5c61be`; Phase 7 reminder behavior remains
+  covered by the combined test suite and Plugin Doctor.
+- The local/no-agent canary survived the controlled gateway restart and remains
+  active. Its manual test execution completed successfully without creating a
+  canonical namespace or changing the empty derived index.
 
 ## Known operational note
 
