@@ -62,7 +62,7 @@ no output and left the derived SQLite index byte-for-byte unchanged.
 ## Operational update — 2026-09-17
 
 - The active Hermes plugin has advanced to Phase 8 merge commit
-  `79aa60329f32f201fb67612132d41205e6a03c0b`; Phase 7 reminder behavior remains
+  `bd46229aefbddfc76849f3223044d77658fb812e`; Phase 7 reminder behavior remains
   covered by the combined test suite and Plugin Doctor.
 - The local/no-agent canary survived the controlled gateway restart and remains
   active. Its manual test execution completed successfully without creating a
