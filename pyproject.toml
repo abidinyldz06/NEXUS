@@ -13,7 +13,7 @@ dependencies = []
 include = ["nexus*"]
 
 [tool.setuptools.package-data]
-"nexus.extraction" = ["prompt_v1.txt"]
+"nexus.extraction" = ["prompt_v2.txt"]
 "nexus.eval" = ["fixtures/*.json"]
 "nexus.templates" = ["*.md"]
 "nexus.index" = ["schema.sql"]

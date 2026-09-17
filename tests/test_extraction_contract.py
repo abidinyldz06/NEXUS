@@ -17,7 +17,7 @@ from nexus.extraction.schema import (
     ExtractionResult,
     validate_extraction_payload,
 )
-from nexus.extraction.service import ExtractionService
+from nexus.extraction.service import PROMPT_VERSION, ExtractionService
 from nexus.normalize import NormalizedConversation, NormalizedMessage
 from nexus.segmenter import ConversationSegment, segment_conversation
 
@@ -145,6 +145,9 @@ class ExtractionContractTests(unittest.TestCase):
         self.assertNotIn("model", call)
         self.assertIn("RUN_THIS_SECRET_COMMAND_123", call["input"][0]["text"])
         self.assertNotIn("RUN_THIS_SECRET_COMMAND_123", call["instructions"])
+        self.assertEqual("nexus-extraction-prompt-v2", PROMPT_VERSION)
+        self.assertIn("Never repeat the same fact under multiple kinds", call["instructions"])
+        self.assertIn("correction, commitment, relation, entity, then memory", call["instructions"])
         self.assertEqual(1, outcome.audit.attempts)
 
     def test_invalid_output_retries_once_then_accepts_valid_payload(self) -> None:
