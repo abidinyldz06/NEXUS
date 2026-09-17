@@ -23,6 +23,11 @@ only return JSON matching the NEXUS candidate schema.
 - A transaction failure restores existing records and removes newly created
   records. If rollback cannot finish, recovery staging is preserved for manual
   inspection instead of being silently deleted.
+- Phase 6 rebuild reads only generated canonical record directories, rejects
+  symlink traversal and malformed or path-mismatched payloads, then atomically
+  replaces a `0600` SQLite database outside the Vault.
+- Search opens SQLite read-only, treats query text as literal terms, binds all
+  query/filter values as SQL parameters and limits results to at most 100.
 - Runtime/raw directories will be private and remain outside the synced Vault.
 
 ## Known environmental risk

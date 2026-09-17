@@ -9,8 +9,9 @@ from typing import Any
 
 from . import __version__
 from .config import from_plugin_context
-from .errors import ConfigurationError
+from .errors import ConfigurationError, NexusIndexError
 from .eval import evaluate_with_llm_report, frozen_fixture_path
+from .index import rebuild_index, search_index
 from .ingest import plan_inbox
 from .review.commands import configure_review_parser, run_review_command
 
@@ -49,6 +50,21 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
     )
     configure_review_parser(review)
 
+    rebuild = subcommands.add_parser(
+        "rebuild", help="Rebuild the disposable SQLite index from the canonical Vault"
+    )
+    rebuild.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
+
+    search = subcommands.add_parser("search", help="Search the derived SQLite index")
+    search.add_argument("query", help="Words to find; treated as literal terms")
+    search.add_argument(
+        "--kind",
+        choices=("memory", "entity", "relation", "commitment", "source", "review"),
+    )
+    search.add_argument("--status")
+    search.add_argument("--limit", type=int, default=20)
+    search.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
+
     parser.set_defaults(func=handler)
 
 
@@ -59,7 +75,7 @@ def _status_payload(ctx: Any) -> dict[str, Any]:
         return {
             "ok": False,
             "version": __version__,
-            "phase": "0-5-writer-disabled",
+            "phase": "0-6-index",
             "write_enabled": False,
             "errors": [str(exc)],
         }
@@ -68,7 +84,7 @@ def _status_payload(ctx: Any) -> dict[str, Any]:
     return {
         "ok": not errors,
         "version": __version__,
-        "phase": "0-5-writer-disabled",
+        "phase": "0-6-index",
         "write_enabled": False,
         "auto_publish_enabled": config.auto_publish_enabled,
         "sensitive_auto_publish": config.sensitive_auto_publish,
@@ -90,7 +106,7 @@ def _print_payload(payload: dict[str, Any], *, as_json: bool) -> None:
 
     state = "ready" if payload["ok"] else "not ready"
     print(f"NEXUS v{payload['version']} — Phase {payload['phase']} — {state}")
-    print("Vault writes: disabled (Phase 4 review safety gate)")
+    print("Vault writes: disabled; SQLite index is derived and rebuildable")
     for key, value in payload.get("paths", {}).items():
         print(f"{key}: {value or '<not configured>'}")
     for error in payload.get("errors", []):
@@ -142,9 +158,17 @@ def run_command(args: Namespace, ctx: Any) -> int:
             }
         _print_review_payload(payload, as_json=bool(getattr(args, "as_json", False)))
         return result
+    if command == "rebuild":
+        payload = _rebuild_payload(ctx)
+        _print_index_payload(payload, as_json=bool(getattr(args, "as_json", False)))
+        return 0 if payload["ok"] else 2
+    if command == "search":
+        payload = _search_payload(args, ctx)
+        _print_index_payload(payload, as_json=bool(getattr(args, "as_json", False)))
+        return 0 if payload["ok"] else 2
     print(
         "Usage: hermes nexus "
-        "{status|config validate|ingest --dry-run|eval --shadow|review ...}"
+        "{status|config validate|ingest --dry-run|eval --shadow|review ...|rebuild|search}"
     )
     return 2
 
@@ -231,6 +255,60 @@ def _print_review_payload(payload: dict[str, Any], *, as_json: bool) -> None:
     item = payload.get("item", {})
     if isinstance(item, dict):
         print(json.dumps(item, ensure_ascii=False, sort_keys=True, indent=2))
+    print("Vault writes: false")
+
+
+def _rebuild_payload(ctx: Any) -> dict[str, Any]:
+    try:
+        config = from_plugin_context(ctx)
+        if config.vault_path is None:
+            raise ConfigurationError("vault_path is not configured")
+        result = rebuild_index(config.vault_path, config.index_path)
+        return result.to_dict()
+    except (ConfigurationError, NexusIndexError, OSError) as exc:
+        return {"ok": False, "vault_writes": False, "errors": [str(exc)]}
+
+
+def _search_payload(args: Namespace, ctx: Any) -> dict[str, Any]:
+    try:
+        config = from_plugin_context(ctx)
+        results = search_index(
+            config.index_path,
+            args.query,
+            kind=getattr(args, "kind", None),
+            status=getattr(args, "status", None),
+            limit=args.limit,
+        )
+        return {
+            "ok": True,
+            "query": args.query,
+            "count": len(results),
+            "items": [item.to_dict() for item in results],
+            "vault_writes": False,
+        }
+    except (ConfigurationError, NexusIndexError, OSError) as exc:
+        return {"ok": False, "vault_writes": False, "errors": [str(exc)]}
+
+
+def _print_index_payload(payload: dict[str, Any], *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return
+    if not payload.get("ok", False):
+        for error in payload.get("errors", []):
+            print(f"error: {error}")
+        return
+    if "items" in payload:
+        print(f"NEXUS search — {payload.get('count', 0)} result(s); Vault writes: false")
+        for item in payload.get("items", []):
+            if isinstance(item, dict):
+                print(f"{item.get('id')}  {item.get('kind')}  {item.get('title')}")
+        return
+    print(
+        f"NEXUS index rebuilt — {payload.get('records', 0)} record(s), "
+        f"{payload.get('open_commitments', 0)} open commitment(s)"
+    )
+    print(f"index: {payload.get('index_path')}")
     print("Vault writes: false")
 
 

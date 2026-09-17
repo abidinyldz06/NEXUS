@@ -246,6 +246,55 @@ class CliTests(unittest.TestCase):
             self.assertEqual("Yeni", payload["item"]["candidate"]["statement"])
             self.assertFalse(payload["vault_writes"])
 
+    def test_rebuild_and_search_cli_use_only_derived_index(self) -> None:
+        from nexus.contracts import Impact, Memory, MemoryType, ReviewStatus
+        from nexus.vault import VaultRepository
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            vault = root / "vault"
+            vault.mkdir()
+            data = root / "private"
+            record = Memory(
+                id=new_id(IdPrefix.MEMORY),
+                type=MemoryType.PREFERENCE,
+                summary="Kullanıcı kısa ve sade Türkçe yanıtları tercih ediyor",
+                source_refs=(
+                    SourceRef(
+                        source_id=new_id(IdPrefix.SOURCE),
+                        conversation_id="conversation-index",
+                        span_ids=("msg_1",),
+                        span_sha256=sha256(b"msg_1").hexdigest(),
+                    ),
+                ),
+                confidence=0.95,
+                impact=Impact.LOW,
+                review_status=ReviewStatus.APPROVED,
+            )
+            VaultRepository(vault).commit_records((record,), run_id=new_id(IdPrefix.RUN))
+            parser = parser_for(
+                FakeContext({"vault_path": str(vault), "data_path": str(data)})
+            )
+
+            rebuild_args = parser.parse_args(["rebuild", "--json"])
+            rebuild_stream = io.StringIO()
+            with contextlib.redirect_stdout(rebuild_stream):
+                rebuild_result = rebuild_args.func(rebuild_args)
+
+            search_args = parser.parse_args(["search", "kısa Türkçe", "--json"])
+            search_stream = io.StringIO()
+            with contextlib.redirect_stdout(search_stream):
+                search_result = search_args.func(search_args)
+
+            rebuilt = json.loads(rebuild_stream.getvalue())
+            searched = json.loads(search_stream.getvalue())
+            self.assertEqual(0, rebuild_result)
+            self.assertEqual(1, rebuilt["records"])
+            self.assertFalse(rebuilt["vault_writes"])
+            self.assertEqual(0, search_result)
+            self.assertEqual([record.id], [item["id"] for item in searched["items"]])
+            self.assertFalse(searched["vault_writes"])
+
 
 if __name__ == "__main__":
     unittest.main()
