@@ -16,6 +16,7 @@ from .index import rebuild_index, search_index
 from .ingest import plan_inbox
 from .permission_audit import audit_permissions
 from .pulse import emit_due_reminders
+from .restore_drill import run_synthetic_restore_drill
 from .retention import plan_retention
 from .review.commands import configure_review_parser, run_review_command
 
@@ -94,6 +95,18 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
         "permissions", help="Check private path ownership and access bits"
     )
     permissions.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
+
+    drill = subcommands.add_parser("drill", help="Run isolated synthetic recovery checks")
+    drill_subcommands = drill.add_subparsers(dest="drill_command")
+    restore = drill_subcommands.add_parser(
+        "restore", help="Verify synthetic snapshot, restore and index parity"
+    )
+    restore.add_argument(
+        "--synthetic",
+        action="store_true",
+        help="Required safety gate; use temporary synthetic data only",
+    )
+    restore.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
 
     parser.set_defaults(func=handler)
 
@@ -243,10 +256,27 @@ def run_command(args: Namespace, ctx: Any) -> int:
             }
         _print_permission_audit(payload, as_json=bool(getattr(args, "as_json", False)))
         return 0 if payload["ok"] else 2
+    if command == "drill" and getattr(args, "drill_command", None) == "restore":
+        if not bool(getattr(args, "synthetic", False)):
+            print("Phase 8 only supports: hermes nexus drill restore --synthetic")
+            return 2
+        try:
+            payload = run_synthetic_restore_drill().to_dict()
+        except (NexusError, OSError, ValueError) as exc:
+            payload = {
+                "ok": False,
+                "mode": "synthetic-temporary",
+                "production_paths_accessed": False,
+                "production_writes": False,
+                "errors": [str(exc)],
+            }
+        _print_restore_drill(payload, as_json=bool(getattr(args, "as_json", False)))
+        return 0 if payload["ok"] else 2
     print(
         "Usage: hermes nexus "
         "{status|config validate|ingest --dry-run|eval --shadow|review ...|"
-        "rebuild|search|reminders --emit-local|retention --dry-run|audit permissions}"
+        "rebuild|search|reminders --emit-local|retention --dry-run|audit permissions|"
+        "drill restore --synthetic}"
     )
     return 2
 
@@ -434,6 +464,28 @@ def _print_permission_audit(payload: dict[str, Any], *, as_json: bool) -> None:
                 f"{item.get('insecure_entries', 0)} insecure, "
                 f"{item.get('unsafe_entries', 0)} unsafe"
             )
+
+
+def _print_restore_drill(payload: dict[str, Any], *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return
+    if not payload.get("ok", False):
+        for error in payload.get("errors", []):
+            print(f"error: {error}")
+        return
+    print("NEXUS restore drill — synthetic temporary data only")
+    print(
+        f"records: {payload.get('records', 0)}, "
+        f"open commitments: {payload.get('open_commitments', 0)}, "
+        f"canonical files: {payload.get('canonical_files', 0)}"
+    )
+    print(
+        f"hash parity: {payload.get('canonical_hashes_match', False)}, "
+        f"index parity: {payload.get('index_parity', False)}, "
+        f"cleanup: {payload.get('cleanup_verified', False)}"
+    )
+    print("Production paths accessed: false; production writes: false")
 
 
 __all__ = ["configure_parser", "run_command"]

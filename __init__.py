@@ -8,7 +8,7 @@ from .nexus.cli import configure_parser, run_command
 
 
 def register(ctx: Any) -> None:
-    """Register the Phase 7 CLI and tool-free extraction route."""
+    """Register the NEXUS v0.1 CLI and tool-free extraction route."""
     ctx.register_auxiliary_task(
         "nexus_extract",
         display_name="NEXUS memory extraction",

@@ -33,6 +33,10 @@ rejected candidate'ları yalnız toplu sayılarla raporlar; audit komutu private
 ve Inbox metadata'sını kontrol eder. İki komut da içerik/yol/ID göstermez ve silme,
 yeniden yazma veya izin değiştirme yapmaz.
 
+Üçüncü Phase 8 dilimi kaynak dalda yalnız sentetik verilerle çalışan geçici restore
+drill'i ekler. Drill kullanıcı config'ini ve production yollarını okumaz; canonical
+hash, derived-index, private permission ve cleanup eşliğini doğrular.
+
 Paketlenmiş iki-vakalı frozen holdout, aktif `ollama-cloud` / `glm-5.3` rotasında
 shadow modda başarıyla çalışmıştır. Bu sonuç Phase 3 contract kapısını doğrular;
 geniş model-kalitesi kanıtı veya auto-publish yetkisi değildir.
@@ -110,6 +114,7 @@ hermes nexus search "Türk kahvesi" --kind memory
 hermes nexus reminders --emit-local
 hermes nexus retention --dry-run
 hermes nexus audit permissions
+hermes nexus drill restore --synthetic
 ```
 
 `eval --shadow` yalnız paketlenmiş sentetik frozen holdout'u aktif
@@ -125,6 +130,9 @@ güvenli biçimde günceller.
 yoktur; forget workflow ve gerçek retention temizliği ayrı güvenlik kapılarıdır.
 `audit permissions` yalnız metadata ve toplu sorun sayılarını okur; dosya yolu,
 isim veya içerik basmaz ve izinleri değiştirmez.
+`drill restore --synthetic` yalnız sistem geçici dizininde sentetik kayıt, snapshot
+ve iki derived indeks oluşturur; production yollarını okumadan hash/index eşliğini
+doğrular ve geçici alanı komut bitmeden siler.
 
 Backup sınıflandırması ve restore güvenlik sınırı:
 [`docs/backup-policy.md`](docs/backup-policy.md).
