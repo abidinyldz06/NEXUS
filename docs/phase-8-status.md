@@ -77,5 +77,5 @@ found no expiry candidates and permission audit found no insecure or unsafe
 entries. No retention deletion, permission repair or backup capability exists.
 
 The synthetic restore-drill slice is local on
-`codex/nexus-phase8-restore-drill`; it has not been pushed, merged or installed
-in the active Hermes plugin.
+`codex/nexus-phase8-restore-drill` and published as PR #13; it has not been
+merged or installed in the active Hermes plugin.
