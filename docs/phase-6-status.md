@@ -28,10 +28,11 @@ configuration were not modified during Phase 6 implementation.
 
 ## Verification
 
-- Python 3.11 unit tests: 77 passed.
+- Python 3.11 unit tests: 79 passed.
 - Delete/rebuild parity preserved canonical record IDs, content hashes and open
   commitment counts.
 - Turkish FTS search, kind filtering and hostile query text passed.
+- Nested canonical symlink rejection and bounded-query checks passed.
 - Migration idempotency and missing/corrupt index fail-closed paths passed.
 - CLI rebuild/search integration reported `vault_writes: false`.
 - Python bytecode compilation and diff whitespace checks passed.

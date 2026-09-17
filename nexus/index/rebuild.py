@@ -133,6 +133,9 @@ def scan_canonical_records(vault_root: Path) -> tuple[IndexedRecord, ...]:
             continue
         if root.is_symlink() or not root.is_dir():
             raise NexusIndexError(f"canonical directory is unsafe: {root}")
+        for candidate in root.rglob("*"):
+            if candidate.is_symlink():
+                raise NexusIndexError(f"canonical path contains a symlink: {candidate}")
         for path in sorted(root.rglob("*.md")):
             relative = path.relative_to(vault_root)
             current = vault_root

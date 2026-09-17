@@ -36,9 +36,13 @@ class SearchResult:
 
 
 def _fts_expression(query: str) -> str:
+    if len(query) > 500:
+        raise NexusIndexError("search query must be 500 characters or fewer")
     tokens = _QUERY_TOKEN.findall(query)
     if not tokens:
         raise NexusIndexError("search query must contain at least one letter or number")
+    if len(tokens) > 50:
+        raise NexusIndexError("search query must contain 50 terms or fewer")
     return " AND ".join(f'"{token}"' for token in tokens)
 
 

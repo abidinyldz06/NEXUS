@@ -145,6 +145,27 @@ class IndexTests(unittest.TestCase):
             with self.assertRaises(NexusIndexError):
                 search_index(path, "***")
 
+    def test_nested_canonical_symlink_fails_closed(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            root = Path(directory)
+            vault = root / "vault"
+            facts = vault / "Nexus" / "Memory"
+            facts.mkdir(parents=True)
+            (facts / "Facts").symlink_to(Path(outside), target_is_directory=True)
+
+            with self.assertRaisesRegex(NexusIndexError, "symlink"):
+                rebuild_index(vault, root / "private" / "nexus.db")
+            self.assertFalse((root / "private").exists())
+
+    def test_search_query_is_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "missing.db"
+            with self.assertRaisesRegex(NexusIndexError, "500 characters"):
+                search_index(path, "a" * 501)
+
 
 if __name__ == "__main__":
     unittest.main()

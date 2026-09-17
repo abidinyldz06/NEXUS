@@ -34,7 +34,8 @@ class IndexStore:
             if read_only:
                 if path.is_symlink() or not path.is_file():
                     raise NexusIndexError("index does not exist as a regular file; run rebuild")
-                self.connection = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+                uri = f"{path.resolve().as_uri()}?mode=ro"
+                self.connection = sqlite3.connect(uri, uri=True)
             else:
                 self.connection = sqlite3.connect(path)
         except sqlite3.Error as exc:
