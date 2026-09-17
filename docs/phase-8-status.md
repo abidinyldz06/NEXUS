@@ -4,16 +4,16 @@ Date: 2026-09-17
 
 ## Current slices
 
-Five merged Phase 8 slices implement a fail-closed, read-only retention planner,
+Six merged Phase 8 slices implement a fail-closed, read-only retention planner,
 a metadata-only permission audit, temporary synthetic restore and external
-git-dir rollback drills, and a record-scoped canonical forget workflow. They do
+git-dir rollback drills, a record-scoped canonical forget workflow and explicit
+approved-memory publication. They do
 not implement retention deletion, event-log compaction, subject-wide privacy
 erasure, production backup/restore or production Vault Git history. Production
 canonical data has not been deleted.
 
-A sixth source-branch slice implements explicit approved-memory publication.
-It is limited to APPROVED/EDITED memory review items, requires dry-run or exact
-ID-confirmed apply, and does not enable unattended publishing.
+The sixth slice is limited to APPROVED/EDITED memory review items, requires
+dry-run or exact ID-confirmed apply, and does not enable unattended publishing.
 
 ## Implemented
 
@@ -58,10 +58,9 @@ ID-confirmed apply, and does not enable unattended publishing.
 
 ## Verification
 
-- Python 3.11 unit tests: 114 passed on `main` and the installed plugin copy.
-- Approved-memory publication source branch: 120 Python 3.11 tests passed,
-  including CLI dry-run/apply, provenance, idempotency, rollback and audit-retry
-  coverage. Installed-copy acceptance remains pending until merge.
+- Python 3.11 unit tests: 120 passed on `main` and the installed plugin copy.
+- Approved-memory publication coverage includes CLI dry-run/apply, provenance,
+  idempotency, rollback, audit retry and legacy v1 schema compatibility.
 - Old/fresh raw and quarantine boundaries passed.
 - Rejected candidate expiry passed while preserving the append-only event log.
 - Symlinked data path failed closed; nested symlink entries were not followed.
@@ -126,6 +125,18 @@ ID-confirmed apply, and does not enable unattended publishing.
 - Production SQLite mode `0600`, size `57344`, SHA-256
   `a1a098d0006b1bf51896d575884a354d8201559455fae5d2ddedd5de5456c0fa` and the
   private file count of one remained unchanged after the dry-run.
+- PR #19 was squash-merged to `main` as
+  `3c70434749b066d00daff92e01416cf1ba63b1ee`; the active Hermes plugin is pinned
+  to that exact commit, 120 installed-copy tests pass and Plugin Doctor passes.
+- A production-safe publish dry-run used a valid but nonexistent review ID. It
+  returned `review item was not found`, exit code `2`,
+  `writes_performed=false` and `vault_writes=false` without selecting a real
+  review item or canonical record.
+- The production SQLite mode/size and SHA-256 were unchanged, and the private
+  file count remained one before and after the publish dry-run.
+- Direct launchd inspection showed `ai.hermes.gateway` running with PID `82652`.
+  `hermes gateway status` saw PIDs `82652`/`82653` but simultaneously reported
+  the service as not loaded; this status-reporting discrepancy remains open.
 
 ## Not yet delivered
 
@@ -138,14 +149,15 @@ ID-confirmed apply, and does not enable unattended publishing.
   installed acceptance used temporary synthetic files only.
 - Phase 7 local-only reminder canary remains time-gated through seven scheduled
   runs before final v0.1 acceptance.
-- No production memory publication has been authorized or applied. The new
-  workflow has been exercised only against temporary synthetic Vaults.
+- No production memory publication has been authorized or applied. Apply has
+  been exercised only against temporary synthetic Vaults.
 
 ## Delivery state
 
-The retention dry-run, permission-audit/backup-policy, synthetic restore-drill
-synthetic Git rollback and record-scoped canonical forget slices are merged,
-installed and accepted within their narrow safety boundaries.
+The retention dry-run, permission-audit/backup-policy, synthetic restore-drill,
+synthetic Git rollback, record-scoped canonical forget and approved-memory
+publication slices are merged, installed and accepted within their narrow
+safety boundaries.
 Retention found no expiry candidates, permission audit found no insecure or
 unsafe entries, and both drill verifications used temporary synthetic data only.
 No retention deletion, permission repair, production backup capability or
@@ -154,3 +166,7 @@ production Vault Git history exists.
 Forget apply was exercised only with temporary synthetic records. Production
 acceptance used a missing-target dry-run; no production canonical record, raw
 file, review event or Vault path was changed.
+
+Memory publish apply was exercised only with temporary synthetic records.
+Production acceptance used a missing-review dry-run; no production review event,
+canonical record, generated view or derived index was changed.

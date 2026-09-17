@@ -59,7 +59,10 @@ class CliTests(unittest.TestCase):
         self.assertEqual(0, result)
         self.assertTrue(json.loads(stream.getvalue())["ok"])
         self.assertTrue(json.loads(stream.getvalue())["write_enabled"])
-        self.assertEqual("reminder-state-only", json.loads(stream.getvalue())["write_scope"])
+        self.assertEqual(
+            "explicit-confirmed-operations",
+            json.loads(stream.getvalue())["write_scope"],
+        )
 
     def test_ingest_requires_explicit_dry_run(self) -> None:
         parser = parser_for(FakeContext())
