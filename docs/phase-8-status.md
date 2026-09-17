@@ -18,10 +18,14 @@ Git rollback operations.
 - Non-symlink absolute `data_path` validation and no-follow tree traversal.
 - Missing private-data directories remain missing; dry-run creates no state.
 - Rejected review expiry uses the timezone-aware decision audit timestamp.
+- Read-only permission audit for private data and Inbox ownership/access bits.
+- Aggregate permission findings without entry paths, names or file content.
+- Backup classification and encrypted/excluded sensitive-data policy in
+  `docs/backup-policy.md`.
 
 ## Verification
 
-- Python 3.11 unit tests: 97 passed.
+- Python 3.11 unit tests: 101 passed.
 - Old/fresh raw and quarantine boundaries passed.
 - Rejected candidate expiry passed while preserving the append-only event log.
 - Symlinked data path failed closed; nested symlink entries were not followed.
@@ -35,12 +39,15 @@ Git rollback operations.
 - Production dry-run returned zero raw, quarantine and rejected candidates,
   reported `writes_performed=false`, and left both the SQLite hash and private
   file count unchanged.
+- Permission audit tests cover private trees, group-readable files, nested
+  symlinks and output redaction.
 
 ## Not yet delivered
 
 - No apply/delete retention mode.
 - No forget workflow.
-- No sensitive-backup encryption/exclusion decision or restore drill.
+- No backup archive or restore drill; the encryption/exclusion policy is
+  documented but not operationally exercised.
 - No external git-dir rollback canary.
 - Phase 7 local-only reminder canary remains time-gated through seven scheduled
   runs before final v0.1 acceptance.
@@ -50,3 +57,7 @@ Git rollback operations.
 The retention dry-run slice is merged and installed. Production acceptance is
 limited to the zero-data read-only scan above; no retention deletion capability
 exists.
+
+The permission-audit and backup-policy slice is local on
+`codex/nexus-phase8-permission-audit`; it has not been committed, pushed, merged
+or installed in the active Hermes plugin.

@@ -105,6 +105,7 @@ hermes nexus rebuild
 hermes nexus search "Türk kahvesi" --kind memory
 hermes nexus reminders --emit-local
 hermes nexus retention --dry-run
+hermes nexus audit permissions
 ```
 
 `eval --shadow` yalnız paketlenmiş sentetik frozen holdout'u aktif
@@ -118,6 +119,11 @@ güvenli biçimde günceller.
 
 `retention --dry-run` yalnız aggregate expiry sayıları üretir. Apply/delete modu
 yoktur; forget workflow ve gerçek retention temizliği ayrı güvenlik kapılarıdır.
+`audit permissions` yalnız metadata ve toplu sorun sayılarını okur; dosya yolu,
+isim veya içerik basmaz ve izinleri değiştirmez.
+
+Backup sınıflandırması ve restore güvenlik sınırı:
+[`docs/backup-policy.md`](docs/backup-policy.md).
 
 Extraction servisi yalnız plugin-owned `nexus_extract` auxiliary task'ını kullanır;
 provider/model override istemez ve adayları hiçbir yere yayınlamaz.
