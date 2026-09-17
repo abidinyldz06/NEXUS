@@ -2,11 +2,11 @@
 
 Date: 2026-09-17
 
-## Current slice
+## Current slices
 
-The first Phase 8 slice implements a fail-closed, read-only retention planner.
-It does not implement deletion, event-log compaction, forget, backup, restore or
-Git rollback operations.
+The first two Phase 8 slices implement a fail-closed, read-only retention planner
+and a metadata-only permission audit. They do not implement deletion, event-log
+compaction, forget, backup, restore or Git rollback operations.
 
 ## Implemented
 
@@ -41,6 +41,14 @@ Git rollback operations.
   file count unchanged.
 - Permission audit tests cover private trees, group-readable files, nested
   symlinks and output redaction.
+- PR #11 was squash-merged to `main` as
+  `7cac1228facff63e08aae85053763720ba5c61be`; the active Hermes plugin is pinned
+  to that exact commit and Plugin Doctor passes on the installed copy.
+- The gateway restarted under launchd and direct `launchctl` inspection showed
+  the supervised service running with a fresh PID.
+- Production `audit permissions --json` checked two private-data entries with
+  zero insecure or unsafe findings, reported `writes_performed=false`, and left
+  the SQLite mode, size and SHA-256 unchanged. The configured Inbox was absent.
 
 ## Not yet delivered
 
@@ -54,10 +62,7 @@ Git rollback operations.
 
 ## Delivery state
 
-The retention dry-run slice is merged and installed. Production acceptance is
-limited to the zero-data read-only scan above; no retention deletion capability
-exists.
-
-The permission-audit and backup-policy slice is local on
-`codex/nexus-phase8-permission-audit`; it has not been committed, pushed, merged
-or installed in the active Hermes plugin.
+The retention dry-run and permission-audit/backup-policy slices are merged and
+installed. Their production acceptance is limited to read-only scans: retention
+found no expiry candidates and permission audit found no insecure or unsafe
+entries. No retention deletion, permission repair or backup capability exists.

@@ -6,16 +6,18 @@ rebuild edilebilir SQLite indeks ve commitments hatırlatmalarını kapsar.
 
 ## Güncel durum
 
-Phase 7 ve ilk Phase 8 retention dilimi `main` dalına birleştirilmiş ve tam
-merge commit'i aktif Hermes plugin'ine kurulmuştur. Mevcut kod güvenli plugin/CLI
-iskeleti, source adapter'ları, idempotent source state, deterministik segmenter,
+Phase 7 ile Phase 8 retention ve permission-audit dilimleri `main` dalına
+birleştirilmiş ve tam merge commit'i aktif Hermes plugin'ine kurulmuştur. Mevcut
+kod güvenli plugin/CLI iskeleti, source adapter'ları, idempotent source state,
+deterministik segmenter,
 provenance zorunlu structured extraction, exact-only entity resolver,
 deterministik policy, tekrar oynatılabilir review kuyruğu ve atomik canonical
 Vault writer, disposable SQLite FTS5 indeks ve local-only Pulse scanner içerir.
 ChatGPT adapter gerçek
 export doğrulanana kadar experimental'dır. Aktif kurulum merge commit'i
-`0d6216ffc64e995a268afc9c20faa8111fadbb1b` ile sabitlenmiş; Plugin Doctor,
-boş production reminder canary ve retention dry-run ile doğrulanmıştır. Sistem
+`7cac1228facff63e08aae85053763720ba5c61be` ile sabitlenmiş; Plugin Doctor,
+local/no-agent reminder canary, retention dry-run ve salt-okunur production
+permission audit ile doğrulanmıştır. Sistem
 hâlâ:
 
 - canonical record auto-publish yapmaz; yalnız explicit local reminder komutu
@@ -25,9 +27,11 @@ hâlâ:
 - yalnız açık `eval --shadow` komutunda paketlenmiş sentetik fixture ile model çağrısı yapar,
 - Telegram veya başka bir dış kanala notification göndermez.
 
-Phase 8'in ilk dar parçası olarak retention dry-run aktif kuruluma alınmıştır.
-Bu komut raw/quarantine dosyaları ile süresi dolmuş rejected candidate'ları yalnız
-toplu sayılarla raporlar; içerik/ID göstermez ve silme veya yeniden yazma yapmaz.
+Phase 8'in ilk iki dar parçası olarak retention dry-run ve permission audit aktif
+kuruluma alınmıştır. Retention komutu raw/quarantine dosyaları ile süresi dolmuş
+rejected candidate'ları yalnız toplu sayılarla raporlar; audit komutu private data
+ve Inbox metadata'sını kontrol eder. İki komut da içerik/yol/ID göstermez ve silme,
+yeniden yazma veya izin değiştirme yapmaz.
 
 Paketlenmiş iki-vakalı frozen holdout, aktif `ollama-cloud` / `glm-5.3` rotasında
 shadow modda başarıyla çalışmıştır. Bu sonuç Phase 3 contract kapısını doğrular;
@@ -50,8 +54,8 @@ terimlere çevirip tüm filtreleri parametreli SQL ile uygular.
 Phase 7 reminder scanner yalnız onaylı, açık, tarihi kesin ve `notify=true`
 commitment'ları işler. `notified_at` canonical kayda content-hash precondition ile
 yazılır; indeks yenileme başarısızsa exact canonical byte'lar geri yüklenir.
-No-agent wrapper boş stdout'ta sessizdir. Cron job kurulumu ve Telegram teslimi
-henüz yapılmamıştır.
+No-agent wrapper boş stdout'ta sessizdir. Günlük 09:00 `Europe/Istanbul`
+local/no-agent cron canary'si aktiftir; Telegram teslimi henüz etkin değildir.
 
 Makinece okunabilir v1 kayıt contract'ı
 [`schemas/nexus-v1.schema.json`](schemas/nexus-v1.schema.json) dosyasındadır.
