@@ -9,6 +9,8 @@ a metadata-only permission audit, a temporary synthetic restore drill and a
 temporary synthetic external git-dir rollback drill. They do not implement
 deletion, event-log compaction, forget, production backup/restore or production
 Vault Git history.
+A fifth source-branch slice adds a record-scoped canonical forget workflow;
+production data has not been deleted.
 
 ## Implemented
 
@@ -35,10 +37,17 @@ Vault Git history.
   worktree, mutation detection, exact-commit rollback, hash parity and clean-tree
   verification.
 - Isolated Git execution with no shell, system/global config, templates or hooks.
+- Read-only `forget RECORD_ID --dry-run` impact planning with aggregate dependency
+  counts and no record content in output.
+- Exact-ID `--apply --confirm RECORD_ID` gate, dependency refusal, immediate
+  content-hash precondition, generated memory-view update, derived-index rebuild
+  and content-free private audit.
+- Exact-byte target/view/index rollback when rebuild or audit fails, with
+  fail-closed handling for concurrent changes.
 
 ## Verification
 
-- Python 3.11 unit tests: 109 passed on the merged implementation.
+- Python 3.11 unit tests: 114 passed on the source branch.
 - Old/fresh raw and quarantine boundaries passed.
 - Rejected candidate expiry passed while preserving the append-only event log.
 - Symlinked data path failed closed; nested symlink entries were not followed.
@@ -89,11 +98,16 @@ Vault Git history.
   mode `0600`, size `57344`, SHA-256
   `a1a098d0006b1bf51896d575884a354d8201559455fae5d2ddedd5de5456c0fa` and the
   private file count remained unchanged, and no temporary drill directory remained.
+- Forget workflow tests cover dependency refusal, exact confirmation, successful
+  synthetic deletion, memory-view/index parity, private audit permissions and
+  exact rollback after rebuild or audit failure. Concurrent target changes are
+  preserved and force an incomplete-rollback error instead of being overwritten.
 
 ## Not yet delivered
 
 - No apply/delete retention mode.
-- No forget workflow.
+- No subject-wide privacy erase or raw/quarantine purge; canonical forget is
+  intentionally limited to one unreferenced generated record.
 - No production backup archive or real-data restore; the encryption/exclusion
   policy is exercised only with temporary synthetic data.
 - No production Vault external git-dir rollback canary or real Vault Git history;
@@ -110,3 +124,7 @@ Retention found no expiry candidates, permission audit found no insecure or
 unsafe entries, and both drill verifications used temporary synthetic data only.
 No retention deletion, permission repair, production backup capability or
 production Vault Git history exists.
+
+The record-scoped forget slice is local on
+`codex/nexus-phase8-forget-workflow`; it has not been merged, installed or run
+against production data.

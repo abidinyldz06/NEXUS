@@ -12,6 +12,7 @@ from . import __version__
 from .config import from_plugin_context
 from .errors import ConfigurationError, NexusError, NexusIndexError
 from .eval import evaluate_with_llm_report, frozen_fixture_path
+from .forget import apply_forget, plan_forget
 from .git_rollback_drill import run_synthetic_git_rollback_drill
 from .index import rebuild_index, search_index
 from .ingest import plan_inbox
@@ -89,6 +90,28 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
         help="Required safety gate; report aggregate expiry counts without writing",
     )
     retention.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
+
+    forget = subcommands.add_parser(
+        "forget", help="Inspect or explicitly forget one canonical record"
+    )
+    forget.add_argument("record_id", help="Exact canonical NEXUS record ID")
+    forget_mode = forget.add_mutually_exclusive_group(required=True)
+    forget_mode.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report dependency impact without writing",
+    )
+    forget_mode.add_argument(
+        "--apply",
+        action="store_true",
+        help="Delete the unreferenced target and rebuild derived state",
+    )
+    forget.add_argument(
+        "--confirm",
+        metavar="RECORD_ID",
+        help="Required with --apply; must exactly match the target ID",
+    )
+    forget.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
 
     audit = subcommands.add_parser("audit", help="Run read-only local safety audits")
     audit_subcommands = audit.add_subparsers(dest="audit_command")
@@ -254,6 +277,30 @@ def run_command(args: Namespace, ctx: Any) -> int:
             }
         _print_retention_payload(payload, as_json=bool(getattr(args, "as_json", False)))
         return 0 if payload["ok"] else 2
+    if command == "forget":
+        try:
+            config = from_plugin_context(ctx)
+            if bool(getattr(args, "apply", False)):
+                payload = apply_forget(
+                    config,
+                    args.record_id,
+                    confirmation=getattr(args, "confirm", None),
+                ).to_dict()
+            else:
+                if getattr(args, "confirm", None) is not None:
+                    raise ValueError("--confirm is only valid with --apply")
+                payload = plan_forget(config, args.record_id).to_dict()
+        except (NexusError, OSError, ValueError) as exc:
+            payload = {
+                "ok": False,
+                "mode": "confirmed-apply"
+                if bool(getattr(args, "apply", False))
+                else "dry-run",
+                "writes_performed": False,
+                "errors": [str(exc)],
+            }
+        _print_forget_payload(payload, as_json=bool(getattr(args, "as_json", False)))
+        return 0 if payload["ok"] else 2
     if command == "audit" and getattr(args, "audit_command", None) == "permissions":
         try:
             payload = audit_permissions(from_plugin_context(ctx)).to_dict()
@@ -303,7 +350,7 @@ def run_command(args: Namespace, ctx: Any) -> int:
     print(
         "Usage: hermes nexus "
         "{status|config validate|ingest --dry-run|eval --shadow|review ...|"
-        "rebuild|search|reminders --emit-local|retention --dry-run|audit permissions|"
+        "rebuild|search|reminders --emit-local|retention --dry-run|forget ...|audit permissions|"
         "drill restore --synthetic|drill git-rollback --synthetic}"
     )
     return 2
@@ -472,6 +519,28 @@ def _print_retention_payload(payload: dict[str, Any], *, as_json: bool) -> None:
             f"rejected candidates: {rejected.get('total_items', 0)} item(s), "
             f"{rejected.get('expired_items', 0)} expired"
         )
+
+
+def _print_forget_payload(payload: dict[str, Any], *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return
+    if not payload.get("ok", False):
+        for error in payload.get("errors", []):
+            print(f"error: {error}")
+        return
+    if payload.get("mode") == "dry-run":
+        print("NEXUS forget dry-run — no writes performed")
+        print(
+            f"target: {payload.get('record_id')} ({payload.get('record_kind')}), "
+            f"dependencies: {payload.get('dependency_count', 0)}, "
+            f"can apply: {str(bool(payload.get('can_apply'))).lower()}"
+        )
+        return
+    print(
+        f"NEXUS forget complete — {payload.get('record_id')} deleted; "
+        f"{payload.get('records_after', 0)} canonical record(s) remain"
+    )
 
 
 def _print_permission_audit(payload: dict[str, Any], *, as_json: bool) -> None:
