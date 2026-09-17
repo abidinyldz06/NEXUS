@@ -51,3 +51,7 @@ class VaultConflictError(VaultError):
 
 class VaultTransactionError(VaultError):
     """A Vault transaction failed and was rolled back."""
+
+
+class NexusIndexError(NexusError):
+    """The disposable SQLite index cannot be read or rebuilt safely."""
