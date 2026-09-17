@@ -433,6 +433,8 @@ def _print_eval_payload(payload: dict[str, Any], *, as_json: bool) -> None:
             print(
                 f"provenance: {metrics.get('provenance_rate', 0):.2f}, "
                 f"expected-kind recall: {metrics.get('expected_kind_recall', 0):.2f}, "
+                f"precision: {metrics.get('expected_kind_precision', 0):.2f}, "
+                f"exact-case: {metrics.get('exact_case_match_rate', 0):.2f}, "
                 f"schema failures: {metrics.get('schema_failures', 0)}"
             )
     for error in payload.get("errors", []):

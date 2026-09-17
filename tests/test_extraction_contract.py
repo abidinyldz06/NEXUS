@@ -70,6 +70,28 @@ def valid_payload(span_ids=("m1", "m2")):
     }
 
 
+def expected_payload(span_ids: tuple[str, ...], kinds: list[str]):
+    candidates = [
+        {
+            "kind": kind,
+            "statement": f"Synthetic expected {kind}",
+            "entity_mentions": [],
+            "temporal_expression": None,
+            "source_span_ids": [span_ids[0]],
+            "confidence": 0.95,
+            "ambiguity_flags": [],
+            "possible_supersedes": [],
+        }
+        for kind in kinds
+    ]
+    return {
+        "schema_version": 1,
+        "candidates": candidates,
+        "ignored_span_ids": list(span_ids[1:] if candidates else span_ids),
+        "warnings": [],
+    }
+
+
 class FakeLlm:
     def __init__(self, responses):
         self.responses = list(responses)
@@ -144,13 +166,45 @@ class ExtractionContractTests(unittest.TestCase):
 
     def test_frozen_contract_holdout_records_expected_metrics(self) -> None:
         fixture = frozen_fixture_path()
+        fixture_payload = json.loads(fixture.read_text(encoding="utf-8"))
+        expected_by_case = {
+            item["id"]: item["expected_kinds"] for item in fixture_payload["cases"]
+        }
 
         def fake_extract(item: ConversationSegment) -> ExtractionResult:
-            if item.conversation_id == "prompt-injection-data":
-                return ExtractionResult((), item.span_ids, ())
+            kinds = expected_by_case[item.conversation_id]
+            candidates = tuple(
+                ExtractionCandidate(
+                    kind=CandidateKind(kind),
+                    statement=f"Synthetic expected {kind}",
+                    entity_mentions=(),
+                    temporal_expression=None,
+                    source_span_ids=(item.span_ids[0],),
+                    confidence=0.95,
+                    ambiguity_flags=(),
+                    possible_supersedes=(),
+                )
+                for kind in kinds
+            )
+            ignored = item.span_ids[1:] if candidates else item.span_ids
+            return ExtractionResult(candidates, ignored, ())
+
+        metrics = evaluate_fixture(fixture, fake_extract)
+        baseline = json.loads(
+            (ROOT / "eval" / "baseline-phase3-contract.json").read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(baseline["metrics"], metrics.to_dict())
+        self.assertEqual(1.0, metrics.provenance_rate)
+        self.assertEqual(1.0, metrics.expected_kind_precision)
+        self.assertEqual(1.0, metrics.exact_case_match_rate)
+        self.assertEqual(0, metrics.schema_failures)
+
+    def test_eval_precision_penalizes_unexpected_candidates(self) -> None:
+        def over_extract(item: ConversationSegment) -> ExtractionResult:
             candidate = ExtractionCandidate(
                 kind=CandidateKind.MEMORY,
-                statement="Kullanıcı kısa yanıtları tercih ediyor.",
+                statement="Unsupported synthetic memory",
                 entity_mentions=(),
                 temporal_expression=None,
                 source_span_ids=(item.span_ids[0],),
@@ -160,34 +214,31 @@ class ExtractionContractTests(unittest.TestCase):
             )
             return ExtractionResult((candidate,), item.span_ids[1:], ())
 
-        metrics = evaluate_fixture(fixture, fake_extract)
-        baseline = json.loads(
-            (ROOT / "eval" / "baseline-phase3-contract.json").read_text(encoding="utf-8")
-        )
+        metrics = evaluate_fixture(frozen_fixture_path(), over_extract)
 
-        self.assertEqual(baseline["metrics"], metrics.to_dict())
-        self.assertEqual(1.0, metrics.provenance_rate)
-        self.assertEqual(0, metrics.schema_failures)
+        self.assertLess(metrics.expected_kind_precision, 0.90)
+        self.assertLess(metrics.exact_case_match_rate, 0.80)
+        self.assertEqual(0.0, metrics.empty_case_precision)
 
     def test_live_report_contains_audit_metadata_but_no_candidate_content(self) -> None:
+        fixture = frozen_fixture_path()
+        fixture_payload = json.loads(fixture.read_text(encoding="utf-8"))
         responses = [
-            valid_payload(("p1", "p2", "p3")),
-            {
-                "schema_version": 1,
-                "candidates": [],
-                "ignored_span_ids": ["i1", "i2"],
-                "warnings": ["instruction_like_text"],
-            },
+            expected_payload(
+                tuple(message["id"] for message in item["messages"]),
+                item["expected_kinds"],
+            )
+            for item in fixture_payload["cases"]
         ]
 
-        report = evaluate_with_llm_report(frozen_fixture_path(), FakeLlm(responses))
+        report = evaluate_with_llm_report(fixture, FakeLlm(responses))
         payload = report.to_dict()
 
         self.assertTrue(report.accepted)
         self.assertEqual(("fake-provider",), report.providers)
         self.assertEqual(("fake-model",), report.models)
-        self.assertEqual(2, report.successful_calls)
-        self.assertEqual(30, report.total_tokens)
+        self.assertEqual(12, report.successful_calls)
+        self.assertEqual(180, report.total_tokens)
         self.assertNotIn("candidates", payload)
         self.assertNotIn("Kullanıcı kısa", json.dumps(payload, ensure_ascii=False))
 

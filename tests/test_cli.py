@@ -14,6 +14,7 @@ from types import SimpleNamespace
 
 from nexus.cli import configure_parser, run_command
 from nexus.contracts import SourceRef
+from nexus.eval import frozen_fixture_path
 from nexus.ids import IdPrefix, new_id
 from nexus.review import ReviewStore, create_review_item
 
@@ -266,27 +267,29 @@ class CliTests(unittest.TestCase):
         self.assertIn("eval --shadow", stream.getvalue())
 
     def test_eval_shadow_reports_metrics_without_publishing(self) -> None:
+        fixture = json.loads(frozen_fixture_path().read_text(encoding="utf-8"))
+        expected_by_case = {
+            item["id"]: item["expected_kinds"] for item in fixture["cases"]
+        }
+
         class FixtureLlm:
             def complete_structured(self, **kwargs):
                 envelope = json.loads(kwargs["input"][0]["text"].split("\n", 1)[1])
                 span_ids = [item["span_id"] for item in envelope["spans"]]
-                if envelope["conversation_id"] == "prompt-injection-data":
-                    candidates = []
-                    ignored = span_ids
-                else:
-                    candidates = [
-                        {
-                            "kind": "memory",
-                            "statement": "Kullanıcı kısa yanıtları tercih ediyor.",
-                            "entity_mentions": [],
-                            "temporal_expression": None,
-                            "source_span_ids": [span_ids[0]],
-                            "confidence": 0.95,
-                            "ambiguity_flags": [],
-                            "possible_supersedes": [],
-                        }
-                    ]
-                    ignored = span_ids[1:]
+                candidates = [
+                    {
+                        "kind": kind,
+                        "statement": f"Synthetic expected {kind}",
+                        "entity_mentions": [],
+                        "temporal_expression": None,
+                        "source_span_ids": [span_ids[0]],
+                        "confidence": 0.95,
+                        "ambiguity_flags": [],
+                        "possible_supersedes": [],
+                    }
+                    for kind in expected_by_case[envelope["conversation_id"]]
+                ]
+                ignored = span_ids[1:] if candidates else span_ids
                 parsed = {
                     "schema_version": 1,
                     "candidates": candidates,
@@ -315,6 +318,8 @@ class CliTests(unittest.TestCase):
         self.assertFalse(payload["writes_performed"])
         self.assertFalse(payload["candidates_published"])
         self.assertEqual(["fixture-model"], payload["report"]["models"])
+        self.assertEqual(1.0, payload["report"]["metrics"]["expected_kind_precision"])
+        self.assertEqual(1.0, payload["report"]["metrics"]["exact_case_match_rate"])
 
     def test_review_cli_lists_and_approves_without_vault_writes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
