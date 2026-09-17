@@ -1,0 +1,57 @@
+# Approved memory publication workflow
+
+This workflow is the only v0.1 path from a human-approved review item to a
+canonical memory record. It does not enable auto-publish.
+
+## Eligibility
+
+A review item must be `approved` or `edited`, carry a valid approval decision
+and have `candidate_kind: memory`. Its candidate is closed to these fields:
+
+- required: `statement`, `memory_type`, `confidence`, `impact`
+- optional: `entity_ids`, `extractor`
+
+Source references come from the review item and cannot be replaced by candidate
+JSON. Every `entity_id` must already exist as a canonical entity. The canonical
+memory ID is deterministically derived from the review ID, so retries cannot
+create a second record.
+
+## Safe sequence
+
+```bash
+hermes nexus review publish REV_ID --dry-run
+hermes nexus review publish REV_ID --apply --confirm REV_ID
+```
+
+Dry-run validates the review decision, candidate contract, target identity,
+source/entity references and any existing publication state without writing.
+Apply repeats those checks and requires an exact review-ID confirmation.
+
+A successful initial apply:
+
+1. atomically writes the canonical memory and generated Current-Memory view,
+2. rebuilds the disposable SQLite index,
+3. appends a content-free publication event to the private review log.
+
+Reapplying the same fully recorded publication performs no writes. Conflicting
+canonical content or a publication audit that disagrees with canonical state
+fails closed.
+
+## Failure recovery
+
+- Vault transaction failure leaves the canonical record and view unchanged.
+- Index rebuild failure removes the newly created record, restores the previous
+  view bytes and verifies that the prior index was preserved.
+- If the private review audit fails after canonical/index commit, the command
+  reports an incomplete audit and does not claim rollback. Repeat the exact
+  apply command. The retry verifies the deterministic canonical payload,
+  rebuilds the derived index and appends only the missing review audit.
+- A concurrent target or view change makes rollback fail closed instead of
+  overwriting the concurrent bytes.
+
+## Production gate
+
+Source tests use only temporary synthetic Vaults. A real production apply must
+name one reviewed target and receive target-specific operational approval after
+its dry-run output is inspected. `write_enabled` and `auto_publish_enabled`
+remain false for unattended flows.

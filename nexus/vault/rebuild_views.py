@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..contracts import Memory, RecordStatus
@@ -11,10 +12,18 @@ from .repository import VaultRepository
 from .transaction import VaultWrite
 
 
-def render_current_memory_view(memories: Iterable[Memory], repository: VaultRepository) -> str:
+@dataclass(frozen=True, slots=True)
+class MemoryViewEntry:
+    record_id: str
+    summary: str
+    status: str
+    relative_path: Path
+
+
+def render_memory_view_entries(entries: Iterable[MemoryViewEntry]) -> str:
     active = sorted(
-        (memory for memory in memories if memory.status is RecordStatus.ACTIVE),
-        key=lambda memory: memory.id,
+        (entry for entry in entries if entry.status == RecordStatus.ACTIVE.value),
+        key=lambda entry: entry.record_id,
     )
     lines = [
         "---",
@@ -27,15 +36,27 @@ def render_current_memory_view(memories: Iterable[Memory], repository: VaultRepo
         "This view is generated from active canonical records.",
         "",
     ]
-    for memory in active:
-        target = repository.record_path(memory).relative_to("Nexus")
+    for entry in active:
+        target = entry.relative_path.relative_to("Nexus").with_suffix("")
         lines.extend(
             [
-                f"- [[../{target.with_suffix('').as_posix()}|{memory.id}]]",
-                f"  {render_safe_pre(memory.summary)}",
+                f"- [[../{target.as_posix()}|{entry.record_id}]]",
+                f"  {render_safe_pre(entry.summary)}",
             ]
         )
     return "\n".join(lines) + "\n"
+
+
+def render_current_memory_view(memories: Iterable[Memory], repository: VaultRepository) -> str:
+    return render_memory_view_entries(
+        MemoryViewEntry(
+            record_id=memory.id,
+            summary=memory.summary,
+            status=memory.status.value,
+            relative_path=repository.record_path(memory),
+        )
+        for memory in memories
+    )
 
 
 def current_memory_view_write(

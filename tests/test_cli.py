@@ -397,6 +397,71 @@ class CliTests(unittest.TestCase):
             self.assertEqual("Yeni", payload["item"]["candidate"]["statement"])
             self.assertFalse(payload["vault_writes"])
 
+    def test_review_publish_requires_dry_run_and_exact_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            vault = root / "vault"
+            vault.mkdir()
+            store = ReviewStore(root / "private")
+            item = store.enqueue(
+                create_review_item(
+                    candidate_kind="memory",
+                    candidate={
+                        "statement": "CLI üzerinden onaylı sentetik hafıza",
+                        "memory_type": "fact",
+                        "confidence": 0.95,
+                        "impact": "low",
+                    },
+                    reason_codes=("operator_review",),
+                    source_refs=(
+                        SourceRef(
+                            source_id=new_id(IdPrefix.SOURCE),
+                            conversation_id="conversation-publish",
+                            span_ids=("msg_publish",),
+                            span_sha256=sha256(b"msg_publish").hexdigest(),
+                        ),
+                    ),
+                )
+            )
+            store.decide(item.id, action="approve")
+            parser = parser_for(
+                FakeContext(
+                    {
+                        "vault_path": str(vault),
+                        "data_path": str(root / "private"),
+                    }
+                )
+            )
+
+            dry_args = parser.parse_args(
+                ["review", "publish", item.id, "--dry-run", "--json"]
+            )
+            dry_stream = io.StringIO()
+            with contextlib.redirect_stdout(dry_stream):
+                dry_result = dry_args.func(dry_args)
+
+            apply_args = parser.parse_args(
+                [
+                    "review",
+                    "publish",
+                    item.id,
+                    "--apply",
+                    "--confirm",
+                    item.id,
+                    "--json",
+                ]
+            )
+            apply_stream = io.StringIO()
+            with contextlib.redirect_stdout(apply_stream):
+                apply_result = apply_args.func(apply_args)
+
+            self.assertEqual(0, dry_result)
+            self.assertFalse(json.loads(dry_stream.getvalue())["writes_performed"])
+            self.assertEqual(0, apply_result)
+            payload = json.loads(apply_stream.getvalue())
+            self.assertTrue(payload["vault_writes"])
+            self.assertTrue(payload["record_id"].startswith("mem_"))
+
     def test_rebuild_and_search_cli_use_only_derived_index(self) -> None:
         from nexus.contracts import Impact, Memory, MemoryType, ReviewStatus
         from nexus.vault import VaultRepository

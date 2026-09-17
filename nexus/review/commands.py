@@ -39,6 +39,16 @@ def configure_review_parser(parser: ArgumentParser) -> None:
     edit.add_argument("--reason")
     edit.add_argument("--json", action="store_true", dest="as_json")
 
+    publish = commands.add_parser(
+        "publish", help="Plan or explicitly publish one approved memory item"
+    )
+    publish.add_argument("item_id")
+    publish_mode = publish.add_mutually_exclusive_group(required=True)
+    publish_mode.add_argument("--dry-run", action="store_true")
+    publish_mode.add_argument("--apply", action="store_true")
+    publish.add_argument("--confirm", metavar="REVIEW_ID")
+    publish.add_argument("--json", action="store_true", dest="as_json")
+
 
 def _load_candidate(path_value: str) -> dict[str, Any]:
     path = Path(path_value).expanduser()

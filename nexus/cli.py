@@ -17,6 +17,7 @@ from .git_rollback_drill import run_synthetic_git_rollback_drill
 from .index import rebuild_index, search_index
 from .ingest import plan_inbox
 from .permission_audit import audit_permissions
+from .publication import apply_publication, plan_publication
 from .pulse import emit_due_reminders
 from .restore_drill import run_synthetic_restore_drill
 from .retention import plan_retention
@@ -230,12 +231,26 @@ def run_command(args: Namespace, ctx: Any) -> int:
     if command == "review":
         try:
             config = from_plugin_context(ctx)
-            result, payload = run_review_command(args, data_path=config.data_path)
-        except ConfigurationError as exc:
+            if getattr(args, "review_command", None) == "publish":
+                if bool(getattr(args, "apply", False)):
+                    payload = apply_publication(
+                        config,
+                        args.item_id,
+                        confirmation=getattr(args, "confirm", None),
+                    ).to_dict()
+                else:
+                    if getattr(args, "confirm", None) is not None:
+                        raise ValueError("--confirm is only valid with --apply")
+                    payload = plan_publication(config, args.item_id).to_dict()
+                result = 0
+            else:
+                result, payload = run_review_command(args, data_path=config.data_path)
+        except (NexusError, OSError, ValueError) as exc:
             result, payload = 2, {
                 "ok": False,
                 "errors": [str(exc)],
                 "vault_writes": False,
+                "writes_performed": False,
             }
         _print_review_payload(payload, as_json=bool(getattr(args, "as_json", False)))
         return result
@@ -424,6 +439,18 @@ def _print_review_payload(payload: dict[str, Any], *, as_json: bool) -> None:
     if not payload.get("ok", False):
         for error in payload.get("errors", []):
             print(f"error: {error}")
+        return
+    if payload.get("mode") == "dry-run" and "record_id" in payload:
+        print(
+            f"NEXUS publish dry-run — {payload.get('review_id')} -> "
+            f"{payload.get('record_id')}; no writes performed"
+        )
+        return
+    if payload.get("mode") == "confirmed-apply":
+        print(
+            f"NEXUS publish complete — {payload.get('record_id')}; "
+            f"already published: {str(bool(payload.get('already_published'))).lower()}"
+        )
         return
     if "items" in payload:
         items = payload.get("items", [])

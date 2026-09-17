@@ -9,9 +9,11 @@ only return JSON matching the NEXUS candidate schema.
 ## Fail-closed defaults
 
 - `vault_path` has no default and must identify an existing Vault.
-- Canonical record publish remains disabled. Phase 4 may write private review
-  events outside the synced Vault; Phase 7 may update only `notified_at` on an
-  existing approved commitment through the explicit local reminder command.
+- Canonical auto-publish remains disabled. Phase 4 may write private review
+  events outside the synced Vault; an approved/edited memory may be published
+  only through the explicit dry-run/apply command and exact review-ID
+  confirmation. Phase 7 may update only `notified_at` on an existing approved
+  commitment through the explicit local reminder command.
 - Auto-publish is disabled.
 - Sensitive auto-publish is rejected even if configured true.
 - Relative storage paths are rejected.
@@ -43,6 +45,15 @@ only return JSON matching the NEXUS candidate schema.
   content hash immediately before deletion, rebuilds the disposable index and
   writes a content-free private audit event. View/index/audit failure restores
   exact prior bytes; concurrent changes prevent unsafe rollback.
+- Approved-memory publication accepts only a closed memory-candidate shape,
+  preserves exact source references, rejects missing canonical entity links and
+  derives one stable memory ID from the review ID. Apply requires the review ID
+  again and writes the record plus Current-Memory view in one Vault transaction.
+- A publication index failure restores the new record and generated view while
+  preserving the prior disposable index. A later private review-audit failure
+  is reported as incomplete rather than claiming rollback: retry verifies the
+  deterministic canonical content, rebuilds the index and appends the missing
+  audit without rewriting the Vault record.
 - Permission audit reads metadata only, reports aggregate issue counts and
   treats symlinks, non-regular entries, ownership mismatch and group/world
   access as failures without changing modes.
