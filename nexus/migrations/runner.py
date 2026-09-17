@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from ..errors import NexusIndexError
 
 CURRENT_SCHEMA_VERSION = 1
-_MIGRATIONS = ("nexus.migrations.001_initial",)
+_MIGRATIONS = (".001_initial",)
 
 
 def _installed_version(connection: sqlite3.Connection) -> int:
@@ -32,7 +32,7 @@ def migrate(connection: sqlite3.Connection) -> int:
             f"index schema {current} is newer than supported {CURRENT_SCHEMA_VERSION}"
         )
     for module_name in _MIGRATIONS[current:]:
-        module = importlib.import_module(module_name)
+        module = importlib.import_module(module_name, package=__package__)
         expected = current + 1
         if expected != module.VERSION:
             raise NexusIndexError("index migration sequence is invalid")
