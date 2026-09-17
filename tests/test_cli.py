@@ -185,6 +185,32 @@ class CliTests(unittest.TestCase):
         self.assertFalse(payload["production_paths_accessed"])
         self.assertFalse(payload["production_writes"])
 
+    def test_git_rollback_drill_requires_synthetic_gate_and_ignores_config(self) -> None:
+        class NoConfigContext:
+            def get_config(self, key: str, default: object = None) -> object:
+                raise AssertionError(f"production config must not be read: {key}")
+
+        parser = parser_for(NoConfigContext())
+        missing_gate = parser.parse_args(["drill", "git-rollback", "--json"])
+        missing_stream = io.StringIO()
+        with contextlib.redirect_stdout(missing_stream):
+            missing_result = missing_gate.func(missing_gate)
+
+        args = parser.parse_args(["drill", "git-rollback", "--synthetic", "--json"])
+        stream = io.StringIO()
+        with contextlib.redirect_stdout(stream):
+            result = args.func(args)
+
+        payload = json.loads(stream.getvalue())
+        self.assertEqual(2, missing_result)
+        self.assertIn("only supports", missing_stream.getvalue())
+        self.assertEqual(0, result)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(6, payload["files"])
+        self.assertTrue(payload["metadata_external"])
+        self.assertFalse(payload["production_paths_accessed"])
+        self.assertFalse(payload["production_writes"])
+
     def test_eval_requires_explicit_shadow_gate(self) -> None:
         parser = parser_for(FakeContext())
         args = parser.parse_args(["eval", "--json"])

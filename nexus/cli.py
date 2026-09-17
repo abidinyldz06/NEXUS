@@ -12,6 +12,7 @@ from . import __version__
 from .config import from_plugin_context
 from .errors import ConfigurationError, NexusError, NexusIndexError
 from .eval import evaluate_with_llm_report, frozen_fixture_path
+from .git_rollback_drill import run_synthetic_git_rollback_drill
 from .index import rebuild_index, search_index
 from .ingest import plan_inbox
 from .permission_audit import audit_permissions
@@ -107,6 +108,15 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
         help="Required safety gate; use temporary synthetic data only",
     )
     restore.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
+    git_rollback = drill_subcommands.add_parser(
+        "git-rollback", help="Verify an external git-dir rollback with synthetic files"
+    )
+    git_rollback.add_argument(
+        "--synthetic",
+        action="store_true",
+        help="Required safety gate; use temporary synthetic files only",
+    )
+    git_rollback.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
 
     parser.set_defaults(func=handler)
 
@@ -272,11 +282,29 @@ def run_command(args: Namespace, ctx: Any) -> int:
             }
         _print_restore_drill(payload, as_json=bool(getattr(args, "as_json", False)))
         return 0 if payload["ok"] else 2
+    if command == "drill" and getattr(args, "drill_command", None) == "git-rollback":
+        if not bool(getattr(args, "synthetic", False)):
+            print("Phase 8 only supports: hermes nexus drill git-rollback --synthetic")
+            return 2
+        try:
+            payload = run_synthetic_git_rollback_drill().to_dict()
+        except (NexusError, OSError, ValueError) as exc:
+            payload = {
+                "ok": False,
+                "mode": "synthetic-temporary",
+                "production_paths_accessed": False,
+                "production_writes": False,
+                "errors": [str(exc)],
+            }
+        _print_git_rollback_drill(
+            payload, as_json=bool(getattr(args, "as_json", False))
+        )
+        return 0 if payload["ok"] else 2
     print(
         "Usage: hermes nexus "
         "{status|config validate|ingest --dry-run|eval --shadow|review ...|"
         "rebuild|search|reminders --emit-local|retention --dry-run|audit permissions|"
-        "drill restore --synthetic}"
+        "drill restore --synthetic|drill git-rollback --synthetic}"
     )
     return 2
 
@@ -483,6 +511,28 @@ def _print_restore_drill(payload: dict[str, Any], *, as_json: bool) -> None:
     print(
         f"hash parity: {payload.get('canonical_hashes_match', False)}, "
         f"index parity: {payload.get('index_parity', False)}, "
+        f"cleanup: {payload.get('cleanup_verified', False)}"
+    )
+    print("Production paths accessed: false; production writes: false")
+
+
+def _print_git_rollback_drill(payload: dict[str, Any], *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return
+    if not payload.get("ok", False):
+        for error in payload.get("errors", []):
+            print(f"error: {error}")
+        return
+    print("NEXUS Git rollback drill — synthetic temporary data only")
+    print(
+        f"files: {payload.get('files', 0)}, "
+        f"metadata external: {payload.get('metadata_external', False)}, "
+        f"mutation detected: {payload.get('mutation_detected', False)}"
+    )
+    print(
+        f"rollback parity: {payload.get('rollback_hashes_match', False)}, "
+        f"clean: {payload.get('clean_after_rollback', False)}, "
         f"cleanup: {payload.get('cleanup_verified', False)}"
     )
     print("Production paths accessed: false; production writes: false")

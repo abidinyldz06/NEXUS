@@ -71,3 +71,7 @@ class RetentionError(NexusError):
 
 class RestoreDrillError(NexusError):
     """An isolated synthetic restore drill failed its parity checks."""
+
+
+class GitRollbackDrillError(NexusError):
+    """An isolated external git-dir rollback drill failed closed."""
