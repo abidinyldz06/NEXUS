@@ -39,7 +39,7 @@ Date: 2026-09-17
 ## Current state
 
 No production archive, repository, external git directory or real restore is
-created. The source branch includes a synthetic restore drill that uses only a
-private temporary directory, verifies canonical hash and derived-index parity,
-then removes the entire drill directory. Production backup and restore remain
-separate, explicitly approved acceptance gates.
+created. The installed synthetic restore drill uses only a private temporary
+directory, verifies canonical hash and derived-index parity, then removes the
+entire drill directory. Production backup and restore remain separate, explicitly
+approved acceptance gates.

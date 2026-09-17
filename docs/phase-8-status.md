@@ -4,9 +4,9 @@ Date: 2026-09-17
 
 ## Current slices
 
-The first two merged Phase 8 slices implement a fail-closed, read-only retention
-planner and a metadata-only permission audit. A third source-branch slice adds a
-temporary synthetic restore drill. They do not implement deletion, event-log
+Three merged Phase 8 slices implement a fail-closed, read-only retention planner,
+a metadata-only permission audit and a temporary synthetic restore drill. They
+do not implement deletion, event-log
 compaction, forget, production backup/restore or Git rollback operations.
 
 ## Implemented
@@ -31,7 +31,7 @@ compaction, forget, production backup/restore or Git rollback operations.
 
 ## Verification
 
-- Python 3.11 unit tests: 105 passed on the source branch.
+- Python 3.11 unit tests: 105 passed.
 - Old/fresh raw and quarantine boundaries passed.
 - Rejected candidate expiry passed while preserving the append-only event log.
 - Symlinked data path failed closed; nested symlink entries were not followed.
@@ -58,6 +58,16 @@ compaction, forget, production backup/restore or Git rollback operations.
 - Synthetic restore tests cover successful hash/index/permission/cleanup parity,
   corruption failure, symlinked temporary-parent rejection and the CLI safety
   gate without reading user config.
+- PR #13 was squash-merged to `main` as
+  `6690fd83c4f0d63bb2df21e8761b781c2f2bc458`; the active Hermes plugin is pinned
+  to that exact commit and Plugin Doctor passes on the installed copy.
+- The gateway restarted under launchd with PID `19358`. Production execution of
+  `drill restore --synthetic --json` verified four records, five canonical files,
+  one open commitment, canonical hash parity, independent index parity, private
+  permissions and cleanup.
+- The drill reported no production path access or writes. The production SQLite
+  mode, size, SHA-256 and private file count remained unchanged, and no temporary
+  drill directory remained.
 
 ## Not yet delivered
 
@@ -71,11 +81,8 @@ compaction, forget, production backup/restore or Git rollback operations.
 
 ## Delivery state
 
-The retention dry-run and permission-audit/backup-policy slices are merged and
-installed. Their production acceptance is limited to read-only scans: retention
-found no expiry candidates and permission audit found no insecure or unsafe
-entries. No retention deletion, permission repair or backup capability exists.
-
-The synthetic restore-drill slice is local on
-`codex/nexus-phase8-restore-drill` and published as PR #13; it has not been
-merged or installed in the active Hermes plugin.
+The retention dry-run, permission-audit/backup-policy and synthetic restore-drill
+slices are merged, installed and accepted within their narrow safety boundaries.
+Retention found no expiry candidates, permission audit found no insecure or
+unsafe entries, and restore verification used temporary synthetic data only. No
+retention deletion, permission repair or production backup capability exists.
