@@ -4,9 +4,10 @@ Date: 2026-09-17
 
 ## Current slices
 
-The first two Phase 8 slices implement a fail-closed, read-only retention planner
-and a metadata-only permission audit. They do not implement deletion, event-log
-compaction, forget, backup, restore or Git rollback operations.
+The first two merged Phase 8 slices implement a fail-closed, read-only retention
+planner and a metadata-only permission audit. A third source-branch slice adds a
+temporary synthetic restore drill. They do not implement deletion, event-log
+compaction, forget, production backup/restore or Git rollback operations.
 
 ## Implemented
 
@@ -22,10 +23,15 @@ compaction, forget, backup, restore or Git rollback operations.
 - Aggregate permission findings without entry paths, names or file content.
 - Backup classification and encrypted/excluded sensitive-data policy in
   `docs/backup-policy.md`.
+- Explicit `drill restore --synthetic` gate that never reads plugin config or
+  production paths.
+- Four deterministic synthetic canonical records, private temporary snapshot and
+  restore trees, exact file-hash comparison and independent SQLite rebuild parity.
+- Fail-closed restore corruption detection and verified temporary-directory cleanup.
 
 ## Verification
 
-- Python 3.11 unit tests: 101 passed.
+- Python 3.11 unit tests: 105 passed on the source branch.
 - Old/fresh raw and quarantine boundaries passed.
 - Rejected candidate expiry passed while preserving the append-only event log.
 - Symlinked data path failed closed; nested symlink entries were not followed.
@@ -49,13 +55,16 @@ compaction, forget, backup, restore or Git rollback operations.
 - Production `audit permissions --json` checked two private-data entries with
   zero insecure or unsafe findings, reported `writes_performed=false`, and left
   the SQLite mode, size and SHA-256 unchanged. The configured Inbox was absent.
+- Synthetic restore tests cover successful hash/index/permission/cleanup parity,
+  corruption failure, symlinked temporary-parent rejection and the CLI safety
+  gate without reading user config.
 
 ## Not yet delivered
 
 - No apply/delete retention mode.
 - No forget workflow.
-- No backup archive or restore drill; the encryption/exclusion policy is
-  documented but not operationally exercised.
+- No production backup archive or real-data restore; the encryption/exclusion
+  policy is exercised only with temporary synthetic data.
 - No external git-dir rollback canary.
 - Phase 7 local-only reminder canary remains time-gated through seven scheduled
   runs before final v0.1 acceptance.
@@ -66,3 +75,7 @@ The retention dry-run and permission-audit/backup-policy slices are merged and
 installed. Their production acceptance is limited to read-only scans: retention
 found no expiry candidates and permission audit found no insecure or unsafe
 entries. No retention deletion, permission repair or backup capability exists.
+
+The synthetic restore-drill slice is local on
+`codex/nexus-phase8-restore-drill`; it has not been pushed, merged or installed
+in the active Hermes plugin.
