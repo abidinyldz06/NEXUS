@@ -4,13 +4,12 @@ Date: 2026-09-17
 
 ## Current slices
 
-Four merged Phase 8 slices implement a fail-closed, read-only retention planner,
-a metadata-only permission audit, a temporary synthetic restore drill and a
-temporary synthetic external git-dir rollback drill. They do not implement
-deletion, event-log compaction, forget, production backup/restore or production
-Vault Git history.
-A fifth source-branch slice adds a record-scoped canonical forget workflow;
-production data has not been deleted.
+Five merged Phase 8 slices implement a fail-closed, read-only retention planner,
+a metadata-only permission audit, temporary synthetic restore and external
+git-dir rollback drills, and a record-scoped canonical forget workflow. They do
+not implement retention deletion, event-log compaction, subject-wide privacy
+erasure, production backup/restore or production Vault Git history. Production
+canonical data has not been deleted.
 
 ## Implemented
 
@@ -47,7 +46,7 @@ production data has not been deleted.
 
 ## Verification
 
-- Python 3.11 unit tests: 114 passed on the source branch.
+- Python 3.11 unit tests: 114 passed on `main` and the installed plugin copy.
 - Old/fresh raw and quarantine boundaries passed.
 - Rejected candidate expiry passed while preserving the append-only event log.
 - Symlinked data path failed closed; nested symlink entries were not followed.
@@ -102,6 +101,16 @@ production data has not been deleted.
   synthetic deletion, memory-view/index parity, private audit permissions and
   exact rollback after rebuild or audit failure. Concurrent target changes are
   preserved and force an incomplete-rollback error instead of being overwritten.
+- PR #17 was squash-merged to `main` as
+  `ad73a45c08ee3016e1d5cc899587f59b7d5c4c92`; the active Hermes plugin is pinned
+  to that exact commit and Plugin Doctor passes on the installed copy.
+- The gateway restarted under launchd with PID `26988`. Production execution of
+  forget dry-run with a valid nonexistent target returned `record not found`,
+  `writes_performed=false` and exit code `2`, proving the command surface and
+  fail-closed path without selecting or deleting a real record.
+- Production SQLite mode `0600`, size `57344`, SHA-256
+  `a1a098d0006b1bf51896d575884a354d8201559455fae5d2ddedd5de5456c0fa` and the
+  private file count of one remained unchanged after the dry-run.
 
 ## Not yet delivered
 
@@ -118,13 +127,13 @@ production data has not been deleted.
 ## Delivery state
 
 The retention dry-run, permission-audit/backup-policy, synthetic restore-drill
-and synthetic Git rollback slices are merged, installed and accepted within
-their narrow safety boundaries.
+synthetic Git rollback and record-scoped canonical forget slices are merged,
+installed and accepted within their narrow safety boundaries.
 Retention found no expiry candidates, permission audit found no insecure or
 unsafe entries, and both drill verifications used temporary synthetic data only.
 No retention deletion, permission repair, production backup capability or
 production Vault Git history exists.
 
-The record-scoped forget slice is local on
-`codex/nexus-phase8-forget-workflow`; it has not been merged, installed or run
-against production data.
+Forget apply was exercised only with temporary synthetic records. Production
+acceptance used a missing-target dry-run; no production canonical record, raw
+file, review event or Vault path was changed.
