@@ -9,8 +9,9 @@ only return JSON matching the NEXUS candidate schema.
 ## Fail-closed defaults
 
 - `vault_path` has no default and must identify an existing Vault.
-- Canonical Vault writes remain disabled. Phase 4 may write only private review
-  events outside the synced Vault, with `0700` directory and `0600` file modes.
+- Canonical record publish remains disabled. Phase 4 may write private review
+  events outside the synced Vault; Phase 7 may update only `notified_at` on an
+  existing approved commitment through the explicit local reminder command.
 - Auto-publish is disabled.
 - Sensitive auto-publish is rejected even if configured true.
 - Relative storage paths are rejected.
@@ -28,6 +29,12 @@ only return JSON matching the NEXUS candidate schema.
   replaces a `0600` SQLite database outside the Vault.
 - Search opens SQLite read-only, treats query text as literal terms, binds all
   query/filter values as SQL parameters and limits results to at most 100.
+- Phase 7 reminder output accepts only approved/edited/auto-reviewed open
+  commitments with explicit non-ambiguous dates and `notify=true`.
+- Reminder state uses canonical `notified_at`, immutable-ID paths and SHA-256
+  content preconditions. A post-write index failure restores exact prior bytes.
+- Cron wrappers use argument-vector subprocess calls with no shell and no agent;
+  empty reminder output is silent. No external delivery target is configured.
 - Runtime/raw directories will be private and remain outside the synced Vault.
 
 ## Known environmental risk

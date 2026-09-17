@@ -58,6 +58,8 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(0, result)
         self.assertTrue(json.loads(stream.getvalue())["ok"])
+        self.assertTrue(json.loads(stream.getvalue())["write_enabled"])
+        self.assertEqual("reminder-state-only", json.loads(stream.getvalue())["write_scope"])
 
     def test_ingest_requires_explicit_dry_run(self) -> None:
         parser = parser_for(FakeContext())
@@ -294,6 +296,34 @@ class CliTests(unittest.TestCase):
             self.assertEqual(0, search_result)
             self.assertEqual([record.id], [item["id"] for item in searched["items"]])
             self.assertFalse(searched["vault_writes"])
+
+    def test_reminders_requires_local_gate_and_empty_queue_is_silent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            vault = root / "vault"
+            vault.mkdir()
+            data = root / "private"
+            from nexus.index import rebuild_index
+
+            rebuild_index(vault, data / "nexus.db")
+            parser = parser_for(
+                FakeContext({"vault_path": str(vault), "data_path": str(data)})
+            )
+
+            missing_gate = parser.parse_args(["reminders"])
+            missing_stream = io.StringIO()
+            with contextlib.redirect_stdout(missing_stream):
+                missing_result = missing_gate.func(missing_gate)
+
+            emit = parser.parse_args(["reminders", "--emit-local"])
+            emit_stream = io.StringIO()
+            with contextlib.redirect_stdout(emit_stream):
+                emit_result = emit.func(emit)
+
+            self.assertEqual(2, missing_result)
+            self.assertIn("--emit-local", missing_stream.getvalue())
+            self.assertEqual(0, emit_result)
+            self.assertEqual("", emit_stream.getvalue())
 
 
 if __name__ == "__main__":

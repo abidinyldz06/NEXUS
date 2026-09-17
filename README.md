@@ -6,19 +6,21 @@ rebuild edilebilir SQLite indeks ve commitments hatırlatmalarını kapsar.
 
 ## Güncel durum
 
-Phase 6'nın yerel implementation'ı hazırdır. Mevcut kod güvenli plugin/CLI
+Phase 7'nin yerel implementation'ı hazırdır. Mevcut kod güvenli plugin/CLI
 iskeleti, source adapter'ları, idempotent source state, deterministik segmenter,
 provenance zorunlu structured extraction, exact-only entity resolver,
 deterministik policy, tekrar oynatılabilir review kuyruğu ve atomik canonical
-Vault writer ile disposable SQLite FTS5 indeksini içerir. ChatGPT adapter gerçek
+Vault writer, disposable SQLite FTS5 indeks ve local-only Pulse scanner içerir.
+ChatGPT adapter gerçek
 export doğrulanana kadar experimental'dır. Phase 6 kaynak kodu `main` dalına
 birleştirilmiştir; aktif Hermes kurulumu ayrı bir teslim kapısıdır ve her seferinde
 installed plugin SHA ile ayrıca doğrulanır. Sistem hâlâ:
 
-- Obsidian Vault'a veya private raw store'a yazmaz,
+- canonical record auto-publish yapmaz; yalnız explicit local reminder komutu
+  mevcut commitment'ın `notified_at` state'ini güncelleyebilir,
 - Hermes config/cron/gateway dosyalarını değiştirmez,
 - yalnız açık `eval --shadow` komutunda paketlenmiş sentetik fixture ile model çağrısı yapar,
-- notification göndermez.
+- Telegram veya başka bir dış kanala notification göndermez.
 
 Paketlenmiş iki-vakalı frozen holdout, aktif `ollama-cloud` / `glm-5.3` rotasında
 shadow modda başarıyla çalışmıştır. Bu sonuç Phase 3 contract kapısını doğrular;
@@ -37,6 +39,12 @@ Phase 6 `rebuild` komutu canonical Markdown kayıtlarını salt okunur tarar ve
 Vault dışındaki SQLite indeksini yan dosyada tamamen kurduktan sonra atomik
 olarak değiştirir. `search` FTS ifadesi çalıştırmaz; kullanıcı sorgusunu literal
 terimlere çevirip tüm filtreleri parametreli SQL ile uygular.
+
+Phase 7 reminder scanner yalnız onaylı, açık, tarihi kesin ve `notify=true`
+commitment'ları işler. `notified_at` canonical kayda content-hash precondition ile
+yazılır; indeks yenileme başarısızsa exact canonical byte'lar geri yüklenir.
+No-agent wrapper boş stdout'ta sessizdir. Cron job kurulumu ve Telegram teslimi
+henüz yapılmamıştır.
 
 Makinece okunabilir v1 kayıt contract'ı
 [`schemas/nexus-v1.schema.json`](schemas/nexus-v1.schema.json) dosyasındadır.
@@ -68,7 +76,8 @@ Phase kanıtları: [`docs/phase-0-1-status.md`](docs/phase-0-1-status.md) ve
 [`docs/phase-3-status.md`](docs/phase-3-status.md) ve
 [`docs/phase-4-status.md`](docs/phase-4-status.md),
 [`docs/phase-5-status.md`](docs/phase-5-status.md) ve
-[`docs/phase-6-status.md`](docs/phase-6-status.md).
+[`docs/phase-6-status.md`](docs/phase-6-status.md),
+[`docs/phase-7-status.md`](docs/phase-7-status.md).
 
 ## Mevcut CLI
 
@@ -86,6 +95,7 @@ hermes nexus review reject REV_ID
 hermes nexus review edit REV_ID --candidate-file /absolute/path/candidate.json
 hermes nexus rebuild
 hermes nexus search "Türk kahvesi" --kind memory
+hermes nexus reminders --emit-local
 ```
 
 `eval --shadow` yalnız paketlenmiş sentetik frozen holdout'u aktif
@@ -93,8 +103,9 @@ hermes nexus search "Türk kahvesi" --kind memory
 yalnız kalite/audit ölçümlerini ekrana verir. Review komutları yalnız private
 olay kaydını değiştirir ve `vault_writes: false` raporlar. `rebuild` ve `search`
 yalnız Vault dışındaki disposable indeksi değiştirir/okur. Mutating ingest,
-canonical Vault publish ve reminders komutları sonraki fazlarda, kendi acceptance
-testleri tamamlandıkça açılacaktır.
+canonical record publish ve dış-kanal reminder teslimi kapalıdır. Reminder komutu
+yalnız local output üretir ve işlenen canonical commitment'ın notification state'ini
+güvenli biçimde günceller.
 
 Extraction servisi yalnız plugin-owned `nexus_extract` auxiliary task'ını kullanır;
 provider/model override istemez ve adayları hiçbir yere yayınlamaz.

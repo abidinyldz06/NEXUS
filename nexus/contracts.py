@@ -133,7 +133,7 @@ def _require_optional_time(value: str | None, field_name: str) -> None:
         raise ContractError(f"{field_name} must be an ISO 8601 time") from exc
 
 
-def _require_source_refs(value: tuple["SourceRef", ...], field_name: str) -> None:
+def _require_source_refs(value: tuple[SourceRef, ...], field_name: str) -> None:
     if not value or any(not isinstance(item, SourceRef) for item in value):
         raise ContractError(f"{field_name} must contain at least one SourceRef")
 
@@ -331,6 +331,10 @@ class Commitment:
             raise ContractError(f"unknown timezone: {self.timezone}") from exc
         _require_optional_date(self.due_date, "due_date")
         _require_optional_time(self.due_time, "due_time")
+        if not isinstance(self.notify, bool):
+            raise ContractError("notify must be a boolean")
+        if self.notified_at is not None:
+            _require_datetime(self.notified_at, "notified_at")
         if self.notify and self.due_precision is DuePrecision.AMBIGUOUS:
             raise ContractError("ambiguous commitments cannot enable notifications")
 
