@@ -126,8 +126,8 @@ dry-run or exact ID-confirmed apply, and does not enable unattended publishing.
   `a1a098d0006b1bf51896d575884a354d8201559455fae5d2ddedd5de5456c0fa` and the
   private file count of one remained unchanged after the dry-run.
 - PR #19 was squash-merged to `main` as
-  `3c70434749b066d00daff92e01416cf1ba63b1ee`; the active Hermes plugin is pinned
-  to that exact commit, 120 installed-copy tests pass and Plugin Doctor passes.
+  `3c70434749b066d00daff92e01416cf1ba63b1ee`; that feature commit passed 120
+  installed-copy tests and Plugin Doctor.
 - A production-safe publish dry-run used a valid but nonexistent review ID. It
   returned `review item was not found`, exit code `2`,
   `writes_performed=false` and `vault_writes=false` without selecting a real
@@ -137,6 +137,15 @@ dry-run or exact ID-confirmed apply, and does not enable unattended publishing.
 - Direct launchd inspection showed `ai.hermes.gateway` running with PID `82652`.
   `hermes gateway status` saw PIDs `82652`/`82653` but simultaneously reported
   the service as not loaded; this status-reporting discrepancy remains open.
+- PR #20 was squash-merged to `main` as
+  `79aa60329f32f201fb67612132d41205e6a03c0b`. It records acceptance evidence and
+  corrects `status.write_scope` to `explicit-confirmed-operations` without
+  widening any write gate.
+- The active Hermes plugin is pinned to that exact PR #20 commit; 120
+  installed-copy tests and Plugin Doctor pass. Runtime status reports
+  `auto_publish_enabled=false`, the corrected write scope and no config errors.
+- Direct launchd inspection after the final restart showed the gateway running
+  with PID `85639`.
 
 ## Not yet delivered
 
