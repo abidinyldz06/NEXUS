@@ -38,6 +38,12 @@ only return JSON matching the NEXUS candidate schema.
 - Retention starts as aggregate-only dry-run: raw/quarantine paths are scanned
   without following symlinks, rejected candidate IDs/content are not printed,
   and no delete, rewrite or apply mode exists.
+- Permission audit reads metadata only, reports aggregate issue counts and
+  treats symlinks, non-regular entries, ownership mismatch and group/world
+  access as failures without changing modes.
+- Derived SQLite is excluded from authoritative backup. Private raw/review data
+  is excluded by default and requires encrypted, owner-only staging plus an
+  explicitly approved destination before backup.
 - Runtime/raw directories will be private and remain outside the synced Vault.
 
 ## Known environmental risk

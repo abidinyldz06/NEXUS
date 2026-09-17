@@ -133,6 +133,33 @@ class CliTests(unittest.TestCase):
             self.assertEqual(1, payload["raw"]["expired_files"])
             self.assertTrue(old.exists())
 
+    def test_permission_audit_reports_aggregate_metadata_only(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data_path = root / "private"
+            data_path.mkdir()
+            os.chmod(data_path, 0o700)
+            private_file = data_path / "do-not-print-this-name.json"
+            private_file.write_text("do-not-print-this-content", encoding="utf-8")
+            os.chmod(private_file, 0o600)
+            parser = parser_for(
+                FakeContext(
+                    {"data_path": str(data_path), "inbox_path": str(root / "missing-inbox")}
+                )
+            )
+            args = parser.parse_args(["audit", "permissions", "--json"])
+            stream = io.StringIO()
+
+            with contextlib.redirect_stdout(stream):
+                result = args.func(args)
+
+            output = stream.getvalue()
+            payload = json.loads(output)
+            self.assertEqual(0, result)
+            self.assertTrue(payload["ok"])
+            self.assertFalse(payload["writes_performed"])
+            self.assertNotIn("do-not-print", output)
+
     def test_eval_requires_explicit_shadow_gate(self) -> None:
         parser = parser_for(FakeContext())
         args = parser.parse_args(["eval", "--json"])

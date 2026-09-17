@@ -14,6 +14,7 @@ from .errors import ConfigurationError, NexusError, NexusIndexError
 from .eval import evaluate_with_llm_report, frozen_fixture_path
 from .index import rebuild_index, search_index
 from .ingest import plan_inbox
+from .permission_audit import audit_permissions
 from .pulse import emit_due_reminders
 from .retention import plan_retention
 from .review.commands import configure_review_parser, run_review_command
@@ -86,6 +87,13 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
         help="Required safety gate; report aggregate expiry counts without writing",
     )
     retention.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
+
+    audit = subcommands.add_parser("audit", help="Run read-only local safety audits")
+    audit_subcommands = audit.add_subparsers(dest="audit_command")
+    permissions = audit_subcommands.add_parser(
+        "permissions", help="Check private path ownership and access bits"
+    )
+    permissions.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
 
     parser.set_defaults(func=handler)
 
@@ -223,10 +231,22 @@ def run_command(args: Namespace, ctx: Any) -> int:
             }
         _print_retention_payload(payload, as_json=bool(getattr(args, "as_json", False)))
         return 0 if payload["ok"] else 2
+    if command == "audit" and getattr(args, "audit_command", None) == "permissions":
+        try:
+            payload = audit_permissions(from_plugin_context(ctx)).to_dict()
+        except (NexusError, OSError, ValueError) as exc:
+            payload = {
+                "ok": False,
+                "mode": "read-only",
+                "writes_performed": False,
+                "errors": [str(exc)],
+            }
+        _print_permission_audit(payload, as_json=bool(getattr(args, "as_json", False)))
+        return 0 if payload["ok"] else 2
     print(
         "Usage: hermes nexus "
         "{status|config validate|ingest --dry-run|eval --shadow|review ...|"
-        "rebuild|search|reminders --emit-local|retention --dry-run}"
+        "rebuild|search|reminders --emit-local|retention --dry-run|audit permissions}"
     )
     return 2
 
@@ -394,6 +414,26 @@ def _print_retention_payload(payload: dict[str, Any], *, as_json: bool) -> None:
             f"rejected candidates: {rejected.get('total_items', 0)} item(s), "
             f"{rejected.get('expired_items', 0)} expired"
         )
+
+
+def _print_permission_audit(payload: dict[str, Any], *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return
+    if not payload.get("ok", False) and "private_data" not in payload:
+        for error in payload.get("errors", []):
+            print(f"error: {error}")
+        return
+    print("NEXUS permission audit — read-only; no writes performed")
+    for key in ("private_data", "inbox"):
+        item = payload.get(key, {})
+        if isinstance(item, dict):
+            state = "absent" if not item.get("present", False) else "present"
+            print(
+                f"{key}: {state}, {item.get('checked_entries', 0)} checked, "
+                f"{item.get('insecure_entries', 0)} insecure, "
+                f"{item.get('unsafe_entries', 0)} unsafe"
+            )
 
 
 __all__ = ["configure_parser", "run_command"]
