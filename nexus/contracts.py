@@ -349,6 +349,7 @@ class ReviewItem:
     source_refs: tuple[SourceRef, ...]
     status: ReviewStatus = ReviewStatus.PENDING
     decision: dict[str, Any] | None = None
+    publication: dict[str, Any] | None = None
     schema_version: int = SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -360,3 +361,7 @@ class ReviewItem:
         if not self.reason_codes:
             raise ContractError("review item must include at least one reason code")
         _require_source_refs(self.source_refs, "source_refs")
+        if self.decision is not None and not isinstance(self.decision, dict):
+            raise ContractError("review decision must be an object or null")
+        if self.publication is not None and not isinstance(self.publication, dict):
+            raise ContractError("review publication must be an object or null")

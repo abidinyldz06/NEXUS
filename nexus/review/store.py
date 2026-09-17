@@ -57,6 +57,7 @@ def _review_item(payload: object) -> ReviewItem:
             source_refs=tuple(_source_ref(item) for item in payload["source_refs"]),
             status=ReviewStatus(payload["status"]),
             decision=payload.get("decision"),
+            publication=payload.get("publication"),
             schema_version=payload.get("schema_version", 1),
         )
     except (KeyError, TypeError, ValueError) as exc:
@@ -113,6 +114,21 @@ class ReviewStore:
                 if item.id in items:
                     raise ReviewStoreError("duplicate review create event")
                 items[item.id] = item
+                continue
+            if action == "publish":
+                item_id = event.get("item_id")
+                item = items.get(item_id)
+                if item is None or item.status not in {
+                    ReviewStatus.APPROVED,
+                    ReviewStatus.EDITED,
+                }:
+                    raise ReviewStoreError("publication has no approved review decision")
+                publication = event.get("publication")
+                if not isinstance(publication, dict):
+                    raise ReviewStoreError("review publication audit must be an object")
+                if item.publication is not None:
+                    raise ReviewStoreError("duplicate review publication event")
+                items[item_id] = replace(item, publication=dict(publication))
                 continue
             if action not in {"approve", "reject", "edit"}:
                 raise ReviewStoreError(f"unknown review action at line {line_number}")
@@ -207,6 +223,40 @@ class ReviewStore:
         if edited_candidate is not None:
             event["candidate"] = to_primitive(edited_candidate)
         self._append(event)
+        return self.get(item_id)
+
+    def record_publication(
+        self,
+        item_id: str,
+        *,
+        record_id: str,
+        content_sha256: str,
+        run_id: str,
+    ) -> ReviewItem:
+        current = self.get(item_id)
+        if current.status not in {ReviewStatus.APPROVED, ReviewStatus.EDITED}:
+            raise ReviewStoreError("only approved or edited review items can be published")
+        publication = {
+            "record_id": record_id,
+            "content_sha256": content_sha256,
+            "run_id": run_id,
+            "published_at": _now(),
+        }
+        if current.publication is not None:
+            comparable = {
+                key: current.publication.get(key) for key in ("record_id", "content_sha256")
+            }
+            expected = {key: publication[key] for key in comparable}
+            if comparable != expected:
+                raise ReviewStoreError("review item has a conflicting publication audit")
+            return current
+        self._append(
+            {
+                "action": "publish",
+                "item_id": item_id,
+                "publication": publication,
+            }
+        )
         return self.get(item_id)
 
     def _append(self, event: dict[str, Any]) -> None:

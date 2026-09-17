@@ -19,7 +19,7 @@ from .ids import IdPrefix, is_nexus_id, new_id
 from .index import RebuildResult, rebuild_index
 from .index.rebuild import scan_canonical_records
 from .index.store import IndexedRecord
-from .vault.renderer import render_safe_pre
+from .vault.rebuild_views import MemoryViewEntry, render_memory_view_entries
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,30 +166,17 @@ def _atomic_write(path: Path, content: bytes, *, mode: int = 0o600) -> None:
 
 
 def _render_memory_view(records: tuple[IndexedRecord, ...]) -> bytes:
-    active = sorted(
-        (record for record in records if record.kind == "memory" and record.status == "active"),
-        key=lambda record: record.record_id,
-    )
-    lines = [
-        "---",
-        "managed_by: nexus",
-        "generated: true",
-        "---",
-        "",
-        "# Current Memory",
-        "",
-        "This view is generated from active canonical records.",
-        "",
-    ]
-    for record in active:
-        relative = Path(record.relative_path).relative_to("Nexus").with_suffix("")
-        lines.extend(
-            [
-                f"- [[../{relative.as_posix()}|{record.record_id}]]",
-                f"  {render_safe_pre(record.title)}",
-            ]
+    entries = (
+        MemoryViewEntry(
+            record_id=record.record_id,
+            summary=record.title,
+            status=record.status,
+            relative_path=Path(record.relative_path),
         )
-    return ("\n".join(lines) + "\n").encode("utf-8")
+        for record in records
+        if record.kind == "memory"
+    )
+    return render_memory_view_entries(entries).encode("utf-8")
 
 
 def _append_audit(data_path: Path, payload: dict[str, object]) -> None:

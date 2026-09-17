@@ -206,6 +206,7 @@
         },
         "status": { "$ref": "#/$defs/reviewStatus" },
         "decision": { "type": ["object", "null"] },
+        "publication": { "type": ["object", "null"] },
         "schema_version": { "$ref": "#/$defs/schemaVersion" }
       }
     }

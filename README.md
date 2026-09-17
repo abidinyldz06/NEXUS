@@ -51,6 +51,13 @@ Silme, generated memory view ve disposable SQLite indeks birlikte güncellenir;
 hata durumunda önceki byte'lar geri yüklenir. Workflow kurulu kopyada sentetik
 testlerle kabul edilmiştir; production canonical kayıt silinmemiştir.
 
+Altıncı dar dilim, onaylanmış veya düzenlenmiş bir `memory` review adayını
+canonical Vault'a taşımak için açık publish workflow'u ekler. Dry-run yazmaz;
+apply aynı review ID'nin birebir doğrulanmasını ister, deterministik record ID
+kullanır, source reference'ları korur, Current-Memory view'i ve derived indeksi
+yeniler ve private publication audit'i ekler. Bu komut otomatik yayın değildir;
+production apply ayrıca hedefe özel operasyon onayı gerektirir.
+
 Paketlenmiş iki-vakalı frozen holdout, aktif `ollama-cloud` / `glm-5.3` rotasında
 shadow modda başarıyla çalışmıştır. Bu sonuç Phase 3 contract kapısını doğrular;
 geniş model-kalitesi kanıtı veya auto-publish yetkisi değildir.
@@ -123,6 +130,8 @@ hermes nexus review show REV_ID
 hermes nexus review approve REV_ID
 hermes nexus review reject REV_ID
 hermes nexus review edit REV_ID --candidate-file /absolute/path/candidate.json
+hermes nexus review publish REV_ID --dry-run
+hermes nexus review publish REV_ID --apply --confirm REV_ID
 hermes nexus rebuild
 hermes nexus search "Türk kahvesi" --kind memory
 hermes nexus reminders --emit-local
@@ -150,6 +159,12 @@ yazmadan inceler. `--apply` yalnız aynı ID `--confirm` ile tekrar verildiğind
 bağımlılık sayısı sıfırken hedefi siler, memory view'i yeniler, indeksi rebuild eder
 ve içeriksiz private audit olayı yazar. Bu kayıt-bazlı workflow raw/quarantine
 dosyalarını veya subject-wide kişisel veri kopyalarını temizlemez.
+`review publish REV_ID --dry-run` yalnız APPROVED/EDITED durumundaki `memory`
+adayını ve deterministik hedefini doğrular. `--apply --confirm REV_ID` canonical
+kaydı, generated view'i ve derived indeksi günceller; aynı içeriğin tekrarı
+idempotent'tır. Canonical commit sonrasında private review audit yazımı geçici
+olarak başarısız olursa komut hata verir; aynı apply komutunun tekrarı eksik audit'i
+tamamlar ve canonical kaydı yeniden yazmaz.
 `audit permissions` yalnız metadata ve toplu sorun sayılarını okur; dosya yolu,
 isim veya içerik basmaz ve izinleri değiştirmez.
 `drill restore --synthetic` yalnız sistem geçici dizininde sentetik kayıt, snapshot
@@ -163,6 +178,8 @@ Backup sınıflandırması ve restore güvenlik sınırı:
 [`docs/backup-policy.md`](docs/backup-policy.md).
 Canonical kayıt unutma güvenlik akışı:
 [`docs/forget-workflow.md`](docs/forget-workflow.md).
+Onaylı hafıza yayınlama güvenlik akışı:
+[`docs/publication-workflow.md`](docs/publication-workflow.md).
 
 Extraction servisi yalnız plugin-owned `nexus_extract` auxiliary task'ını kullanır;
 provider/model override istemez ve adayları hiçbir yere yayınlamaz.

@@ -11,6 +11,10 @@ not implement retention deletion, event-log compaction, subject-wide privacy
 erasure, production backup/restore or production Vault Git history. Production
 canonical data has not been deleted.
 
+A sixth source-branch slice implements explicit approved-memory publication.
+It is limited to APPROVED/EDITED memory review items, requires dry-run or exact
+ID-confirmed apply, and does not enable unattended publishing.
+
 ## Implemented
 
 - `hermes nexus retention --dry-run` explicit safety gate.
@@ -43,10 +47,21 @@ canonical data has not been deleted.
   and content-free private audit.
 - Exact-byte target/view/index rollback when rebuild or audit fails, with
   fail-closed handling for concurrent changes.
+- Read-only approved-memory publication planning with a deterministic target ID.
+- Exact-review-ID apply gate, closed candidate shape, preserved provenance and
+  validation of canonical entity references.
+- Atomic canonical memory and Current-Memory view write followed by derived-index
+  rebuild and a private publication event.
+- Idempotent repeat apply and recovery of a missing private review audit without
+  rewriting canonical Vault bytes.
+- Exact target/view rollback when initial publication index rebuild fails.
 
 ## Verification
 
 - Python 3.11 unit tests: 114 passed on `main` and the installed plugin copy.
+- Approved-memory publication source branch: 120 Python 3.11 tests passed,
+  including CLI dry-run/apply, provenance, idempotency, rollback and audit-retry
+  coverage. Installed-copy acceptance remains pending until merge.
 - Old/fresh raw and quarantine boundaries passed.
 - Rejected candidate expiry passed while preserving the append-only event log.
 - Symlinked data path failed closed; nested symlink entries were not followed.
@@ -123,6 +138,8 @@ canonical data has not been deleted.
   installed acceptance used temporary synthetic files only.
 - Phase 7 local-only reminder canary remains time-gated through seven scheduled
   runs before final v0.1 acceptance.
+- No production memory publication has been authorized or applied. The new
+  workflow has been exercised only against temporary synthetic Vaults.
 
 ## Delivery state
 

@@ -73,6 +73,10 @@ class ForgetError(NexusError):
     """A requested forget operation cannot be completed safely."""
 
 
+class PublicationError(NexusError):
+    """An approved review item cannot be published safely."""
+
+
 class RestoreDrillError(NexusError):
     """An isolated synthetic restore drill failed its parity checks."""
 
