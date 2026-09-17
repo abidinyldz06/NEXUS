@@ -4,12 +4,11 @@ Date: 2026-09-17
 
 ## Current slices
 
-Three merged Phase 8 slices implement a fail-closed, read-only retention planner,
-a metadata-only permission audit and a temporary synthetic restore drill. They
-do not implement deletion, event-log
-compaction, forget, production backup/restore or Git rollback operations.
-A fourth source-branch slice adds a temporary synthetic external git-dir rollback
-drill without enabling production Vault history.
+Four merged Phase 8 slices implement a fail-closed, read-only retention planner,
+a metadata-only permission audit, a temporary synthetic restore drill and a
+temporary synthetic external git-dir rollback drill. They do not implement
+deletion, event-log compaction, forget, production backup/restore or production
+Vault Git history.
 
 ## Implemented
 
@@ -39,7 +38,7 @@ drill without enabling production Vault history.
 
 ## Verification
 
-- Python 3.11 unit tests: 109 passed on the source branch.
+- Python 3.11 unit tests: 109 passed on the merged implementation.
 - Old/fresh raw and quarantine boundaries passed.
 - Rejected candidate expiry passed while preserving the append-only event log.
 - Symlinked data path failed closed; nested symlink entries were not followed.
@@ -79,6 +78,17 @@ drill without enabling production Vault history.
 - Synthetic Git rollback tests cover six-file parity, external metadata, absence
   of a worktree `.git` entry, missing-Git failure, symlinked-parent rejection and
   the CLI safety gate without reading user config.
+- PR #15 was squash-merged to `main` as
+  `74ebf71ea5f065c6b133543b5440cf88d847af83`; the active Hermes plugin is pinned
+  to that exact commit and Plugin Doctor passes on the installed copy.
+- The gateway restarted under launchd with PID `23427`. Production execution of
+  `drill git-rollback --synthetic --json` verified six files, external metadata,
+  no worktree `.git` entry, controlled mutation detection, exact-commit rollback,
+  hash parity, a clean worktree, private permissions and cleanup.
+- The Git drill reported no production path access or writes. Production SQLite
+  mode `0600`, size `57344`, SHA-256
+  `a1a098d0006b1bf51896d575884a354d8201559455fae5d2ddedd5de5456c0fa` and the
+  private file count remained unchanged, and no temporary drill directory remained.
 
 ## Not yet delivered
 
@@ -86,19 +96,17 @@ drill without enabling production Vault history.
 - No forget workflow.
 - No production backup archive or real-data restore; the encryption/exclusion
   policy is exercised only with temporary synthetic data.
-- No production Vault external git-dir rollback canary; the source-branch drill
-  uses temporary synthetic files only.
+- No production Vault external git-dir rollback canary or real Vault Git history;
+  installed acceptance used temporary synthetic files only.
 - Phase 7 local-only reminder canary remains time-gated through seven scheduled
   runs before final v0.1 acceptance.
 
 ## Delivery state
 
-The retention dry-run, permission-audit/backup-policy and synthetic restore-drill
-slices are merged, installed and accepted within their narrow safety boundaries.
+The retention dry-run, permission-audit/backup-policy, synthetic restore-drill
+and synthetic Git rollback slices are merged, installed and accepted within
+their narrow safety boundaries.
 Retention found no expiry candidates, permission audit found no insecure or
-unsafe entries, and restore verification used temporary synthetic data only. No
-retention deletion, permission repair or production backup capability exists.
-
-The synthetic Git rollback slice is local on
-`codex/nexus-phase8-git-rollback-drill` and published as PR #15; it has not been
-merged or installed in the active Hermes plugin.
+unsafe entries, and both drill verifications used temporary synthetic data only.
+No retention deletion, permission repair, production backup capability or
+production Vault Git history exists.

@@ -6,9 +6,9 @@ rebuild edilebilir SQLite indeks ve commitments hatırlatmalarını kapsar.
 
 ## Güncel durum
 
-Phase 7 ile Phase 8 retention, permission-audit ve synthetic restore-drill
-dilimleri `main` dalına birleştirilmiş ve tam merge commit'i aktif Hermes
-plugin'ine kurulmuştur. Mevcut
+Phase 7 ile Phase 8 retention, permission-audit, synthetic restore-drill ve
+synthetic external git-dir rollback dilimleri `main` dalına birleştirilmiş ve tam
+merge commit'i aktif Hermes plugin'ine kurulmuştur. Mevcut
 kod güvenli plugin/CLI iskeleti, source adapter'ları, idempotent source state,
 deterministik segmenter,
 provenance zorunlu structured extraction, exact-only entity resolver,
@@ -16,9 +16,9 @@ deterministik policy, tekrar oynatılabilir review kuyruğu ve atomik canonical
 Vault writer, disposable SQLite FTS5 indeks ve local-only Pulse scanner içerir.
 ChatGPT adapter gerçek
 export doğrulanana kadar experimental'dır. Aktif kurulum merge commit'i
-`6690fd83c4f0d63bb2df21e8761b781c2f2bc458` ile sabitlenmiş; Plugin Doctor,
+`74ebf71ea5f065c6b133543b5440cf88d847af83` ile sabitlenmiş; Plugin Doctor,
 local/no-agent reminder canary, retention dry-run ve salt-okunur production
-permission audit ile synthetic restore drill kullanılarak doğrulanmıştır. Sistem
+permission audit ile iki synthetic drill kullanılarak doğrulanmıştır. Sistem
 hâlâ:
 
 - canonical record auto-publish yapmaz; yalnız explicit local reminder komutu
@@ -38,9 +38,10 @@ yeniden yazma veya izin değiştirme yapmaz.
 ekler. Drill kullanıcı config'ini ve production yollarını okumaz; canonical hash,
 derived-index, private permission ve cleanup eşliğini doğrular.
 
-Dördüncü Phase 8 dilimi kaynak dalda altı sentetik dosyayla external git-dir
-rollback drill'i ekler. Git metadata geçici worktree dışında tutulur; kullanıcı ve
-sistem Git config/template/hook kaynakları yüklenmez.
+Dördüncü Phase 8 dilimi altı sentetik dosyayla external git-dir rollback drill'i
+ekler. Git metadata geçici worktree dışında tutulur; kullanıcı ve sistem Git
+config/template/hook kaynakları yüklenmez. Bu dilim kurulu kopyada kabul
+edilmiştir; production Vault için Git geçmişi oluşturmaz.
 
 Paketlenmiş iki-vakalı frozen holdout, aktif `ollama-cloud` / `glm-5.3` rotasında
 shadow modda başarıyla çalışmıştır. Bu sonuç Phase 3 contract kapısını doğrular;
@@ -102,7 +103,7 @@ Phase kanıtları: [`docs/phase-0-1-status.md`](docs/phase-0-1-status.md) ve
 
 ## Mevcut CLI
 
-Kaynak dalda aşağıdaki güvenli komut yüzeyleri vardır:
+Aktif kurulumda aşağıdaki güvenli komut yüzeyleri vardır:
 
 ```bash
 hermes nexus status
