@@ -6,24 +6,26 @@ rebuild edilebilir SQLite indeks ve commitments hatırlatmalarını kapsar.
 
 ## Güncel durum
 
-Phase 7 kodu `main` dalına birleştirilmiş ve tam merge commit'i aktif Hermes
-plugin'ine kurulmuştur. Mevcut kod güvenli plugin/CLI
+Phase 7 ve ilk Phase 8 retention dilimi `main` dalına birleştirilmiş ve tam
+merge commit'i aktif Hermes plugin'ine kurulmuştur. Mevcut kod güvenli plugin/CLI
 iskeleti, source adapter'ları, idempotent source state, deterministik segmenter,
 provenance zorunlu structured extraction, exact-only entity resolver,
 deterministik policy, tekrar oynatılabilir review kuyruğu ve atomik canonical
 Vault writer, disposable SQLite FTS5 indeks ve local-only Pulse scanner içerir.
 ChatGPT adapter gerçek
-export doğrulanana kadar experimental'dır. Aktif kurulum Phase 7 merge commit'i
-`90fd4f5629c63dbd850d57db7e1a721a21f6097b` ile sabitlenmiş, Plugin Doctor ve
-boş production local-output canary ile doğrulanmıştır. Sistem hâlâ:
+export doğrulanana kadar experimental'dır. Aktif kurulum merge commit'i
+`0d6216ffc64e995a268afc9c20faa8111fadbb1b` ile sabitlenmiş; Plugin Doctor,
+boş production reminder canary ve retention dry-run ile doğrulanmıştır. Sistem
+hâlâ:
 
 - canonical record auto-publish yapmaz; yalnız explicit local reminder komutu
   mevcut commitment'ın `notified_at` state'ini güncelleyebilir,
-- Hermes config/cron/gateway dosyalarını değiştirmez,
+- retention komutundan Hermes config/cron/gateway dosyalarını değiştirmez;
+  reminder canary ayrı olarak local/no-agent çalışır,
 - yalnız açık `eval --shadow` komutunda paketlenmiş sentetik fixture ile model çağrısı yapar,
 - Telegram veya başka bir dış kanala notification göndermez.
 
-Phase 8'in ilk dar parçası olarak retention dry-run kaynak dalda hazırlanmıştır.
+Phase 8'in ilk dar parçası olarak retention dry-run aktif kuruluma alınmıştır.
 Bu komut raw/quarantine dosyaları ile süresi dolmuş rejected candidate'ları yalnız
 toplu sayılarla raporlar; içerik/ID göstermez ve silme veya yeniden yazma yapmaz.
 
