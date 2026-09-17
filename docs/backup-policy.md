@@ -44,7 +44,8 @@ directory, verifies canonical hash and derived-index parity, then removes the
 entire drill directory. Production backup and restore remain separate, explicitly
 approved acceptance gates.
 
-The source branch also contains a synthetic external git-dir rollback drill. It
-uses six temporary files, keeps Git metadata outside the temporary worktree,
-disables external config/templates/hooks, verifies exact rollback parity and
-removes both worktree and metadata. It does not create production Vault history.
+The installed plugin also contains an accepted synthetic external git-dir
+rollback drill. It uses six temporary files, keeps Git metadata outside the
+temporary worktree, disables external config/templates/hooks, verifies exact
+rollback parity and removes both worktree and metadata. It does not create
+production Vault history.
