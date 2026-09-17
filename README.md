@@ -23,6 +23,10 @@ boş production local-output canary ile doğrulanmıştır. Sistem hâlâ:
 - yalnız açık `eval --shadow` komutunda paketlenmiş sentetik fixture ile model çağrısı yapar,
 - Telegram veya başka bir dış kanala notification göndermez.
 
+Phase 8'in ilk dar parçası olarak retention dry-run kaynak dalda hazırlanmıştır.
+Bu komut raw/quarantine dosyaları ile süresi dolmuş rejected candidate'ları yalnız
+toplu sayılarla raporlar; içerik/ID göstermez ve silme veya yeniden yazma yapmaz.
+
 Paketlenmiş iki-vakalı frozen holdout, aktif `ollama-cloud` / `glm-5.3` rotasında
 shadow modda başarıyla çalışmıştır. Bu sonuç Phase 3 contract kapısını doğrular;
 geniş model-kalitesi kanıtı veya auto-publish yetkisi değildir.
@@ -78,7 +82,8 @@ Phase kanıtları: [`docs/phase-0-1-status.md`](docs/phase-0-1-status.md) ve
 [`docs/phase-4-status.md`](docs/phase-4-status.md),
 [`docs/phase-5-status.md`](docs/phase-5-status.md) ve
 [`docs/phase-6-status.md`](docs/phase-6-status.md),
-[`docs/phase-7-status.md`](docs/phase-7-status.md).
+[`docs/phase-7-status.md`](docs/phase-7-status.md) ve
+[`docs/phase-8-status.md`](docs/phase-8-status.md).
 
 ## Mevcut CLI
 
@@ -97,6 +102,7 @@ hermes nexus review edit REV_ID --candidate-file /absolute/path/candidate.json
 hermes nexus rebuild
 hermes nexus search "Türk kahvesi" --kind memory
 hermes nexus reminders --emit-local
+hermes nexus retention --dry-run
 ```
 
 `eval --shadow` yalnız paketlenmiş sentetik frozen holdout'u aktif
@@ -107,6 +113,9 @@ yalnız Vault dışındaki disposable indeksi değiştirir/okur. Mutating ingest
 canonical record publish ve dış-kanal reminder teslimi kapalıdır. Reminder komutu
 yalnız local output üretir ve işlenen canonical commitment'ın notification state'ini
 güvenli biçimde günceller.
+
+`retention --dry-run` yalnız aggregate expiry sayıları üretir. Apply/delete modu
+yoktur; forget workflow ve gerçek retention temizliği ayrı güvenlik kapılarıdır.
 
 Extraction servisi yalnız plugin-owned `nexus_extract` auxiliary task'ını kullanır;
 provider/model override istemez ve adayları hiçbir yere yayınlamaz.

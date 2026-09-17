@@ -15,6 +15,7 @@ from .eval import evaluate_with_llm_report, frozen_fixture_path
 from .index import rebuild_index, search_index
 from .ingest import plan_inbox
 from .pulse import emit_due_reminders
+from .retention import plan_retention
 from .review.commands import configure_review_parser, run_review_command
 
 
@@ -75,6 +76,16 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
         action="store_true",
         help="Required safety gate; mark and print due reminders without sending externally",
     )
+
+    retention = subcommands.add_parser(
+        "retention", help="Inspect private-data expiry without deleting anything"
+    )
+    retention.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Required safety gate; report aggregate expiry counts without writing",
+    )
+    retention.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
 
     parser.set_defaults(func=handler)
 
@@ -197,10 +208,25 @@ def run_command(args: Namespace, ctx: Any) -> int:
         if output:
             print(output)
         return 0
+    if command == "retention":
+        if not bool(getattr(args, "dry_run", False)):
+            print("Phase 8 only supports: hermes nexus retention --dry-run")
+            return 2
+        try:
+            payload = plan_retention(from_plugin_context(ctx)).to_dict()
+        except (NexusError, OSError, ValueError) as exc:
+            payload = {
+                "ok": False,
+                "mode": "dry-run",
+                "writes_performed": False,
+                "errors": [str(exc)],
+            }
+        _print_retention_payload(payload, as_json=bool(getattr(args, "as_json", False)))
+        return 0 if payload["ok"] else 2
     print(
         "Usage: hermes nexus "
         "{status|config validate|ingest --dry-run|eval --shadow|review ...|"
-        "rebuild|search|reminders --emit-local}"
+        "rebuild|search|reminders --emit-local|retention --dry-run}"
     )
     return 2
 
@@ -342,6 +368,32 @@ def _print_index_payload(payload: dict[str, Any], *, as_json: bool) -> None:
     )
     print(f"index: {payload.get('index_path')}")
     print("Vault writes: false")
+
+
+def _print_retention_payload(payload: dict[str, Any], *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return
+    if not payload.get("ok", False):
+        for error in payload.get("errors", []):
+            print(f"error: {error}")
+        return
+    print("NEXUS retention dry-run — no writes performed")
+    for key in ("raw", "quarantine"):
+        item = payload.get(key, {})
+        if isinstance(item, dict):
+            print(
+                f"{key}: {item.get('total_files', 0)} file(s), "
+                f"{item.get('expired_files', 0)} expired, "
+                f"{item.get('expired_bytes', 0)} expired byte(s), "
+                f"{item.get('unsafe_entries', 0)} unsafe entry(s)"
+            )
+    rejected = payload.get("rejected_candidates", {})
+    if isinstance(rejected, dict):
+        print(
+            f"rejected candidates: {rejected.get('total_items', 0)} item(s), "
+            f"{rejected.get('expired_items', 0)} expired"
+        )
 
 
 __all__ = ["configure_parser", "run_command"]
