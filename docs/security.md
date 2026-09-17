@@ -16,6 +16,13 @@ only return JSON matching the NEXUS candidate schema.
 - Relative storage paths are rejected.
 - Review edit input must be an absolute, regular, non-symlink JSON file no larger
   than 1 MiB and must preserve the candidate's existing fields.
+- Phase 5 canonical writer accepts only generated relative paths below `Nexus/`,
+  rejects symlink traversal and requires content-hash preconditions for updates.
+- Untrusted human text is escaped inside `<pre>`; the rebuild payload is
+  deterministic JSON encoded as URL-safe base64 rather than executable Markdown.
+- A transaction failure restores existing records and removes newly created
+  records. If rollback cannot finish, recovery staging is preserved for manual
+  inspection instead of being silently deleted.
 - Runtime/raw directories will be private and remain outside the synced Vault.
 
 ## Known environmental risk
