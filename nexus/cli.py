@@ -59,7 +59,7 @@ def _status_payload(ctx: Any) -> dict[str, Any]:
         return {
             "ok": False,
             "version": __version__,
-            "phase": "0-4-review",
+            "phase": "0-5-writer-disabled",
             "write_enabled": False,
             "errors": [str(exc)],
         }
@@ -68,7 +68,7 @@ def _status_payload(ctx: Any) -> dict[str, Any]:
     return {
         "ok": not errors,
         "version": __version__,
-        "phase": "0-4-review",
+        "phase": "0-5-writer-disabled",
         "write_enabled": False,
         "auto_publish_enabled": config.auto_publish_enabled,
         "sensitive_auto_publish": config.sensitive_auto_publish,

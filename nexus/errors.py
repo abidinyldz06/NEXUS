@@ -39,3 +39,15 @@ class ExtractionError(NexusError):
 
 class ReviewStoreError(NexusError):
     """The append-only review event store is invalid or unsafe."""
+
+
+class VaultError(NexusError):
+    """A canonical Vault operation is invalid or unsafe."""
+
+
+class VaultConflictError(VaultError):
+    """A Vault file changed since the caller's precondition was recorded."""
+
+
+class VaultTransactionError(VaultError):
+    """A Vault transaction failed and was rolled back."""

@@ -6,12 +6,13 @@ rebuild edilebilir SQLite indeks ve commitments hatırlatmalarını kapsar.
 
 ## Güncel durum
 
-Phase 4'ün yerel implementation'ı hazırdır. Mevcut kod güvenli plugin/CLI
+Phase 5'in yerel implementation'ı hazırdır. Mevcut kod güvenli plugin/CLI
 iskeleti, source adapter'ları, idempotent source state, deterministik segmenter,
 provenance zorunlu structured extraction, exact-only entity resolver,
-deterministik policy ve tekrar oynatılabilir review kuyruğu içerir. ChatGPT
-adapter gerçek export doğrulanana kadar experimental'dır. Aktif Hermes kurulumu
-henüz bu yerel Phase 4 dalına yükseltilmedi ve hâlâ:
+deterministik policy, tekrar oynatılabilir review kuyruğu ve atomik canonical
+Vault writer içerir. ChatGPT adapter gerçek export doğrulanana kadar
+experimental'dır. Aktif Hermes kurulumu Phase 4 `main` commitinde kalır; Phase 5
+yalnız geçici Vault testlerinde çalıştırılmıştır ve hâlâ:
 
 - Obsidian Vault'a veya private raw store'a yazmaz,
 - Hermes config/cron/gateway dosyalarını değiştirmez,
@@ -24,7 +25,12 @@ geniş model-kalitesi kanıtı veya auto-publish yetkisi değildir.
 
 Phase 4 review kararları yalnız Vault dışındaki private data dizininde `0600`
 append-only JSONL olayları olarak saklanır. Approve/edit kararı canonical kayıt
-yayınlamaz; bu yetki Phase 5 Vault writer kabulüne kadar kapalıdır.
+yayınlamaz; production canary ve ayrı publish yetkisi verilene kadar kapalıdır.
+
+Phase 5 writer yalnız immutable ID tabanlı sabit `Nexus/` yolları üretir;
+create/update precondition, symlink containment, rollback ve run audit uygular.
+Writer kütüphanesinin hazır olması production auto-publish yetkisi vermez:
+aktif config'te `write_enabled: false` ve `auto_publish_enabled: false` kalır.
 
 Makinece okunabilir v1 kayıt contract'ı
 [`schemas/nexus-v1.schema.json`](schemas/nexus-v1.schema.json) dosyasındadır.
@@ -54,7 +60,8 @@ aktif kullanıcı config'ini veya Vault'u değiştirmez.
 Phase kanıtları: [`docs/phase-0-1-status.md`](docs/phase-0-1-status.md) ve
 [`docs/phase-2-status.md`](docs/phase-2-status.md),
 [`docs/phase-3-status.md`](docs/phase-3-status.md) ve
-[`docs/phase-4-status.md`](docs/phase-4-status.md).
+[`docs/phase-4-status.md`](docs/phase-4-status.md),
+[`docs/phase-5-status.md`](docs/phase-5-status.md).
 
 ## Mevcut CLI
 
