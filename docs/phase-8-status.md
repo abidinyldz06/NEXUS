@@ -100,5 +100,5 @@ unsafe entries, and restore verification used temporary synthetic data only. No
 retention deletion, permission repair or production backup capability exists.
 
 The synthetic Git rollback slice is local on
-`codex/nexus-phase8-git-rollback-drill`; it has not been pushed, merged or
-installed in the active Hermes plugin.
+`codex/nexus-phase8-git-rollback-drill` and published as PR #15; it has not been
+merged or installed in the active Hermes plugin.
