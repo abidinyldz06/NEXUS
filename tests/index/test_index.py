@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import importlib
 import sqlite3
 import tempfile
 import unittest
 from contextlib import closing
 from hashlib import sha256
 from pathlib import Path
+from unittest.mock import patch
 
 from nexus.contracts import (
     Commitment,
@@ -74,6 +76,20 @@ class IndexTests(unittest.TestCase):
                     1,
                     store.connection.execute("SELECT version FROM schema_version").fetchone()[0],
                 )
+
+    def test_migration_uses_the_active_plugin_package_namespace(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "nexus.db"
+            with (
+                patch(
+                    "nexus.migrations.runner.importlib.import_module",
+                    wraps=importlib.import_module,
+                ) as loader,
+                IndexStore(path) as store,
+            ):
+                store.migrate()
+
+            loader.assert_any_call(".001_initial", package="nexus.migrations")
 
     def test_delete_and_rebuild_preserves_canonical_hashes_and_open_count(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

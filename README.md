@@ -11,9 +11,9 @@ iskeleti, source adapter'ları, idempotent source state, deterministik segmenter
 provenance zorunlu structured extraction, exact-only entity resolver,
 deterministik policy, tekrar oynatılabilir review kuyruğu ve atomik canonical
 Vault writer ile disposable SQLite FTS5 indeksini içerir. ChatGPT adapter gerçek
-export doğrulanana kadar experimental'dır. Aktif Hermes kurulumu Phase 5
-`7a12134513f9a8a0af2bf6140d573b8de996ebcb` commitindedir; Phase 6 yalnız geçici
-Vault ve private data dizinlerinde doğrulanmıştır ve hâlâ:
+export doğrulanana kadar experimental'dır. Phase 6 kaynak kodu `main` dalına
+birleştirilmiştir; aktif Hermes kurulumu ayrı bir teslim kapısıdır ve her seferinde
+installed plugin SHA ile ayrıca doğrulanır. Sistem hâlâ:
 
 - Obsidian Vault'a veya private raw store'a yazmaz,
 - Hermes config/cron/gateway dosyalarını değiştirmez,
