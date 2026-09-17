@@ -57,6 +57,24 @@ class ContractTests(unittest.TestCase):
                 notify=True,
             )
 
+    def test_commitment_notification_fields_are_strict(self) -> None:
+        common = {
+            "id": new_id(IdPrefix.COMMITMENT),
+            "summary": "Call Hasan",
+            "actor_entity_id": new_id(IdPrefix.ENTITY),
+            "source_refs": (source_ref(),),
+            "confidence": 0.95,
+            "impact": Impact.LOW,
+            "review_status": ReviewStatus.APPROVED,
+            "timezone": "Europe/Istanbul",
+            "due_date": "2026-09-18",
+            "due_precision": DuePrecision.DAY,
+        }
+        with self.assertRaises(ContractError):
+            Commitment(**common, notify="yes")  # type: ignore[arg-type]
+        with self.assertRaises(ContractError):
+            Commitment(**common, notified_at="not-a-datetime")
+
     def test_serialization_is_deterministic_and_uses_enum_values(self) -> None:
         memory = Memory(
             id=new_id(IdPrefix.MEMORY),

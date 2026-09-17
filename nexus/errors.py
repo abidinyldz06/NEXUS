@@ -55,3 +55,11 @@ class VaultTransactionError(VaultError):
 
 class NexusIndexError(NexusError):
     """The disposable SQLite index cannot be read or rebuilt safely."""
+
+
+class CommitmentError(NexusError):
+    """A commitment date or lifecycle transition is invalid."""
+
+
+class PulseError(NexusError):
+    """The local reminder scanner cannot complete safely."""

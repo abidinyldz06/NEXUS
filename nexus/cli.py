@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import json
+import sys
 from argparse import ArgumentParser, Namespace
 from collections.abc import Callable
 from typing import Any
 
 from . import __version__
 from .config import from_plugin_context
-from .errors import ConfigurationError, NexusIndexError
+from .errors import ConfigurationError, NexusError, NexusIndexError
 from .eval import evaluate_with_llm_report, frozen_fixture_path
 from .index import rebuild_index, search_index
 from .ingest import plan_inbox
+from .pulse import emit_due_reminders
 from .review.commands import configure_review_parser, run_review_command
 
 
@@ -65,6 +67,15 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
     search.add_argument("--limit", type=int, default=20)
     search.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
 
+    reminders = subcommands.add_parser(
+        "reminders", help="Emit due commitments for local no-agent delivery"
+    )
+    reminders.add_argument(
+        "--emit-local",
+        action="store_true",
+        help="Required safety gate; mark and print due reminders without sending externally",
+    )
+
     parser.set_defaults(func=handler)
 
 
@@ -75,7 +86,7 @@ def _status_payload(ctx: Any) -> dict[str, Any]:
         return {
             "ok": False,
             "version": __version__,
-            "phase": "0-6-index",
+            "phase": "0-7-pulse-local",
             "write_enabled": False,
             "errors": [str(exc)],
         }
@@ -84,8 +95,10 @@ def _status_payload(ctx: Any) -> dict[str, Any]:
     return {
         "ok": not errors,
         "version": __version__,
-        "phase": "0-6-index",
-        "write_enabled": False,
+        "phase": "0-7-pulse-local",
+        "write_enabled": not errors and config.write_ready,
+        "write_scope": "reminder-state-only" if not errors and config.write_ready else "none",
+        "reminder_delivery": "local-only",
         "auto_publish_enabled": config.auto_publish_enabled,
         "sensitive_auto_publish": config.sensitive_auto_publish,
         "timezone": config.timezone,
@@ -106,7 +119,10 @@ def _print_payload(payload: dict[str, Any], *, as_json: bool) -> None:
 
     state = "ready" if payload["ok"] else "not ready"
     print(f"NEXUS v{payload['version']} — Phase {payload['phase']} — {state}")
-    print("Vault writes: disabled; SQLite index is derived and rebuildable")
+    if payload.get("write_enabled", False):
+        print("Vault writes: explicit reminder-state updates only; canonical publish disabled")
+    else:
+        print("Vault writes: disabled; SQLite index is derived and rebuildable")
     for key, value in payload.get("paths", {}).items():
         print(f"{key}: {value or '<not configured>'}")
     for error in payload.get("errors", []):
@@ -166,9 +182,25 @@ def run_command(args: Namespace, ctx: Any) -> int:
         payload = _search_payload(args, ctx)
         _print_index_payload(payload, as_json=bool(getattr(args, "as_json", False)))
         return 0 if payload["ok"] else 2
+    if command == "reminders":
+        if not bool(getattr(args, "emit_local", False)):
+            print("Phase 7 only supports: hermes nexus reminders --emit-local")
+            return 2
+        try:
+            config = from_plugin_context(ctx)
+            if config.vault_path is None:
+                raise ConfigurationError("vault_path is not configured")
+            output = emit_due_reminders(config.vault_path, config.index_path)
+        except (NexusError, OSError) as exc:
+            print(f"NEXUS reminder error: {exc}", file=sys.stderr)
+            return 2
+        if output:
+            print(output)
+        return 0
     print(
         "Usage: hermes nexus "
-        "{status|config validate|ingest --dry-run|eval --shadow|review ...|rebuild|search}"
+        "{status|config validate|ingest --dry-run|eval --shadow|review ...|"
+        "rebuild|search|reminders --emit-local}"
     )
     return 2
 
