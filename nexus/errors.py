@@ -63,3 +63,7 @@ class CommitmentError(NexusError):
 
 class PulseError(NexusError):
     """The local reminder scanner cannot complete safely."""
+
+
+class RetentionError(NexusError):
+    """A retention plan cannot be produced without crossing a safety boundary."""

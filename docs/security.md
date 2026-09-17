@@ -35,6 +35,9 @@ only return JSON matching the NEXUS candidate schema.
   content preconditions. A post-write index failure restores exact prior bytes.
 - Cron wrappers use argument-vector subprocess calls with no shell and no agent;
   empty reminder output is silent. No external delivery target is configured.
+- Retention starts as aggregate-only dry-run: raw/quarantine paths are scanned
+  without following symlinks, rejected candidate IDs/content are not printed,
+  and no delete, rewrite or apply mode exists.
 - Runtime/raw directories will be private and remain outside the synced Vault.
 
 ## Known environmental risk

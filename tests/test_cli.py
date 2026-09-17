@@ -102,6 +102,37 @@ class CliTests(unittest.TestCase):
             self.assertEqual(1, payload["summary"]["messages"])
             self.assertFalse((root / "private").exists())
 
+    def test_retention_requires_dry_run_and_reports_aggregate_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_path = Path(directory) / "private"
+            raw_path = data_path / "raw" / "aa"
+            raw_path.mkdir(parents=True)
+            old = raw_path / "old.json"
+            old.write_text("synthetic", encoding="utf-8")
+            os.utime(old, (1, 1))
+            parser = parser_for(
+                FakeContext({"data_path": str(data_path), "raw_retention_days": 1})
+            )
+
+            missing_gate = parser.parse_args(["retention", "--json"])
+            missing_stream = io.StringIO()
+            with contextlib.redirect_stdout(missing_stream):
+                missing_result = missing_gate.func(missing_gate)
+
+            args = parser.parse_args(["retention", "--dry-run", "--json"])
+            stream = io.StringIO()
+            with contextlib.redirect_stdout(stream):
+                result = args.func(args)
+
+            payload = json.loads(stream.getvalue())
+            self.assertEqual(2, missing_result)
+            self.assertIn("only supports", missing_stream.getvalue())
+            self.assertEqual(0, result)
+            self.assertTrue(payload["ok"])
+            self.assertFalse(payload["writes_performed"])
+            self.assertEqual(1, payload["raw"]["expired_files"])
+            self.assertTrue(old.exists())
+
     def test_eval_requires_explicit_shadow_gate(self) -> None:
         parser = parser_for(FakeContext())
         args = parser.parse_args(["eval", "--json"])
