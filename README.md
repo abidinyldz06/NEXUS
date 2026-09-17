@@ -16,7 +16,7 @@ deterministik policy, tekrar oynatılabilir review kuyruğu ve atomik canonical
 Vault writer, disposable SQLite FTS5 indeks ve local-only Pulse scanner içerir.
 ChatGPT adapter gerçek
 export doğrulanana kadar experimental'dır. Aktif kurulum merge commit'i
-`79aa60329f32f201fb67612132d41205e6a03c0b` ile sabitlenmiş; Plugin Doctor,
+`bd46229aefbddfc76849f3223044d77658fb812e` ile sabitlenmiş; Plugin Doctor,
 local/no-agent reminder canary, retention dry-run ve salt-okunur production
 permission audit, iki synthetic drill, yazmasız canonical forget ve approved
 memory publish dry-run'ları ile doğrulanmıştır. Sistem

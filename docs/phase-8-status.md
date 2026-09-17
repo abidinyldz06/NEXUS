@@ -58,9 +58,7 @@ dry-run or exact ID-confirmed apply, and does not enable unattended publishing.
 
 ## Verification
 
-- Python 3.11 unit tests: 120 passed on `main` and the installed plugin copy.
-- Hermes export permission hardening source branch: 121 tests passed; installed
-  acceptance remains pending until merge.
+- Python 3.11 unit tests: 121 passed on `main` and the installed plugin copy.
 - Approved-memory publication coverage includes CLI dry-run/apply, provenance,
   idempotency, rollback, audit retry and legacy v1 schema compatibility.
 - Old/fresh raw and quarantine boundaries passed.
@@ -148,6 +146,15 @@ dry-run or exact ID-confirmed apply, and does not enable unattended publishing.
   `auto_publish_enabled=false`, the corrected write scope and no config errors.
 - Direct launchd inspection after the final restart showed the gateway running
   with PID `85639`.
+- PR #22 was squash-merged to `main` as
+  `bd46229aefbddfc76849f3223044d77658fb812e`; the active Hermes plugin is pinned
+  to that exact commit, 121 installed-copy tests pass and Plugin Doctor passes.
+- The installed real-session canary exported one ended Hermes session with
+  official `--redact`, parsed one conversation and two messages, kept both
+  messages extractable, finalized the temporary JSONL at `0600` and removed it
+  without printing content or session identity.
+- Direct launchd inspection after this install showed the gateway running with
+  PID `92561`.
 
 ## Not yet delivered
 
