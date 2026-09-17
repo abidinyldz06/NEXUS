@@ -38,6 +38,11 @@ class JsonSchemaTests(unittest.TestCase):
                 source_refs = definitions[name]["properties"]["source_refs"]
                 self.assertEqual(1, source_refs["minItems"])
 
+    def test_review_publication_is_optional_for_legacy_v1_records(self) -> None:
+        review = self.schema["$defs"]["reviewItem"]
+        self.assertIn("publication", review["properties"])
+        self.assertNotIn("publication", review["required"])
+
 
 if __name__ == "__main__":
     unittest.main()

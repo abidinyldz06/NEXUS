@@ -191,7 +191,7 @@
       "additionalProperties": false,
       "required": [
         "id", "candidate_kind", "candidate_fingerprint", "reason_codes", "candidate",
-        "source_refs", "status", "decision", "publication", "schema_version"
+        "source_refs", "status", "decision", "schema_version"
       ],
       "properties": {
         "id": { "type": "string", "pattern": "^rev_[0-9a-f]{32}$" },

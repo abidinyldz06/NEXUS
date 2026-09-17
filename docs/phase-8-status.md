@@ -59,7 +59,7 @@ ID-confirmed apply, and does not enable unattended publishing.
 ## Verification
 
 - Python 3.11 unit tests: 114 passed on `main` and the installed plugin copy.
-- Approved-memory publication source branch: 119 Python 3.11 tests passed,
+- Approved-memory publication source branch: 120 Python 3.11 tests passed,
   including CLI dry-run/apply, provenance, idempotency, rollback and audit-retry
   coverage. Installed-copy acceptance remains pending until merge.
 - Old/fresh raw and quarantine boundaries passed.
