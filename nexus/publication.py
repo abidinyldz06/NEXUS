@@ -18,10 +18,13 @@ from .contracts import (
     Impact,
     Memory,
     MemoryType,
+    RecordStatus,
     Relation,
     ReviewItem,
     ReviewStatus,
+    SourceRef,
 )
+from .corrections import apply_memory_correction
 from .entity import normalize_alias
 from .errors import ContractError, NexusIndexError, PublicationError, ReviewStoreError, VaultError
 from .ids import IdPrefix, new_id
@@ -66,6 +69,15 @@ _COMMITMENT_FIELDS = {
     "due_precision",
     "target_entity_ids",
     "notify",
+    "extractor",
+}
+_CORRECTION_FIELDS = {
+    "statement",
+    "target_memory_id",
+    "memory_type",
+    "confidence",
+    "impact",
+    "entity_ids",
     "extractor",
 }
 
@@ -127,6 +139,8 @@ class _PublicationAnalysis:
     record_kind: str
     existing_hash: str | None
     records: tuple[IndexedRecord, ...]
+    records_to_write: tuple[PublishRecord, ...]
+    replaced_record: IndexedRecord | None = None
 
 
 def _record_id(review_id: str, record_prefix: IdPrefix) -> str:
@@ -179,6 +193,78 @@ def _memory_from_review(item: ReviewItem) -> Memory:
         )
     except (ContractError, TypeError, ValueError, VaultError) as exc:
         raise PublicationError("memory candidate cannot form a canonical record") from exc
+
+
+def _correction_from_review(item: ReviewItem) -> Memory:
+    candidate = item.candidate
+    if set(candidate) != _CORRECTION_FIELDS:
+        raise PublicationError("correction candidate must match the closed publication shape")
+    statement = candidate.get("statement")
+    target_memory_id = candidate.get("target_memory_id")
+    entity_ids = candidate.get("entity_ids")
+    extractor = candidate.get("extractor")
+    if not isinstance(statement, str) or not statement.strip():
+        raise PublicationError("correction candidate statement must not be empty")
+    if not isinstance(target_memory_id, str):
+        raise PublicationError("correction candidate target_memory_id must be explicit")
+    if not isinstance(entity_ids, list) or not isinstance(extractor, dict):
+        raise PublicationError("correction candidate metadata is invalid")
+    try:
+        enriched_extractor = dict(extractor)
+        enriched_extractor.update({"source": "review", "review_id": item.id})
+        return Memory(
+            id=_record_id(item.id, IdPrefix.MEMORY),
+            type=MemoryType(candidate["memory_type"]),
+            summary=statement.strip(),
+            source_refs=item.source_refs,
+            confidence=candidate["confidence"],
+            impact=Impact(candidate["impact"]),
+            review_status=item.status,
+            entity_ids=tuple(entity_ids),
+            supersedes=(target_memory_id,),
+            extractor=enriched_extractor,
+        )
+    except (ContractError, KeyError, TypeError, ValueError, VaultError) as exc:
+        raise PublicationError("correction candidate cannot form a canonical memory") from exc
+
+
+def _source_ref_from_payload(payload: object) -> SourceRef:
+    if not isinstance(payload, dict):
+        raise PublicationError("correction target has invalid source provenance")
+    try:
+        return SourceRef(
+            source_id=payload["source_id"],
+            conversation_id=payload["conversation_id"],
+            span_ids=tuple(payload["span_ids"]),
+            span_sha256=payload["span_sha256"],
+            excerpt=payload.get("excerpt", ""),
+        )
+    except (ContractError, KeyError, TypeError, ValueError) as exc:
+        raise PublicationError("correction target has invalid source provenance") from exc
+
+
+def _memory_from_indexed(record: IndexedRecord) -> Memory:
+    payload = record.payload
+    try:
+        return Memory(
+            id=payload["id"],
+            type=MemoryType(payload["type"]),
+            summary=payload["summary"],
+            source_refs=tuple(
+                _source_ref_from_payload(item) for item in payload["source_refs"]
+            ),
+            confidence=payload["confidence"],
+            impact=Impact(payload["impact"]),
+            review_status=ReviewStatus(payload["review_status"]),
+            status=RecordStatus(payload["status"]),
+            entity_ids=tuple(payload.get("entity_ids", [])),
+            supersedes=tuple(payload.get("supersedes", [])),
+            superseded_by=payload.get("superseded_by"),
+            extractor=dict(payload.get("extractor", {})),
+            schema_version=payload["schema_version"],
+        )
+    except (ContractError, KeyError, TypeError, ValueError) as exc:
+        raise PublicationError("correction target is not a valid canonical memory") from exc
 
 
 def _commitment_from_review(item: ReviewItem) -> Commitment:
@@ -288,8 +374,11 @@ def _record_from_review(item: ReviewItem) -> tuple[PublishRecord, str]:
         return _entity_from_review(item), "entity"
     if item.candidate_kind == "relation":
         return _relation_from_review(item), "relation"
+    if item.candidate_kind == "correction":
+        return _correction_from_review(item), "correction"
     raise PublicationError(
-        "this publish slice supports memory, commitment, entity or relation review items only"
+        "this publish slice supports memory, commitment, entity, relation "
+        "or correction review items only"
     )
 
 
@@ -314,6 +403,7 @@ def _analyze(config: NexusConfig, review_id: str) -> _PublicationAnalysis:
     item = ReviewStore(config.data_path).get(review_id)
     record, record_kind = _record_from_review(item)
     records = scan_canonical_records(config.vault_path)
+    existing = next((item for item in records if item.record_id == record.id), None)
     entities = {indexed.record_id for indexed in records if indexed.kind == "entity"}
     if isinstance(record, Memory):
         referenced_entities = record.entity_ids
@@ -329,6 +419,28 @@ def _analyze(config: NexusConfig, review_id: str) -> _PublicationAnalysis:
         referenced_entities = ()
     if any(entity_id not in entities for entity_id in referenced_entities):
         raise PublicationError(f"{record_kind} candidate references a missing canonical entity")
+    replaced_record = None
+    records_to_write: tuple[PublishRecord, ...] = (record,)
+    if record_kind == "correction":
+        target_id = record.supersedes[0]
+        replaced_record = next(
+            (indexed for indexed in records if indexed.record_id == target_id),
+            None,
+        )
+        if replaced_record is None or replaced_record.kind != "memory":
+            raise PublicationError("correction target is not an existing canonical memory")
+        if existing is None:
+            previous = _memory_from_indexed(replaced_record)
+            try:
+                superseded, record = apply_memory_correction(previous, record)
+            except VaultError as exc:
+                raise PublicationError("correction target is not an active memory") from exc
+            records_to_write = (superseded, record)
+        elif (
+            replaced_record.status != RecordStatus.SUPERSEDED.value
+            or replaced_record.payload.get("superseded_by") != record.id
+        ):
+            raise PublicationError("correction target does not point to the published replacement")
     if isinstance(record, Entity):
         candidate_names = {
             normalize_alias(record.display_name),
@@ -363,9 +475,9 @@ def _analyze(config: NexusConfig, review_id: str) -> _PublicationAnalysis:
         )
         if duplicate:
             raise PublicationError("relation candidate duplicates an existing active relation")
-    existing = next((item for item in records if item.record_id == record.id), None)
     if existing is not None:
-        if existing.kind != record_kind or existing.payload != to_primitive(record):
+        canonical_kind = "memory" if record_kind == "correction" else record_kind
+        if existing.kind != canonical_kind or existing.payload != to_primitive(record):
             raise PublicationError("deterministic canonical target has conflicting content")
         if item.publication is not None:
             if (
@@ -384,6 +496,8 @@ def _analyze(config: NexusConfig, review_id: str) -> _PublicationAnalysis:
         record_kind=record_kind,
         existing_hash=existing_hash,
         records=records,
+        records_to_write=records_to_write,
+        replaced_record=replaced_record,
     )
 
 
@@ -439,6 +553,7 @@ def _view_write(
 ) -> VaultWrite:
     if not isinstance(analysis.record, Memory):
         raise PublicationError("only memory publication updates Current-Memory view")
+    written_ids = {record.id for record in analysis.records_to_write}
     entries = [
         MemoryViewEntry(
             record_id=record.record_id,
@@ -447,15 +562,17 @@ def _view_write(
             relative_path=Path(record.relative_path),
         )
         for record in analysis.records
-        if record.kind == "memory"
+        if record.kind == "memory" and record.record_id not in written_ids
     ]
-    entries.append(
+    entries.extend(
         MemoryViewEntry(
-            record_id=analysis.record.id,
-            summary=analysis.record.summary,
-            status=analysis.record.status.value,
-            relative_path=repository.record_path(analysis.record),
+            record_id=record.id,
+            summary=record.summary,
+            status=record.status.value,
+            relative_path=repository.record_path(record),
         )
+        for record in analysis.records_to_write
+        if isinstance(record, Memory)
     )
     return VaultWrite(
         Path("Nexus/Views/Current-Memory.md"),
@@ -471,6 +588,9 @@ def _rollback_new_publication(
     view_path: Path | None,
     view_before: bytes | None,
     view_after: bytes | None,
+    replaced_path: Path | None = None,
+    replaced_before: bytes | None = None,
+    replaced_after_hash: str | None = None,
 ) -> None:
     current_target = _read_optional(target_path)
     if current_target is None or sha256(current_target).hexdigest() != created_hash:
@@ -479,8 +599,19 @@ def _rollback_new_publication(
         current_view = _read_optional(view_path)
         if view_after is None or current_view != view_after:
             raise PublicationError("publication rollback refused a concurrent view change")
+    if replaced_path is not None:
+        current_replaced = _read_optional(replaced_path)
+        if (
+            replaced_before is None
+            or replaced_after_hash is None
+            or current_replaced is None
+            or sha256(current_replaced).hexdigest() != replaced_after_hash
+        ):
+            raise PublicationError("publication rollback refused a concurrent target update")
     target_path.unlink()
     _fsync_directory(target_path.parent)
+    if replaced_path is not None and replaced_before is not None:
+        _atomic_write(replaced_path, replaced_before)
     if view_path is not None:
         if view_before is None:
             view_path.unlink()
@@ -531,11 +662,17 @@ def apply_publication(
     target_path = config.vault_path / repository.record_path(analysis.record)
     view_path = (
         config.vault_path / "Nexus" / "Views" / "Current-Memory.md"
-        if analysis.record_kind == "memory"
+        if analysis.record_kind in {"memory", "correction"}
         else None
     )
     view_before = _read_optional(view_path) if view_path is not None else None
     index_before = _read_optional(config.index_path)
+    replaced_path = (
+        config.vault_path / analysis.replaced_record.relative_path
+        if analysis.replaced_record is not None
+        else None
+    )
+    replaced_before = _read_optional(replaced_path) if replaced_path is not None else None
     view_write = (
         _view_write(analysis, repository, view_before)
         if view_path is not None
@@ -543,11 +680,21 @@ def apply_publication(
     )
     try:
         repository.commit_records(
-            (analysis.record,),
+            analysis.records_to_write,
             run_id=run_id,
+            expected_hashes=(
+                {analysis.replaced_record.record_id: analysis.replaced_record.content_sha256}
+                if analysis.replaced_record is not None
+                else None
+            ),
             generated_writes=(view_write,) if view_write is not None else (),
         )
         created_hash = repository.current_hash(analysis.record)
+        replaced_after_hash = (
+            sha256(_read_optional(replaced_path) or b"").hexdigest()
+            if replaced_path is not None
+            else None
+        )
     except (VaultError, OSError) as exc:
         raise PublicationError("canonical publication transaction failed") from exc
 
@@ -561,6 +708,9 @@ def apply_publication(
                 view_path=view_path,
                 view_before=view_before,
                 view_after=view_write.content if view_write is not None else None,
+                replaced_path=replaced_path,
+                replaced_before=replaced_before,
+                replaced_after_hash=replaced_after_hash,
             )
             current_index = _read_optional(config.index_path)
             if current_index != index_before:

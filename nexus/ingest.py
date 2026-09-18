@@ -504,12 +504,11 @@ def _review_candidate(
         }
     return {
         "statement": candidate.statement,
+        "target_memory_id": None,
+        "memory_type": None,
         "confidence": candidate.confidence,
         "impact": impact.value,
-        "entity_mentions": list(candidate.entity_mentions),
-        "temporal_expression": candidate.temporal_expression,
-        "ambiguity_flags": list(candidate.ambiguity_flags),
-        "possible_supersedes": list(candidate.possible_supersedes),
+        "entity_ids": [],
         "extractor": extractor,
     }
 
@@ -592,6 +591,8 @@ def stage_inbox_source(
                 reasons.append("entity_type_required")
             if candidate.kind is CandidateKind.RELATION:
                 reasons.append("relation_fields_required")
+            if candidate.kind is CandidateKind.CORRECTION:
+                reasons.append("correction_fields_required")
             item = create_review_item(
                 candidate_kind=candidate.kind.value,
                 candidate=_review_candidate(

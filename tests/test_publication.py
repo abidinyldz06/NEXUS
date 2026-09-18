@@ -217,7 +217,161 @@ def _approved_relation(
     return store.decide(item.id, action="approve", reason="Relation doğrulandı")
 
 
+def _approved_correction(config: NexusConfig, *, target_memory_id: str):
+    span_id = "msg_correction"
+    store = ReviewStore(config.data_path)
+    item = store.enqueue(
+        create_review_item(
+            candidate_kind="correction",
+            candidate={
+                "statement": "Kullanıcı ayrıntılı ama açık yanıtları tercih ediyor.",
+                "target_memory_id": target_memory_id,
+                "memory_type": "preference",
+                "confidence": 0.98,
+                "impact": "low",
+                "entity_ids": [],
+                "extractor": {"model": "fixture"},
+            },
+            reason_codes=("operator_review", "destructive_correction"),
+            source_refs=(
+                SourceRef(
+                    source_id=new_id(IdPrefix.SOURCE),
+                    conversation_id="conversation-correction",
+                    span_ids=(span_id,),
+                    span_sha256=sha256(span_id.encode()).hexdigest(),
+                ),
+            ),
+        )
+    )
+    return store.decide(item.id, action="approve", reason="Düzeltme hedefi doğrulandı")
+
+
 class PublicationTests(unittest.TestCase):
+    def test_correction_supersedes_one_memory_updates_view_and_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = _config(Path(directory))
+            previous_review = _approved_memory(config)
+            previous_result = apply_publication(
+                config, previous_review.id, confirmation=previous_review.id
+            )
+            correction = _approved_correction(
+                config, target_memory_id=previous_result.record_id
+            )
+
+            plan = plan_publication(config, correction.id)
+            result = apply_publication(config, correction.id, confirmation=correction.id)
+
+            old_path = (
+                config.vault_path
+                / "Nexus/Memory/Preferences"
+                / f"{previous_result.record_id}.md"
+            )
+            new_path = (
+                config.vault_path
+                / "Nexus/Memory/Preferences"
+                / f"{result.record_id}.md"
+            )
+            old_payload = extract_record_payload(old_path.read_text(encoding="utf-8"))
+            new_payload = extract_record_payload(new_path.read_text(encoding="utf-8"))
+            view = (config.vault_path / "Nexus/Views/Current-Memory.md").read_text(
+                encoding="utf-8"
+            )
+
+            self.assertEqual("correction", plan.record_kind)
+            self.assertEqual("correction", result.record_kind)
+            self.assertEqual("superseded", old_payload["status"])
+            self.assertEqual(result.record_id, old_payload["superseded_by"])
+            self.assertEqual([previous_result.record_id], new_payload["supersedes"])
+            self.assertNotIn(previous_result.record_id, view)
+            self.assertIn(result.record_id, view)
+            self.assertEqual(1, len(search_index(config.index_path, "ayrıntılı açık")))
+            repeated = apply_publication(config, correction.id, confirmation=correction.id)
+            self.assertTrue(repeated.already_published)
+            self.assertFalse(repeated.writes_performed)
+
+    def test_correction_index_failure_restores_old_memory_view_and_index(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = _config(Path(directory))
+            previous_review = _approved_memory(config)
+            previous_result = apply_publication(
+                config, previous_review.id, confirmation=previous_review.id
+            )
+            correction = _approved_correction(
+                config, target_memory_id=previous_result.record_id
+            )
+            old_path = (
+                config.vault_path
+                / "Nexus/Memory/Preferences"
+                / f"{previous_result.record_id}.md"
+            )
+            view_path = config.vault_path / "Nexus/Views/Current-Memory.md"
+            old_before = old_path.read_bytes()
+            view_before = view_path.read_bytes()
+            index_before = config.index_path.read_bytes()
+
+            def failing_rebuild(vault_path: Path, index_path: Path):
+                raise NexusIndexError("injected rebuild failure")
+
+            with self.assertRaisesRegex(PublicationError, "was rolled back"):
+                apply_publication(
+                    config,
+                    correction.id,
+                    confirmation=correction.id,
+                    rebuild=failing_rebuild,
+                )
+
+            replacement_id = f"mem_{correction.id.removeprefix('rev_')}"
+            replacement_path = (
+                config.vault_path / "Nexus/Memory/Preferences" / f"{replacement_id}.md"
+            )
+            self.assertFalse(replacement_path.exists())
+            self.assertEqual(old_before, old_path.read_bytes())
+            self.assertEqual(view_before, view_path.read_bytes())
+            self.assertEqual(index_before, config.index_path.read_bytes())
+            self.assertIsNone(ReviewStore(config.data_path).get(correction.id).publication)
+
+    def test_correction_retry_repairs_missing_audit_without_rewriting_vault(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = _config(Path(directory))
+            previous_review = _approved_memory(config)
+            previous_result = apply_publication(
+                config, previous_review.id, confirmation=previous_review.id
+            )
+            correction = _approved_correction(
+                config, target_memory_id=previous_result.record_id
+            )
+
+            with patch.object(
+                ReviewStore,
+                "record_publication",
+                side_effect=ReviewStoreError("injected audit failure"),
+            ), self.assertRaisesRegex(PublicationError, "audit is incomplete"):
+                apply_publication(config, correction.id, confirmation=correction.id)
+
+            old_path = (
+                config.vault_path
+                / "Nexus/Memory/Preferences"
+                / f"{previous_result.record_id}.md"
+            )
+            replacement_id = f"mem_{correction.id.removeprefix('rev_')}"
+            new_path = (
+                config.vault_path / "Nexus/Memory/Preferences" / f"{replacement_id}.md"
+            )
+            vault_before_retry = (old_path.read_bytes(), new_path.read_bytes())
+
+            recovered = apply_publication(
+                config, correction.id, confirmation=correction.id
+            )
+
+            self.assertTrue(recovered.already_published)
+            self.assertTrue(recovered.writes_performed)
+            self.assertFalse(recovered.vault_writes)
+            self.assertEqual(vault_before_retry, (old_path.read_bytes(), new_path.read_bytes()))
+            self.assertEqual(
+                replacement_id,
+                ReviewStore(config.data_path).get(correction.id).publication["record_id"],
+            )
+
     def test_dry_run_is_read_only_and_apply_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = _config(Path(directory))
@@ -727,9 +881,9 @@ class PublicationTests(unittest.TestCase):
             with self.assertRaisesRegex(PublicationError, "approved or edited"):
                 plan_publication(config, pending.id)
 
-            unsupported = _approved_memory(config, kind="correction")
+            unsupported = _approved_memory(config, kind="unsupported")
             with self.assertRaisesRegex(
-                PublicationError, "memory, commitment, entity or relation"
+                PublicationError, "memory, commitment, entity, relation or correction"
             ):
                 plan_publication(config, unsupported.id)
 

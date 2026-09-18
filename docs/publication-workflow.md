@@ -1,7 +1,8 @@
-# Approved memory, entity, relation and commitment publication workflow
+# Approved memory, entity, relation, commitment and correction publication workflow
 
 This workflow is the only v0.1 path from a human-approved review item to a
-canonical memory, entity, relation or commitment record. It does not enable
+canonical memory, entity, relation or commitment state. A correction creates a
+replacement memory and preserves the superseded record. It does not enable
 auto-publish.
 
 ## Eligibility
@@ -40,6 +41,14 @@ parity with the display name and rejects an exact name/alias or linked-note
 collision with an existing entity of the same type. The canonical entity ID is
 deterministically derived from the review ID.
 
+Correction candidates use one closed shape containing `statement`,
+`target_memory_id`, `memory_type`, `confidence`, `impact`, `entity_ids` and
+`extractor`. Staging leaves the target and memory type unresolved; extractor
+suggestions never select a canonical target. Publication requires an operator
+to name one existing active memory. The replacement ID is deterministic, the
+replacement names exactly one predecessor, and the predecessor points back to
+the replacement.
+
 ## Safe sequence
 
 ```bash
@@ -54,7 +63,8 @@ Apply repeats those checks and requires an exact review-ID confirmation.
 A successful initial apply:
 
 1. atomically writes the canonical record; memory publication also updates the
-   generated Current-Memory view while entity/relation/commitment publication does not,
+   generated Current-Memory view, correction atomically updates the predecessor,
+   replacement and view, while entity/relation/commitment publication does not,
 2. rebuilds the disposable SQLite index,
 3. appends a content-free publication event to the private review log.
 
@@ -67,7 +77,8 @@ fails closed.
 - Vault transaction failure leaves the canonical record and any generated view
   unchanged.
 - Index rebuild failure removes the newly created record, restores the previous
-  view bytes and verifies that the prior index was preserved.
+  view bytes and verifies that the prior index was preserved. Correction rollback
+  also restores the predecessor's exact prior bytes.
 - If the private review audit fails after canonical/index commit, the command
   reports an incomplete audit and does not claim rollback. Repeat the exact
   apply command. The retry verifies the deterministic canonical payload,

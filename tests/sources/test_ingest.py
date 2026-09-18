@@ -26,10 +26,12 @@ class StageLlm:
         statement: str = "Kullanıcı kısa yanıtları tercih ediyor.",
         kind: str = "memory",
         entity_mentions: tuple[str, ...] = (),
+        possible_supersedes: tuple[str, ...] = (),
     ) -> None:
         self.statement = statement
         self.kind = kind
         self.entity_mentions = entity_mentions
+        self.possible_supersedes = possible_supersedes
         self.calls = 0
 
     def complete_structured(self, **kwargs):
@@ -48,7 +50,7 @@ class StageLlm:
                         "source_span_ids": [spans[0]["span_id"]],
                         "confidence": 0.96,
                         "ambiguity_flags": [],
-                        "possible_supersedes": [],
+                        "possible_supersedes": list(self.possible_supersedes),
                     }
                 ],
                 "ignored_span_ids": [item["span_id"] for item in spans[1:]],
@@ -356,6 +358,44 @@ class IngestMetadataTests(unittest.TestCase):
             self.assertIsNone(item.candidate["to_entity_id"])
             self.assertIsNone(item.candidate["literal"])
             self.assertIn("relation_fields_required", item.reason_codes)
+
+    def test_staged_correction_has_closed_human_completion_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = _stage_config(Path(directory))
+            discovered = _source(config, "Hayır, ayrıntılı yanıtları tercih ederim.")
+
+            stage_inbox_source(
+                config,
+                StageLlm(
+                    kind="correction",
+                    statement="Kullanıcı ayrıntılı yanıtları tercih ediyor.",
+                    possible_supersedes=("mem_00000000000000000000000000000000",),
+                ),
+                relative_path="note.md",
+                confirmed_sha256=discovered.content_sha256,
+            )
+
+            item = ReviewStore(config.data_path).list()[0]
+            self.assertEqual("correction", item.candidate_kind)
+            self.assertEqual(
+                {
+                    "statement",
+                    "target_memory_id",
+                    "memory_type",
+                    "confidence",
+                    "impact",
+                    "entity_ids",
+                    "extractor",
+                },
+                set(item.candidate),
+            )
+            self.assertIsNone(item.candidate["target_memory_id"])
+            self.assertIsNone(item.candidate["memory_type"])
+            self.assertEqual(
+                ["mem_00000000000000000000000000000000"],
+                item.candidate["extractor"]["possible_supersedes"],
+            )
+            self.assertIn("correction_fields_required", item.reason_codes)
 
 
 if __name__ == "__main__":
