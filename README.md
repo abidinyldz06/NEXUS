@@ -166,6 +166,7 @@ hermes nexus ingest --dry-run
 hermes nexus ingest --shadow --source FILE --confirm-sha SHA256 --conversation ID
 hermes nexus ingest --stage --source FILE --confirm-sha SHA256 --conversation ID
 hermes nexus eval --shadow
+hermes nexus eval --shadow --private-dataset golden-v1.json --confirm-sha SHA256
 hermes nexus review list
 hermes nexus review show REV_ID
 hermes nexus review approve REV_ID
@@ -196,9 +197,13 @@ kuyruğuna ekler. Tekrar çalıştırma review adayını çoğaltmaz; çıktı y
 sayılar verir. Vault'a yazmaz, aday yayınlamaz; memory adayları insanın
 `memory_type`, commitment adayları actor/target/tarih/notification, entity
 adayları entity türü, relation adayları ise uç/predicate seçimini gerektirir.
-`eval --shadow` yalnız paketlenmiş sentetik frozen holdout'u aktif
-`nexus_extract` model yoluna gönderir; aday içeriği yazmaz veya yayınlamaz ve
-yalnız kalite/audit ölçümlerini ekrana verir. Review komutları yalnız private
+`eval --shadow` varsayılan olarak paketlenmiş sentetik frozen holdout'u aktif
+`nexus_extract` model yoluna gönderir. `--private-dataset` ise yalnız
+`data_path/eval/private/` altındaki SHA-onaylı JSON basename'ini kabul eder.
+İki mod da aday içeriği yazmaz veya yayınlamaz ve yalnız kalite/audit ölçümlerini
+ekrana verir. Private fixture hazırlama sözleşmesi
+[`docs/private-golden-eval.md`](docs/private-golden-eval.md) içinde kayıtlıdır.
+Review komutları yalnız private
 olay kaydını değiştirir ve `vault_writes: false` raporlar. `rebuild` ve `search`
 yalnız Vault dışındaki disposable indeksi değiştirir/okur. Ingest mutation yalnız
 exact-source `--stage` ile private raw/state/review alanıyla sınırlıdır; automatic

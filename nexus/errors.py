@@ -37,6 +37,10 @@ class ExtractionError(NexusError):
     """Structured extraction failed without producing a trusted result."""
 
 
+class EvaluationError(NexusError):
+    """A model evaluation fixture is missing, unsafe or does not match approval."""
+
+
 class ReviewStoreError(NexusError):
     """The append-only review event store is invalid or unsafe."""
 

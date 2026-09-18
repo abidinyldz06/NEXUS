@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
+from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 
-from nexus.errors import ExtractionError
+from nexus.errors import EvaluationError, ExtractionError
 from nexus.eval.runner import (
     evaluate_fixture,
     evaluate_with_llm_report,
     frozen_fixture_path,
+    load_private_fixture,
 )
 from nexus.extraction.schema import (
     CandidateKind,
@@ -113,6 +116,91 @@ class FakeLlm:
 
 
 class ExtractionContractTests(unittest.TestCase):
+    def test_private_fixture_requires_safe_basename_regular_file_and_exact_sha(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data_path = Path(directory)
+            private_root = data_path / "eval/private"
+            private_root.mkdir(parents=True)
+            private_root.chmod(0o700)
+            fixture = private_root / "golden-v1.json"
+            fixture.write_text(
+                json.dumps(
+                    {
+                        "fixture_version": 1,
+                        "dataset": "private-golden",
+                        "cases": [
+                            {
+                                "id": "case-1",
+                                "messages": [{"id": "m1", "role": "user", "content": "private"}],
+                                "expected_kinds": [],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            fixture.chmod(0o600)
+            digest = sha256(fixture.read_bytes()).hexdigest()
+
+            loaded = load_private_fixture(data_path, "golden-v1.json", digest)
+            self.assertEqual(fixture.read_bytes(), loaded.content)
+            self.assertEqual(digest, loaded.content_sha256)
+            with self.assertRaisesRegex(EvaluationError, "JSON basename"):
+                load_private_fixture(data_path, "../golden-v1.json", digest)
+            with self.assertRaisesRegex(EvaluationError, "does not match"):
+                load_private_fixture(data_path, "golden-v1.json", "0" * 64)
+
+            fixture.chmod(0o644)
+            with self.assertRaisesRegex(EvaluationError, "owner-only"):
+                load_private_fixture(data_path, "golden-v1.json", digest)
+            fixture.chmod(0o600)
+
+            link = private_root / "linked.json"
+            link.symlink_to(fixture)
+            with self.assertRaisesRegex(EvaluationError, "missing or unsafe"):
+                load_private_fixture(data_path, "linked.json", digest)
+
+            fixture.unlink()
+            metrics = evaluate_fixture(
+                loaded,
+                lambda item: ExtractionResult((), item.span_ids, ()),
+            )
+            self.assertEqual(1, metrics.cases)
+            self.assertEqual(digest, loaded.content_sha256)
+
+    def test_fixture_contract_is_fully_validated_before_any_model_call(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Path(directory) / "invalid.json"
+            fixture.write_text(
+                json.dumps(
+                    {
+                        "cases": [
+                            {
+                                "id": "valid-first-case",
+                                "messages": [{"id": "m1", "role": "user", "content": "Valid"}],
+                                "expected_kinds": [],
+                            },
+                            {
+                                "id": "invalid-second-case",
+                                "messages": [{"id": "m2", "role": "user", "content": "Invalid"}],
+                                "expected_kinds": ["unsupported"],
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            calls = 0
+
+            def extractor(item: ConversationSegment) -> ExtractionResult:
+                nonlocal calls
+                calls += 1
+                return ExtractionResult((), item.span_ids, ())
+
+            with self.assertRaisesRegex(ValueError, "unsupported candidate kind"):
+                evaluate_fixture(fixture, extractor)
+            self.assertEqual(0, calls)
+
     def test_candidate_provenance_and_full_span_accounting_are_required(self) -> None:
         result = validate_extraction_payload(valid_payload(), allowed_span_ids=("m1", "m2"))
         self.assertEqual(("m1",), result.candidates[0].source_span_ids)

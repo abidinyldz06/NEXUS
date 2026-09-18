@@ -27,6 +27,12 @@ only return JSON matching the NEXUS candidate schema.
   SHA-256. Multi-conversation exports also require one exact conversation ID,
   and the 1--100 segment bound is checked before model execution. All extraction
   calls must succeed before private writes begin.
+- Private golden evaluation accepts only a JSON basename below
+  `data_path/eval/private/`, rejects symlinks/path traversal/oversized files and
+  requires owner-only directory/file permissions and the exact lowercase
+  SHA-256 before any model call. Its output keeps
+  messages, labels and candidate statements private and reports aggregate
+  metrics/audit metadata only.
 - Staging writes only owner-private raw/quarantine, source lineage and append-only
   review state. Policy discards are not queued, quarantine decisions are not
   copied into review, reruns reuse candidate fingerprints, memory subtype remains
