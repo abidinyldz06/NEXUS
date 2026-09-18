@@ -299,6 +299,8 @@ class CliTests(unittest.TestCase):
             self.assertFalse(payload["candidates_published"])
             self.assertEqual(1, payload["review"]["created"])
             self.assertEqual(1, len(ReviewStore(root / "private").list()))
+            self.assertNotIn("Kısa yanıtları tercih ederim", stream.getvalue())
+            self.assertNotIn("Synthetic durable preference", stream.getvalue())
             self.assertFalse(vault.exists())
 
     def test_ingest_shadow_requires_conversation_for_multi_conversation_source(self) -> None:
