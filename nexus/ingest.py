@@ -12,6 +12,7 @@ from .config import NexusConfig
 from .commitments import resolve_due
 from .contracts import DuePrecision, Impact, Source, SourceAvailability, SourceRef
 from .errors import ParseError, SourceError
+from .entity import normalize_alias
 from .extraction.schema import CandidateKind, ExtractionCandidate
 from .extraction.service import PROMPT_VERSION, ExtractionOutcome, ExtractionService
 from .fingerprints import stable_hash
@@ -447,6 +448,22 @@ def _review_candidate(
             "entity_ids": [],
             "extractor": extractor,
         }
+    if candidate.kind is CandidateKind.ENTITY:
+        display_name = (
+            candidate.entity_mentions[0]
+            if len(candidate.entity_mentions) == 1
+            else None
+        )
+        return {
+            "display_name": display_name,
+            "normalized_name": (
+                normalize_alias(display_name) if display_name is not None else None
+            ),
+            "entity_type": None,
+            "aliases": [],
+            "linked_notes": [],
+            "extractor": extractor,
+        }
     if candidate.kind is CandidateKind.COMMITMENT:
         source_at = _source_timestamp(segment, candidate)
         if source_at is None:
@@ -560,6 +577,8 @@ def stage_inbox_source(
                 reasons.append("auto_publish_disabled")
             if candidate.kind is CandidateKind.MEMORY:
                 reasons.append("memory_type_required")
+            if candidate.kind is CandidateKind.ENTITY:
+                reasons.append("entity_type_required")
             item = create_review_item(
                 candidate_kind=candidate.kind.value,
                 candidate=_review_candidate(

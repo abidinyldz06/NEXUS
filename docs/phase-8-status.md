@@ -4,15 +4,16 @@ Date: 2026-09-18
 
 ## Current slices
 
-Seven merged Phase 8 slices implement a fail-closed, read-only retention planner,
+Seven merged Phase 8 slices and one locally verified delivery candidate implement
+a fail-closed, read-only retention planner,
 a metadata-only permission audit, temporary synthetic restore and external
 git-dir rollback drills, a record-scoped canonical forget workflow and explicit
-approved memory/commitment publication. They do
+approved memory/entity/commitment publication. They do
 not implement retention deletion, event-log compaction, subject-wide privacy
 erasure, production backup/restore or production Vault Git history. Production
 canonical data has not been deleted.
 
-The publication slices are limited to APPROVED/EDITED memory or commitment
+The publication slices are limited to APPROVED/EDITED memory, entity or commitment
 review items, require dry-run or exact ID-confirmed apply, and do not enable
 unattended publishing.
 
@@ -61,6 +62,9 @@ unattended publishing.
 - Canonical actor/target existence checks, deterministic commitment ID, exact
   review-ID apply, reminder-index rebuild and idempotent replay without changing
   Current-Memory view.
+- Closed entity completion shape with model-unresolved type and audited human
+  edit, deterministic entity ID, normalized-name parity and same-type exact
+  alias/linked-note collision refusal before canonical write/index rebuild.
 
 ## Verification
 
@@ -68,6 +72,8 @@ unattended publishing.
   merge commit `4d745856760f23afb9728dee53952732d21fa8ec`; bytecode compilation,
   diff whitespace checks and Plugin Doctor also passed. GitHub reported no
   configured `main` CI runs for that commit.
+- Current entity-publication branch: 143 tests passed; bytecode compilation,
+  diff whitespace checks and Plugin Doctor also passed.
 - Expanded 12-case live shadow passed with prompt v2 at 100% recall, 90%
   precision, 91.67% exact-case match, 100% empty-case precision/provenance and
   zero schema failures; no writes or publication occurred.
@@ -220,6 +226,8 @@ unattended publishing.
 - No production commitment publication has been authorized or applied. Apply has
   been exercised only against temporary synthetic Vaults, so no production
   commitment or reminder state has been written.
+- Entity publication is locally verified but is not yet merged or installed.
+  No production entity or index state has been written.
 
 ## Delivery state
 

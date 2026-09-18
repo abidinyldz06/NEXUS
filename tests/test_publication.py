@@ -118,6 +118,39 @@ def _approved_commitment(config: NexusConfig):
     return store.decide(item.id, action="approve", reason="Commitment doğrulandı")
 
 
+def _approved_entity(
+    config: NexusConfig,
+    *,
+    display_name: str = "Hasan Usta",
+    linked_notes: list[str] | None = None,
+):
+    span_id = "msg_entity"
+    store = ReviewStore(config.data_path)
+    item = store.enqueue(
+        create_review_item(
+            candidate_kind="entity",
+            candidate={
+                "display_name": display_name,
+                "normalized_name": display_name.casefold(),
+                "entity_type": "person",
+                "aliases": [],
+                "linked_notes": linked_notes or [],
+                "extractor": {"model": "fixture"},
+            },
+            reason_codes=("operator_review",),
+            source_refs=(
+                SourceRef(
+                    source_id=new_id(IdPrefix.SOURCE),
+                    conversation_id="conversation-entity",
+                    span_ids=(span_id,),
+                    span_sha256=sha256(span_id.encode()).hexdigest(),
+                ),
+            ),
+        )
+    )
+    return store.decide(item.id, action="approve", reason="Entity doğrulandı")
+
+
 class PublicationTests(unittest.TestCase):
     def test_dry_run_is_read_only_and_apply_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -212,6 +245,123 @@ class PublicationTests(unittest.TestCase):
             self.assertFalse((config.vault_path / "Nexus/Views/Current-Memory.md").exists())
             self.assertEqual(index_before, config.index_path.read_bytes())
             self.assertIsNone(ReviewStore(config.data_path).get(item.id).publication)
+
+    def test_entity_publish_is_indexed_idempotent_and_has_no_memory_view(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = _config(Path(directory))
+            item = _approved_entity(config)
+            assert config.vault_path is not None
+
+            plan = plan_publication(config, item.id)
+            result = apply_publication(config, item.id, confirmation=item.id)
+            record_path = (
+                config.vault_path / "Nexus/Entities/People" / f"{result.record_id}.md"
+            )
+            payload = extract_record_payload(record_path.read_text(encoding="utf-8"))
+
+            self.assertEqual("entity", plan.record_kind)
+            self.assertEqual("entity", result.record_kind)
+            self.assertEqual("Hasan Usta", payload["display_name"])
+            self.assertEqual(1, len(search_index(config.index_path, "Hasan Usta")))
+            self.assertFalse((config.vault_path / "Nexus/Views/Current-Memory.md").exists())
+            repeated = apply_publication(config, item.id, confirmation=item.id)
+            self.assertTrue(repeated.already_published)
+            self.assertFalse(repeated.writes_performed)
+
+    def test_entity_publish_rejects_exact_typed_alias_collision(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = _config(Path(directory))
+            first = _approved_entity(config)
+            apply_publication(config, first.id, confirmation=first.id)
+            duplicate = _approved_entity(config, display_name="HASAN USTA")
+
+            with self.assertRaisesRegex(PublicationError, "exact typed alias"):
+                plan_publication(config, duplicate.id)
+
+    def test_entity_publish_rejects_exact_typed_linked_note_collision(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = _config(Path(directory))
+            first = _approved_entity(
+                config,
+                display_name="Hasan Usta",
+                linked_notes=["Kisiler/Hasan-Usta.md"],
+            )
+            apply_publication(config, first.id, confirmation=first.id)
+            duplicate = _approved_entity(
+                config,
+                display_name="H. Usta",
+                linked_notes=["Kisiler/Hasan-Usta.md"],
+            )
+
+            with self.assertRaisesRegex(PublicationError, "linked note"):
+                plan_publication(config, duplicate.id)
+
+    def test_staged_entity_can_be_human_completed_and_published(self) -> None:
+        class EntityLlm:
+            def complete_structured(self, **kwargs):
+                envelope = json.loads(kwargs["input"][0]["text"].split("\n", 1)[1])
+                span_id = envelope["spans"][0]["span_id"]
+                return SimpleNamespace(
+                    parsed={
+                        "schema_version": 1,
+                        "candidates": [
+                            {
+                                "kind": "entity",
+                                "statement": "Hasan Usta kişisi.",
+                                "entity_mentions": ["Hasan Usta"],
+                                "temporal_expression": None,
+                                "source_span_ids": [span_id],
+                                "confidence": 0.97,
+                                "ambiguity_flags": [],
+                                "possible_supersedes": [],
+                            }
+                        ],
+                        "ignored_span_ids": [],
+                        "warnings": [],
+                    },
+                    provider="fixture-provider",
+                    model="fixture-model",
+                    agent_id="fixture-agent",
+                    usage=SimpleNamespace(input_tokens=10, output_tokens=5, total_tokens=15),
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = _config(root)
+            inbox = root / "inbox"
+            inbox.mkdir()
+            config = NexusConfig(
+                vault_path=config.vault_path,
+                inbox_path=inbox,
+                data_path=config.data_path,
+                source_stable_seconds=1,
+            )
+            note = inbox / "entity.md"
+            note.write_text("Hasan Usta benim tesisatçım.", encoding="utf-8")
+            old = time.time() - 60
+            os.utime(note, (old, old))
+            discovered = discover_inbox(inbox, stable_seconds=1).accepted[0]
+            stage_inbox_source(
+                config,
+                EntityLlm(),
+                relative_path=note.name,
+                confirmed_sha256=discovered.content_sha256,
+            )
+            store = ReviewStore(config.data_path)
+            pending = store.list()[0]
+            completed = dict(pending.candidate)
+            completed["entity_type"] = "person"
+            edited = store.decide(
+                pending.id,
+                action="edit",
+                reason="Entity türü doğrulandı",
+                edited_candidate=completed,
+            )
+
+            result = apply_publication(config, edited.id, confirmation=edited.id)
+
+            self.assertEqual("entity", result.record_kind)
+            self.assertEqual(1, len(search_index(config.index_path, "Hasan Usta")))
 
     def test_staged_commitment_can_be_human_completed_and_published(self) -> None:
         class CommitmentLlm:
@@ -345,8 +495,8 @@ class PublicationTests(unittest.TestCase):
             with self.assertRaisesRegex(PublicationError, "approved or edited"):
                 plan_publication(config, pending.id)
 
-            unsupported = _approved_memory(config, kind="entity")
-            with self.assertRaisesRegex(PublicationError, "memory or commitment"):
+            unsupported = _approved_memory(config, kind="relation")
+            with self.assertRaisesRegex(PublicationError, "memory, commitment or entity"):
                 plan_publication(config, unsupported.id)
 
             approved = _approved_memory(config)

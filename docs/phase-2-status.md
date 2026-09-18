@@ -40,6 +40,9 @@ queue, while keeping the canonical Vault and publication path untouched.
 - Extracted commitment candidates use a closed completion shape with unresolved
   actor and `notify=false`; actor/target/date/notification choices remain an
   audited human edit rather than model authority.
+- Extracted entity candidates use a closed completion shape with unresolved
+  entity type. A single mention may prefill the display/normalized name, but the
+  canonical type remains an audited human choice.
 
 ## Verification
 
@@ -64,6 +67,8 @@ queue, while keeping the canonical Vault and publication path untouched.
 - Current merged and installed suite: 137 tests passed. Shadow coverage proves exact SHA,
   aggregate-only output, no private writes, explicit multi-conversation selection
   and pre-model segment-limit refusal.
+- Current entity-publication branch: 143 tests passed; staging keeps entity type
+  unresolved until an audited human edit.
 - Synthetic stage coverage proves wrong-SHA and model-failure zero-write behavior,
   owner-only raw/state modes, review idempotency, quarantine routing and zero
   Vault writes. No configured production Inbox source was staged.

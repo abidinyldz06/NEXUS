@@ -6,6 +6,8 @@ import unittest
 from nexus.contracts import (
     Commitment,
     DuePrecision,
+    Entity,
+    EntityType,
     Impact,
     Memory,
     MemoryType,
@@ -126,13 +128,30 @@ class ContractTests(unittest.TestCase):
                 content_sha256="not-a-hash",
                 ingested_at="2026-09-16T12:00:00",
             )
-
         with self.assertRaises(ContractError):
             Source(
                 id=new_id(IdPrefix.SOURCE),
                 source_type=SourceType.MANUAL,
                 content_sha256=hashlib.sha256(b"source").hexdigest(),
                 ingested_at="2026-09-16T12:00:00",
+            )
+
+    def test_entity_aliases_and_linked_notes_require_non_empty_text(self) -> None:
+        with self.assertRaisesRegex(ContractError, "aliases item"):
+            Entity(
+                id=new_id(IdPrefix.ENTITY),
+                type=EntityType.PERSON,
+                display_name="Hasan Usta",
+                normalized_name="hasan usta",
+                aliases=("",),
+            )
+        with self.assertRaisesRegex(ContractError, "linked_notes item"):
+            Entity(
+                id=new_id(IdPrefix.ENTITY),
+                type=EntityType.PERSON,
+                display_name="Hasan Usta",
+                normalized_name="hasan usta",
+                linked_notes=("",),
             )
 
 
