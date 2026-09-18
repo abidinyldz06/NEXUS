@@ -47,6 +47,7 @@ def commitment_from_payload(payload: dict[str, Any]) -> Commitment:
             status=CommitmentStatus(payload.get("status", "open")),
             notify=payload.get("notify", False),
             notified_at=payload.get("notified_at"),
+            extractor=dict(payload.get("extractor", {})),
             schema_version=payload.get("schema_version", 1),
         )
     except (KeyError, TypeError, ValueError, ContractError) as exc:

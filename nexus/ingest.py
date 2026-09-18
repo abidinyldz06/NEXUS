@@ -419,6 +419,8 @@ def _review_candidate(
     *,
     impact: Impact,
     sensitivity: str,
+    segment: ConversationSegment,
+    timezone_name: str,
 ) -> dict[str, Any]:
     audit = outcome.audit
     extractor = {
@@ -443,6 +445,33 @@ def _review_candidate(
             "confidence": candidate.confidence,
             "impact": impact.value,
             "entity_ids": [],
+            "extractor": extractor,
+        }
+    if candidate.kind is CandidateKind.COMMITMENT:
+        source_at = _source_timestamp(segment, candidate)
+        if source_at is None:
+            due_date = due_time = None
+            due_precision = DuePrecision.AMBIGUOUS
+        else:
+            resolution = resolve_due(
+                candidate.statement,
+                source_at=source_at,
+                timezone=timezone_name,
+            )
+            due_date = resolution.due_date
+            due_time = resolution.due_time
+            due_precision = resolution.due_precision
+        return {
+            "statement": candidate.statement,
+            "actor_entity_id": None,
+            "confidence": candidate.confidence,
+            "impact": impact.value,
+            "timezone": timezone_name,
+            "due_date": due_date,
+            "due_time": due_time,
+            "due_precision": due_precision.value,
+            "target_entity_ids": [],
+            "notify": False,
             "extractor": extractor,
         }
     return {
@@ -539,6 +568,8 @@ def stage_inbox_source(
                     decision.action,
                     impact=decision.impact,
                     sensitivity=decision.sensitivity.value,
+                    segment=segment,
+                    timezone_name=config.timezone,
                 ),
                 reason_codes=reasons,
                 source_refs=(

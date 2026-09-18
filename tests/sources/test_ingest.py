@@ -20,8 +20,14 @@ from nexus.state import SourceStateStore
 
 
 class StageLlm:
-    def __init__(self, *, statement: str = "Kullanıcı kısa yanıtları tercih ediyor.") -> None:
+    def __init__(
+        self,
+        *,
+        statement: str = "Kullanıcı kısa yanıtları tercih ediyor.",
+        kind: str = "memory",
+    ) -> None:
         self.statement = statement
+        self.kind = kind
         self.calls = 0
 
     def complete_structured(self, **kwargs):
@@ -33,7 +39,7 @@ class StageLlm:
                 "schema_version": 1,
                 "candidates": [
                     {
-                        "kind": "memory",
+                        "kind": self.kind,
                         "statement": self.statement,
                         "entity_mentions": [],
                         "temporal_expression": None,
@@ -240,6 +246,43 @@ class IngestMetadataTests(unittest.TestCase):
             self.assertEqual([], list(outside.iterdir()))
             self.assertFalse((config.data_path / "raw").exists())
             self.assertFalse((config.data_path / "quarantine").exists())
+
+    def test_staged_commitment_has_closed_human_completion_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = _stage_config(Path(directory))
+            discovered = _source(config, "Cuma Hasan Usta'yı aramam lazım.")
+
+            stage_inbox_source(
+                config,
+                StageLlm(
+                    kind="commitment",
+                    statement="Cuma Hasan Usta'yı aramam lazım.",
+                ),
+                relative_path="note.md",
+                confirmed_sha256=discovered.content_sha256,
+            )
+
+            item = ReviewStore(config.data_path).list()[0]
+            self.assertEqual("commitment", item.candidate_kind)
+            self.assertEqual(
+                {
+                    "statement",
+                    "actor_entity_id",
+                    "confidence",
+                    "impact",
+                    "timezone",
+                    "due_date",
+                    "due_time",
+                    "due_precision",
+                    "target_entity_ids",
+                    "notify",
+                    "extractor",
+                },
+                set(item.candidate),
+            )
+            self.assertIsNone(item.candidate["actor_entity_id"])
+            self.assertEqual("ambiguous", item.candidate["due_precision"])
+            self.assertFalse(item.candidate["notify"])
 
 
 if __name__ == "__main__":

@@ -37,6 +37,9 @@ queue, while keeping the canonical Vault and publication path untouched.
 - Stage output is aggregate-only. Policy discard/quarantine candidates are not
   written to review, repeated runs reuse the existing review fingerprint and
   extracted memory candidates require a human-selected subtype before publish.
+- Extracted commitment candidates use a closed completion shape with unresolved
+  actor and `notify=false`; actor/target/date/notification choices remain an
+  audited human edit rather than model authority.
 
 ## Verification
 
@@ -58,7 +61,7 @@ queue, while keeping the canonical Vault and publication path untouched.
 - A changed conversation kept its source ID and advanced to revision 2.
 - Symlink, oversize, format mismatch, malformed export and post-discovery mutation
   cases failed closed.
-- Current combined suite: 132 tests passed. Shadow coverage proves exact SHA,
+- Current local branch combined suite: 137 tests passed. Shadow coverage proves exact SHA,
   aggregate-only output, no private writes, explicit multi-conversation selection
   and pre-model segment-limit refusal.
 - Synthetic stage coverage proves wrong-SHA and model-failure zero-write behavior,

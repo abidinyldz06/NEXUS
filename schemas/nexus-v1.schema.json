@@ -177,6 +177,7 @@
         "status": { "enum": ["open", "done", "cancelled", "overdue"] },
         "notify": { "type": "boolean" },
         "notified_at": { "type": ["string", "null"], "format": "date-time" },
+        "extractor": { "type": "object" },
         "schema_version": { "$ref": "#/$defs/schemaVersion" }
       },
       "allOf": [

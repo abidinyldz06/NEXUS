@@ -66,6 +66,11 @@ only return JSON matching the NEXUS candidate schema.
   is reported as incomplete rather than claiming rollback: retry verifies the
   deterministic canonical content, rebuilds the index and appends the missing
   audit without rewriting the Vault record.
+- Approved-commitment publication accepts only a separate closed candidate
+  shape, requires an exact review-ID confirmation and rejects missing canonical
+  actor/target entities. Staging cannot choose an actor or enable notification;
+  those fields require an audited human edit. Apply writes only the commitment,
+  rebuilds the reminder index and never changes Current-Memory view.
 - Permission audit reads metadata only, reports aggregate issue counts and
   treats symlinks, non-regular entries, ownership mismatch and group/world
   access as failures without changing modes.
