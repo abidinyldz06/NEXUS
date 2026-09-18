@@ -31,7 +31,8 @@ sıkılaştırır.
   mevcut commitment'ın `notified_at` state'ini güncelleyebilir,
 - retention komutundan Hermes config/cron/gateway dosyalarını değiştirmez;
   reminder canary ayrı olarak local/no-agent çalışır,
-- yalnız açık `eval --shadow` komutunda paketlenmiş sentetik fixture ile model çağrısı yapar,
+- yalnız açık `eval --shadow` veya exact-source `ingest --shadow` komutlarında
+  model çağrısı yapar,
 - Telegram veya başka bir dış kanala notification göndermez.
 
 Phase 8'in ilk iki dar parçası olarak retention dry-run ve permission audit aktif
@@ -133,6 +134,7 @@ Aktif kurulumda aşağıdaki güvenli komut yüzeyleri vardır:
 hermes nexus status
 hermes nexus config validate
 hermes nexus ingest --dry-run
+hermes nexus ingest --shadow --source FILE --confirm-sha SHA256 --conversation ID
 hermes nexus eval --shadow
 hermes nexus review list
 hermes nexus review show REV_ID
@@ -152,12 +154,16 @@ hermes nexus drill restore --synthetic
 hermes nexus drill git-rollback --synthetic
 ```
 
+`ingest --shadow` tek bir exact Inbox kaynağını path ve SHA ile doğrular. Çok
+konuşmalı export'ta exact `--conversation` ister, varsayılan 20 ve en fazla 100
+segment sınırını model çağrısından önce uygular; yalnız aggregate tür/audit
+sayıları basar ve raw/state/review/Vault yazmaz.
 `eval --shadow` yalnız paketlenmiş sentetik frozen holdout'u aktif
 `nexus_extract` model yoluna gönderir; aday içeriği yazmaz veya yayınlamaz ve
 yalnız kalite/audit ölçümlerini ekrana verir. Review komutları yalnız private
 olay kaydını değiştirir ve `vault_writes: false` raporlar. `rebuild` ve `search`
 yalnız Vault dışındaki disposable indeksi değiştirir/okur. Mutating ingest,
-canonical record publish ve dış-kanal reminder teslimi kapalıdır. Reminder komutu
+automatic canonical record publish ve dış-kanal reminder teslimi kapalıdır. Reminder komutu
 yalnız local output üretir ve işlenen canonical commitment'ın notification state'ini
 güvenli biçimde günceller.
 

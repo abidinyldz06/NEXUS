@@ -15,7 +15,7 @@ from .eval import evaluate_with_llm_report, frozen_fixture_path
 from .forget import apply_forget, plan_forget
 from .git_rollback_drill import run_synthetic_git_rollback_drill
 from .index import rebuild_index, search_index
-from .ingest import plan_inbox
+from .ingest import plan_inbox, shadow_inbox_source
 from .permission_audit import audit_permissions
 from .publication import apply_publication, plan_publication
 from .pulse import emit_due_reminders
@@ -36,10 +36,31 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
     validate.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
 
     ingest = subcommands.add_parser("ingest", help="Inspect Inbox sources without writing")
-    ingest.add_argument(
+    ingest_mode = ingest.add_mutually_exclusive_group()
+    ingest_mode.add_argument(
         "--dry-run",
         action="store_true",
         help="Required safety gate; parse and report without archiving or publishing",
+    )
+    ingest_mode.add_argument(
+        "--shadow",
+        action="store_true",
+        help="Extract one exact source without persisting candidates",
+    )
+    ingest.add_argument("--source", help="Inbox-relative source path; required with --shadow")
+    ingest.add_argument(
+        "--conversation",
+        help="Exact external conversation ID; required when the source contains more than one",
+    )
+    ingest.add_argument(
+        "--confirm-sha",
+        help="Exact lowercase source SHA-256; required with --shadow",
+    )
+    ingest.add_argument(
+        "--max-segments",
+        type=int,
+        default=20,
+        help="Maximum model calls for one shadow run (1-100; default: 20)",
     )
     ingest.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
 
@@ -213,17 +234,39 @@ def run_command(args: Namespace, ctx: Any) -> int:
         _print_payload(payload, as_json=bool(getattr(args, "as_json", False)))
         return 0 if payload["ok"] else 2
     if command == "ingest":
-        if not bool(getattr(args, "dry_run", False)):
-            print("Phase 2 only supports: hermes nexus ingest --dry-run")
+        dry_run = bool(getattr(args, "dry_run", False))
+        shadow = bool(getattr(args, "shadow", False))
+        if not dry_run and not shadow:
+            print("NEXUS ingest requires exactly one of: --dry-run or --shadow")
             return 2
         try:
             config = from_plugin_context(ctx)
-            payload = plan_inbox(config).to_dict()
-        except (ConfigurationError, OSError) as exc:
+            if dry_run:
+                if (
+                    getattr(args, "source", None)
+                    or getattr(args, "conversation", None)
+                    or getattr(args, "confirm_sha", None)
+                    or getattr(args, "max_segments", 20) != 20
+                ):
+                    raise ValueError("source selection options are only valid with --shadow")
+                payload = plan_inbox(config).to_dict()
+            else:
+                if not getattr(args, "source", None) or not getattr(args, "confirm_sha", None):
+                    raise ValueError("--shadow requires --source and --confirm-sha")
+                payload = shadow_inbox_source(
+                    config,
+                    ctx.llm,
+                    relative_path=args.source,
+                    confirmed_sha256=args.confirm_sha,
+                    conversation_id=getattr(args, "conversation", None),
+                    max_segments=args.max_segments,
+                ).to_dict()
+        except (NexusError, OSError, ValueError) as exc:
             payload = {
                 "ok": False,
-                "mode": "dry-run",
+                "mode": "shadow" if shadow else "dry-run",
                 "writes_performed": False,
+                "candidates_published": False,
                 "errors": [str(exc)],
             }
         _print_ingest_payload(payload, as_json=bool(getattr(args, "as_json", False)))
@@ -371,7 +414,7 @@ def run_command(args: Namespace, ctx: Any) -> int:
         return 0 if payload["ok"] else 2
     print(
         "Usage: hermes nexus "
-        "{status|config validate|ingest --dry-run|eval --shadow|review ...|"
+        "{status|config validate|ingest {--dry-run|--shadow}|eval --shadow|review ...|"
         "rebuild|search|reminders --emit-local|retention --dry-run|forget ...|audit permissions|"
         "drill restore --synthetic|drill git-rollback --synthetic}"
     )
@@ -381,6 +424,20 @@ def run_command(args: Namespace, ctx: Any) -> int:
 def _print_ingest_payload(payload: dict[str, Any], *, as_json: bool) -> None:
     if as_json:
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return
+    if payload.get("mode") == "shadow":
+        source = payload.get("source", {})
+        extraction = payload.get("extraction", {})
+        print("NEXUS ingest shadow — no writes or publication")
+        if isinstance(source, dict) and isinstance(extraction, dict):
+            print(
+                f"conversations: {source.get('conversations', 0)}, "
+                f"messages: {source.get('messages', 0)}, "
+                f"segments: {extraction.get('segments', 0)}, "
+                f"candidates: {extraction.get('candidates', 0)}"
+            )
+        for error in payload.get("errors", []):
+            print(f"error: {error}")
         return
     summary = payload.get("summary", {})
     print("NEXUS ingest dry-run — no writes performed")

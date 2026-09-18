@@ -1,6 +1,6 @@
 # Phase 2 delivery status
 
-Date: 2026-09-16
+Date: 2026-09-18
 
 ## Outcome
 
@@ -9,8 +9,9 @@ adapter is validated against a synthetic `conversations.json` fixture, not a rea
 user export. It must not be described as real-export compatible until that private
 shape is inspected without committing its contents.
 
-The active Hermes installation, Obsidian Vault, gateway, cron jobs, backup and
-user configuration were not modified. The exposed CLI remains dry-run only.
+The exposed ingestion CLI remains write-free. In addition to parser-only dry-run,
+one exact source can now be sent through the configured extraction route in
+shadow mode without changing raw state, review state or the Vault.
 
 ## Implemented
 
@@ -24,6 +25,11 @@ user configuration were not modified. The exposed CLI remains dry-run only.
 - Atomic source lineage state with duplicate and growing-revision handling.
 - Stable raw/source/message/segment/memory fingerprint helpers.
 - `hermes nexus ingest --dry-run`; no archive, state or Vault writes.
+- Exact path + SHA-gated `hermes nexus ingest --shadow`; multi-conversation
+  sources require an exact conversation ID and model calls are bounded to 1–100
+  segments before execution.
+- Shadow output contains only source shape, candidate-kind counts and model audit
+  totals; candidate statements and source content are never printed or persisted.
 
 ## Verification
 
@@ -45,13 +51,16 @@ user configuration were not modified. The exposed CLI remains dry-run only.
 - A changed conversation kept its source ID and advanced to revision 2.
 - Symlink, oversize, format mismatch, malformed export and post-discovery mutation
   cases failed closed.
+- Current combined suite: 126 tests passed. Shadow coverage proves exact SHA,
+  aggregate-only output, no private writes, explicit multi-conversation selection
+  and pre-model segment-limit refusal.
 
 ## Remaining gate
 
 - Inspect one suitable real ChatGPT `conversations.json` export in place.
 - Record any format delta and add only a redacted/minimized regression fixture.
-- Re-run the Phase 2 suite and isolated Hermes dry-run before marking Phase 2
-  fully accepted.
+- Re-run the Phase 2 suite and exact-source Hermes ingest shadow before marking
+  Phase 2 fully accepted.
 
 The Hermes official-export shape is accepted. The user explicitly chose to
 proceed on 2026-09-16 with ChatGPT support marked experimental. That separate
