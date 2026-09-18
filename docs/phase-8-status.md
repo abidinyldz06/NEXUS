@@ -4,7 +4,7 @@ Date: 2026-09-18
 
 ## Current slices
 
-Nine merged Phase 8 slices and one locally verified delivery candidate implement
+Ten merged Phase 8 slices implement
 a fail-closed, read-only retention planner,
 a metadata-only permission audit, temporary synthetic restore and external
 git-dir rollback drills, a record-scoped canonical forget workflow and explicit
@@ -77,14 +77,15 @@ apply, and do not enable unattended publishing.
 
 ## Verification
 
-- Current merged and installed `main`: 148 Python unit tests passed at exact
-  merge commit `b637a6fb1b03c95a7ce05793e23f2d9b7c7f077b`; bytecode compilation,
+- Current merged and installed `main`: 152 Python unit tests passed at exact
+  merge commit `c515b90bd7425e873e18ceb9be9af6d1821c59d4`; bytecode compilation,
   diff whitespace checks and Plugin Doctor also passed. GitHub reported no
   configured `main` CI runs for that commit.
-- Current correction-publication branch: 152 tests, bytecode compilation, diff
-  whitespace checks, wheel build/content inspection and Plugin Doctor passed.
-  Ruff still reports the repository's existing 28 lint findings and 26-file
-  format baseline; the new correction slice adds no new lint finding.
+- The correction-publication delivery candidate passed 152 working-tree and
+  clean installed-wheel tests, bytecode compilation, diff whitespace checks,
+  wheel build/content inspection and Plugin Doctor before merge. Ruff reported
+  the repository's existing 28 lint findings and 26-file format baseline; the
+  correction slice added no new lint finding.
 - Expanded 12-case live shadow passed with prompt v2 at 100% recall, 90%
   precision, 91.67% exact-case match, 100% empty-case precision/provenance and
   zero schema failures; no writes or publication occurred.
@@ -232,6 +233,12 @@ apply, and do not enable unattended publishing.
   installed-copy tests, bytecode compilation and Plugin Doctor pass. GitHub
   reported no configured `main` CI runs, and the controlled gateway restart
   produced running PID `2263`.
+- PR #33 was squash-merged as
+  `c515b90bd7425e873e18ceb9be9af6d1821c59d4`, adding reviewed correction
+  supersession. The active Hermes plugin is pinned to that exact commit; 152
+  installed-copy tests, bytecode compilation and Plugin Doctor pass. GitHub
+  reported no configured `main` CI runs, and the controlled gateway restart
+  produced running PID `39976`.
 
 ## Not yet delivered
 
@@ -253,8 +260,9 @@ apply, and do not enable unattended publishing.
   been exercised only against temporary synthetic Vaults.
 - No production relation publication has been authorized or applied. Apply has
   been exercised only against temporary synthetic Vaults.
-- Correction publication is locally verified but is not yet merged or installed.
-  No production memory supersession or index state has been written.
+- No production correction publication has been authorized or applied. Apply
+  has been exercised only against temporary synthetic Vaults, so no production
+  memory supersession or index state has been written.
 
 ## Delivery state
 
@@ -263,9 +271,8 @@ synthetic Git rollback, record-scoped canonical forget, approved-memory
 publication and exact-source private staging slices are merged, installed and
 accepted within their narrow safety boundaries. Reviewed commitment publication
 is also merged, installed and accepted within its synthetic-only safety boundary.
-Reviewed entity and relation publication are merged, installed and accepted
-within the same synthetic-only boundary; correction publication remains a local
-delivery candidate.
+Reviewed entity, relation and correction publication are merged, installed and
+accepted within the same synthetic-only boundary.
 Retention found no expiry candidates, permission audit found no insecure or
 unsafe entries, and both drill verifications used temporary synthetic data only.
 No retention deletion, permission repair, production backup capability or
