@@ -1,7 +1,8 @@
-# Approved memory, entity and commitment publication workflow
+# Approved memory, entity, relation and commitment publication workflow
 
 This workflow is the only v0.1 path from a human-approved review item to a
-canonical memory, entity or commitment record. It does not enable auto-publish.
+canonical memory, entity, relation or commitment record. It does not enable
+auto-publish.
 
 ## Eligibility
 
@@ -24,6 +25,14 @@ must edit the existing fields to complete the candidate. Actor and target IDs
 must already exist as canonical entities. The commitment ID is deterministically
 derived from the review ID.
 
+Relation candidates use one closed shape containing `statement`,
+`from_entity_id`, `predicate`, `to_entity_id`, `literal`, `confidence`, `impact`
+and `extractor`. Staging leaves both entity ends and the predicate unresolved.
+Publication requires existing canonical entity IDs, one target form, and an
+allowlisted predicate (`works_at`, `owns`, `related_to`, `has_role`). Literal
+targets are limited to `has_role`. An existing identical active relation blocks
+a duplicate canonical write.
+
 Entity candidates use one closed shape containing `display_name`,
 `normalized_name`, `entity_type`, `aliases`, `linked_notes` and `extractor`.
 Staging leaves `entity_type` unresolved. Publication requires normalized name
@@ -45,7 +54,7 @@ Apply repeats those checks and requires an exact review-ID confirmation.
 A successful initial apply:
 
 1. atomically writes the canonical record; memory publication also updates the
-   generated Current-Memory view while entity/commitment publication does not,
+   generated Current-Memory view while entity/relation/commitment publication does not,
 2. rebuilds the disposable SQLite index,
 3. appends a content-free publication event to the private review log.
 

@@ -4,16 +4,16 @@ Date: 2026-09-18
 
 ## Current slices
 
-Seven merged Phase 8 slices and one locally verified delivery candidate implement
+Eight merged Phase 8 slices and one locally verified delivery candidate implement
 a fail-closed, read-only retention planner,
 a metadata-only permission audit, temporary synthetic restore and external
 git-dir rollback drills, a record-scoped canonical forget workflow and explicit
-approved memory/entity/commitment publication. They do
+approved memory/entity/relation/commitment publication. They do
 not implement retention deletion, event-log compaction, subject-wide privacy
 erasure, production backup/restore or production Vault Git history. Production
 canonical data has not been deleted.
 
-The publication slices are limited to APPROVED/EDITED memory, entity or commitment
+The publication slices are limited to APPROVED/EDITED memory, entity, relation or commitment
 review items, require dry-run or exact ID-confirmed apply, and do not enable
 unattended publishing.
 
@@ -65,14 +65,17 @@ unattended publishing.
 - Closed entity completion shape with model-unresolved type and audited human
   edit, deterministic entity ID, normalized-name parity and same-type exact
   alias/linked-note collision refusal before canonical write/index rebuild.
+- Closed relation completion shape with model-unresolved entity IDs/predicate,
+  canonical entity existence checks, narrow predicate/literal allowlist,
+  deterministic relation ID and active duplicate refusal.
 
 ## Verification
 
-- Current merged and installed `main`: 137 Python 3.11 unit tests passed at exact
-  merge commit `4d745856760f23afb9728dee53952732d21fa8ec`; bytecode compilation,
+- Current merged and installed `main`: 143 Python 3.11 unit tests passed at exact
+  merge commit `1d22117f0dc5cb907c59a93d53d6d7427a122601`; bytecode compilation,
   diff whitespace checks and Plugin Doctor also passed. GitHub reported no
   configured `main` CI runs for that commit.
-- Current entity-publication branch: 143 tests passed; bytecode compilation,
+- Current relation-publication branch: 148 tests passed; bytecode compilation,
   diff whitespace checks and Plugin Doctor also passed.
 - Expanded 12-case live shadow passed with prompt v2 at 100% recall, 90%
   precision, 91.67% exact-case match, 100% empty-case precision/provenance and
@@ -209,6 +212,12 @@ unattended publishing.
   installed-copy tests, bytecode compilation and Plugin Doctor pass. GitHub
   reported no configured `main` CI runs for the merge commit, and the controlled
   gateway restart produced running PID `95168`.
+- PR #31 was squash-merged as
+  `1d22117f0dc5cb907c59a93d53d6d7427a122601`, adding reviewed entity publication.
+  The active Hermes plugin is pinned to that exact commit; 143 installed-copy
+  tests, bytecode compilation and Plugin Doctor pass. GitHub reported no
+  configured `main` CI runs, and the controlled gateway restart produced running
+  PID `99389`.
 
 ## Not yet delivered
 
@@ -226,8 +235,10 @@ unattended publishing.
 - No production commitment publication has been authorized or applied. Apply has
   been exercised only against temporary synthetic Vaults, so no production
   commitment or reminder state has been written.
-- Entity publication is locally verified but is not yet merged or installed.
-  No production entity or index state has been written.
+- No production entity publication has been authorized or applied. Apply has
+  been exercised only against temporary synthetic Vaults.
+- Relation publication is locally verified but is not yet merged or installed.
+  No production relation or index state has been written.
 
 ## Delivery state
 
@@ -236,6 +247,8 @@ synthetic Git rollback, record-scoped canonical forget, approved-memory
 publication and exact-source private staging slices are merged, installed and
 accepted within their narrow safety boundaries. Reviewed commitment publication
 is also merged, installed and accepted within its synthetic-only safety boundary.
+Reviewed entity publication is merged, installed and accepted within the same
+synthetic-only boundary; relation publication remains a local delivery candidate.
 Retention found no expiry candidates, permission audit found no insecure or
 unsafe entries, and both drill verifications used temporary synthetic data only.
 No retention deletion, permission repair, production backup capability or

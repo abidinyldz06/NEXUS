@@ -464,6 +464,17 @@ def _review_candidate(
             "linked_notes": [],
             "extractor": extractor,
         }
+    if candidate.kind is CandidateKind.RELATION:
+        return {
+            "statement": candidate.statement,
+            "from_entity_id": None,
+            "predicate": None,
+            "to_entity_id": None,
+            "literal": None,
+            "confidence": candidate.confidence,
+            "impact": impact.value,
+            "extractor": extractor,
+        }
     if candidate.kind is CandidateKind.COMMITMENT:
         source_at = _source_timestamp(segment, candidate)
         if source_at is None:
@@ -579,6 +590,8 @@ def stage_inbox_source(
                 reasons.append("memory_type_required")
             if candidate.kind is CandidateKind.ENTITY:
                 reasons.append("entity_type_required")
+            if candidate.kind is CandidateKind.RELATION:
+                reasons.append("relation_fields_required")
             item = create_review_item(
                 candidate_kind=candidate.kind.value,
                 candidate=_review_candidate(
