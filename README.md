@@ -86,6 +86,13 @@ onayını kabul eder; literal hedef yalnız `has_role` için kullanılabilir. Ay
 aktif ilişki yeniden oluşturulmaz; apply derived indeksi günceller ve
 Current-Memory view'ine dokunmaz.
 
+Onuncu dar dilim `correction` adayını kapalı bir insan-tamamlama şekline alır.
+Staging hedef memory kimliğini ve yeni memory türünü boş bırakır; modelin olası
+hedefleri yalnız extractor kanıtı olarak kalır. Yayın yalnız insanın seçtiği tek
+aktif memory'yi supersede eder, eski ve yeni karşılıklı bağlantıları ile
+Current-Memory view'ini tek Vault işleminde günceller ve exact review-ID onayı
+olmadan yazmaz.
+
 Güncel 12-vakalı frozen holdout, aktif `ollama-cloud` / `glm-5.3-flash` rotasında
 prompt v2 ile shadow kabul kapısını geçmiştir: recall `%100`, precision `%90`,
 exact-case `%91,67`, empty-case precision ve provenance `%100`, schema failure

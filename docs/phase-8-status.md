@@ -4,18 +4,19 @@ Date: 2026-09-18
 
 ## Current slices
 
-Eight merged Phase 8 slices and one locally verified delivery candidate implement
+Nine merged Phase 8 slices and one locally verified delivery candidate implement
 a fail-closed, read-only retention planner,
 a metadata-only permission audit, temporary synthetic restore and external
 git-dir rollback drills, a record-scoped canonical forget workflow and explicit
-approved memory/entity/relation/commitment publication. They do
+approved memory/entity/relation/commitment publication plus reviewed correction
+supersession. They do
 not implement retention deletion, event-log compaction, subject-wide privacy
 erasure, production backup/restore or production Vault Git history. Production
 canonical data has not been deleted.
 
-The publication slices are limited to APPROVED/EDITED memory, entity, relation or commitment
-review items, require dry-run or exact ID-confirmed apply, and do not enable
-unattended publishing.
+The publication slices are limited to APPROVED/EDITED memory, entity, relation,
+commitment or correction review items, require dry-run or exact ID-confirmed
+apply, and do not enable unattended publishing.
 
 ## Implemented
 
@@ -68,15 +69,22 @@ unattended publishing.
 - Closed relation completion shape with model-unresolved entity IDs/predicate,
   canonical entity existence checks, narrow predicate/literal allowlist,
   deterministic relation ID and active duplicate refusal.
+- Closed correction completion shape with model-unresolved target/type, exact
+  active-memory target validation, deterministic replacement ID and reciprocal
+  supersession links.
+- Atomic predecessor/replacement/Current-Memory update with exact-byte
+  predecessor/view rollback when index rebuild fails.
 
 ## Verification
 
-- Current merged and installed `main`: 143 Python 3.11 unit tests passed at exact
-  merge commit `1d22117f0dc5cb907c59a93d53d6d7427a122601`; bytecode compilation,
+- Current merged and installed `main`: 148 Python unit tests passed at exact
+  merge commit `b637a6fb1b03c95a7ce05793e23f2d9b7c7f077b`; bytecode compilation,
   diff whitespace checks and Plugin Doctor also passed. GitHub reported no
   configured `main` CI runs for that commit.
-- Current relation-publication branch: 148 tests passed; bytecode compilation,
-  diff whitespace checks and Plugin Doctor also passed.
+- Current correction-publication branch: 152 tests, bytecode compilation, diff
+  whitespace checks, wheel build/content inspection and Plugin Doctor passed.
+  Ruff still reports the repository's existing 28 lint findings and 26-file
+  format baseline; the new correction slice adds no new lint finding.
 - Expanded 12-case live shadow passed with prompt v2 at 100% recall, 90%
   precision, 91.67% exact-case match, 100% empty-case precision/provenance and
   zero schema failures; no writes or publication occurred.
@@ -218,6 +226,12 @@ unattended publishing.
   tests, bytecode compilation and Plugin Doctor pass. GitHub reported no
   configured `main` CI runs, and the controlled gateway restart produced running
   PID `99389`.
+- PR #32 was squash-merged as
+  `b637a6fb1b03c95a7ce05793e23f2d9b7c7f077b`, adding reviewed relation
+  publication. The active Hermes plugin is pinned to that exact commit; 148
+  installed-copy tests, bytecode compilation and Plugin Doctor pass. GitHub
+  reported no configured `main` CI runs, and the controlled gateway restart
+  produced running PID `2263`.
 
 ## Not yet delivered
 
@@ -237,8 +251,10 @@ unattended publishing.
   commitment or reminder state has been written.
 - No production entity publication has been authorized or applied. Apply has
   been exercised only against temporary synthetic Vaults.
-- Relation publication is locally verified but is not yet merged or installed.
-  No production relation or index state has been written.
+- No production relation publication has been authorized or applied. Apply has
+  been exercised only against temporary synthetic Vaults.
+- Correction publication is locally verified but is not yet merged or installed.
+  No production memory supersession or index state has been written.
 
 ## Delivery state
 
@@ -247,8 +263,9 @@ synthetic Git rollback, record-scoped canonical forget, approved-memory
 publication and exact-source private staging slices are merged, installed and
 accepted within their narrow safety boundaries. Reviewed commitment publication
 is also merged, installed and accepted within its synthetic-only safety boundary.
-Reviewed entity publication is merged, installed and accepted within the same
-synthetic-only boundary; relation publication remains a local delivery candidate.
+Reviewed entity and relation publication are merged, installed and accepted
+within the same synthetic-only boundary; correction publication remains a local
+delivery candidate.
 Retention found no expiry candidates, permission audit found no insecure or
 unsafe entries, and both drill verifications used temporary synthetic data only.
 No retention deletion, permission repair, production backup capability or
