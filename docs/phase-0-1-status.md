@@ -33,14 +33,15 @@ Completed locally:
 - Stable opaque IDs and deterministic serialization.
 - Provenance-required record contracts and JSON Schema v1.
 
-Still required before Phase 0 can be marked complete:
+Completed after the initial delivery:
 
-- Validate one suitable real ChatGPT export shape without committing private
-  content.
 - Create the initial local baseline commit after review.
-- Defer the Vault git-dir canary until a later phase actually writes canonical
-  notes.
+- A real ChatGPT `chat.html` export was inspected without committing private
+  content. Its embedded JSON normalized as 208 conversations and 8,065 messages
+  in a write-free dry-run.
+- The Vault git-dir path remained deferred until the later synthetic rollback
+  drill; no production Vault Git history was created.
 
-Phase 2 must not claim ChatGPT parser acceptance until the real export shape is
-available. Hermes and manual source adapters may use redacted fixtures, but the
-real ChatGPT format remains a separate acceptance gate.
+Phase 2 parser acceptance now covers both `conversations.json` and the observed
+`chat.html` wrapper. Real-conversation extraction quality remains a separate
+Phase 3/private-golden acceptance gate.

@@ -4,10 +4,10 @@ Date: 2026-09-18
 
 ## Outcome
 
-Phase 2 is locally implemented with one explicit acceptance hold: the ChatGPT
-adapter is validated against a synthetic `conversations.json` fixture, not a real
-user export. It must not be described as real-export compatible until that private
-shape is inspected without committing its contents.
+Phase 2 source parsing is accepted for both the synthetic `conversations.json`
+shape and the observed real `chat.html` export wrapper. The real export was
+inspected in place without committing its contents; its embedded JSON was
+decoded without executing script and passed a write-free dry-run.
 
 Dry-run and shadow ingestion remain write-free. A separate exact-source staging
 mode now connects extraction to owner-private raw/source state and the review
@@ -16,7 +16,7 @@ queue, while keeping the canonical Vault and publication path untouched.
 ## Implemented
 
 - Provider-neutral normalized conversation/message contracts.
-- Synthetic ChatGPT current-branch adapter.
+- ChatGPT `conversations.json` and non-executing `chat.html` wrapper adapter.
 - Hermes official full-session JSONL adapter and redacted export wrapper.
 - Manual Markdown/text and non-rendering HTML adapter.
 - Inbox extension, size, stability, containment and symlink checks.
@@ -67,6 +67,10 @@ queue, while keeping the canonical Vault and publication path untouched.
 - A changed conversation kept its source ID and advanced to revision 2.
 - Symlink, oversize, format mismatch, malformed export and post-discovery mutation
   cases failed closed.
+- One owner-private real ChatGPT ZIP passed integrity/path-safety checks. Its
+  `chat.html` payload normalized as 208 conversations and 8,065 messages; the
+  CLI-equivalent dry-run accepted one file, rejected zero and reported
+  `writes_performed=false` without printing content.
 - Current merged and installed suite: 143 tests passed. Shadow coverage proves exact SHA,
   aggregate-only output, no private writes, explicit multi-conversation selection
   and pre-model segment-limit refusal.
@@ -76,16 +80,15 @@ queue, while keeping the canonical Vault and publication path untouched.
   owner-only raw/state modes, review idempotency, quarantine routing and zero
   Vault writes. No configured production Inbox source was staged.
 
-## Remaining gate
+## Remaining gates
 
-- Inspect one suitable real ChatGPT `conversations.json` export in place.
-- Record any format delta and add only a redacted/minimized regression fixture.
-- Re-run the Phase 2 suite and exact-source Hermes ingest shadow before marking
-  Phase 2 fully accepted.
+- Merge and install the `chat.html` adapter delivery candidate.
+- Run bounded exact-source shadow ingestion on selected real conversations;
+  parser acceptance alone is not extraction/model-quality acceptance.
 - Run staging against a specifically approved real target only after the export
   shape passes shadow validation; private raw/review writes are not implied by
   read-only acceptance.
 
-The Hermes official-export shape is accepted. The user explicitly chose to
-proceed on 2026-09-16 with ChatGPT support marked experimental. That separate
-source-format gate remains open and is not silently waived.
+The Hermes official-export and ChatGPT source shapes are accepted. Human-labeled
+private evaluation, real shadow extraction and any staging/publication remain
+separate explicit gates.

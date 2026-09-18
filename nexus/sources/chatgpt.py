@@ -1,12 +1,13 @@
-"""Adapter for the common ChatGPT conversations.json export shape.
+"""Adapter for ChatGPT conversations.json and chat.html export shapes.
 
-Synthetic fixtures cover this implementation. Real-export acceptance remains a
-separate Phase 0/2 gate because OpenAI may evolve the export structure.
+The HTML export embeds the same conversation array in a ``jsonData`` script
+assignment. The adapter decodes that JSON without executing any script.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,32 @@ from ..normalize import (
     require_mapping,
 )
 from .base import ParsedSource
+
+_HTML_JSON_ASSIGNMENT = re.compile(
+    r"<script(?:\s[^>]*)?>\s*(?:var|let|const)\s+jsonData\s*=\s*",
+    re.IGNORECASE,
+)
+
+
+def _decode_export(payload: bytes, *, original_name: str) -> object:
+    try:
+        decoded = payload.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ParseError("invalid UTF-8 ChatGPT export") from exc
+    if Path(original_name).suffix.lower() not in {".html", ".htm"}:
+        try:
+            return json.loads(decoded)
+        except json.JSONDecodeError as exc:
+            raise ParseError("invalid ChatGPT conversations JSON") from exc
+
+    assignment = _HTML_JSON_ASSIGNMENT.search(decoded)
+    if assignment is None:
+        raise ParseError("invalid ChatGPT chat.html export")
+    try:
+        root, _ = json.JSONDecoder().raw_decode(decoded, assignment.end())
+    except json.JSONDecodeError as exc:
+        raise ParseError("invalid ChatGPT chat.html export") from exc
+    return root
 
 
 def _chatgpt_content(content: Any) -> str:
@@ -65,17 +92,18 @@ def _current_branch(
 
 class ChatGPTAdapter:
     name = "chatgpt-conversations-json"
-    version = "1-synthetic-validated"
+    version = "2-json-html"
     source_type = SourceType.CHATGPT
 
     def supports(self, path: Path, payload_prefix: bytes) -> bool:
-        return path.suffix.lower() == ".json"
+        suffix = path.suffix.lower()
+        if suffix == ".json":
+            return True
+        lowered = payload_prefix.lower()
+        return suffix in {".html", ".htm"} and b"<script" in lowered and b"jsondata" in lowered
 
     def parse_bytes(self, payload: bytes, *, original_name: str) -> ParsedSource:
-        try:
-            root = json.loads(payload.decode("utf-8-sig"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ParseError("invalid ChatGPT conversations JSON") from exc
+        root = _decode_export(payload, original_name=original_name)
         if isinstance(root, dict) and isinstance(root.get("conversations"), list):
             raw_conversations = root["conversations"]
         elif isinstance(root, list):

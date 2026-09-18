@@ -106,6 +106,62 @@ class CliTests(unittest.TestCase):
             self.assertEqual(1, payload["summary"]["messages"])
             self.assertFalse((root / "private").exists())
 
+    def test_ingest_dry_run_recognizes_chatgpt_html_export(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inbox = root / "inbox"
+            inbox.mkdir()
+            conversation = {
+                "id": "chat-html-conversation",
+                "title": "Synthetic HTML export",
+                "current_node": "node-1",
+                "mapping": {
+                    "node-1": {
+                        "parent": None,
+                        "message": {
+                            "id": "message-1",
+                            "author": {"role": "user"},
+                            "create_time": 1_700_000_000,
+                            "content": {"parts": ["Private fixture text"]},
+                        },
+                    }
+                },
+            }
+            source = inbox / "chat.html"
+            source.write_text(
+                "<!doctype html><script>var jsonData = "
+                + json.dumps([conversation])
+                + "; globalThis.mustNotRun = true;</script>",
+                encoding="utf-8",
+            )
+            old = time.time() - 60
+            os.utime(source, (old, old))
+            context = FakeContext(
+                {
+                    "inbox_path": str(inbox),
+                    "data_path": str(root / "private"),
+                    "source_stable_seconds": 1,
+                }
+            )
+            parser = parser_for(context)
+            args = parser.parse_args(["ingest", "--dry-run", "--json"])
+            stream = io.StringIO()
+
+            with contextlib.redirect_stdout(stream):
+                result = args.func(args)
+
+            payload = json.loads(stream.getvalue())
+            self.assertEqual(0, result)
+            self.assertEqual("chatgpt", payload["accepted"][0]["source_type"])
+            self.assertEqual(
+                "chatgpt-conversations-json@2-json-html",
+                payload["accepted"][0]["adapter"],
+            )
+            self.assertEqual(1, payload["summary"]["conversations"])
+            self.assertEqual(1, payload["summary"]["messages"])
+            self.assertFalse(payload["writes_performed"])
+            self.assertFalse((root / "private").exists())
+
     def test_ingest_shadow_requires_exact_source_and_reports_aggregates_only(self) -> None:
         class ShadowLlm:
             def complete_structured(self, **kwargs):
