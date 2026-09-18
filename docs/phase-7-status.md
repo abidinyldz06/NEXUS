@@ -67,9 +67,10 @@ no output and left the derived SQLite index byte-for-byte unchanged.
 - The local/no-agent canary survived the controlled gateway restart and remains
   active. Its manual test execution completed successfully without creating a
   canonical namespace or changing the empty derived index.
-- The active Hermes plugin is now pinned to exact PR #28 merge commit
-  `e14b1be1bd7054fcb8788ba1784c817905205256`; the combined installed-copy suite
-  has 132 passing tests and Plugin Doctor passes.
+- The active Hermes plugin is now pinned to exact PR #29 merge commit
+  `4d745856760f23afb9728dee53952732d21fa8ec`; the combined installed-copy suite
+  has 137 passing tests, bytecode compilation and Plugin Doctor pass, and the
+  controlled gateway restart produced running PID `95168`.
 - Hermes recorded the first automatic 09:00 run as `completed` with
   `source=builtin` at `2026-09-18T09:00:04+03:00`. Six scheduled observations
   remain before the seven-day local-only acceptance gate closes.
