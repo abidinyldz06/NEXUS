@@ -23,6 +23,14 @@ only return JSON matching the NEXUS candidate schema.
   returns it.
 - Review edit input must be an absolute, regular, non-symlink JSON file no larger
   than 1 MiB and must preserve the candidate's existing fields.
+- Private ingest staging requires one Inbox-relative path and its exact lowercase
+  SHA-256. Multi-conversation exports also require one exact conversation ID,
+  and the 1--100 segment bound is checked before model execution. All extraction
+  calls must succeed before private writes begin.
+- Staging writes only owner-private raw/quarantine, source lineage and append-only
+  review state. Policy discards are not queued, quarantine decisions are not
+  copied into review, reruns reuse candidate fingerprints, memory subtype remains
+  unset for human review, and no staging path can write or publish to the Vault.
 - Phase 5 canonical writer accepts only generated relative paths below `Nexus/`,
   rejects symlink traversal and requires content-hash preconditions for updates.
 - Untrusted human text is escaped inside `<pre>`; the rebuild payload is

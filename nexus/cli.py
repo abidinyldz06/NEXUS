@@ -15,7 +15,7 @@ from .eval import evaluate_with_llm_report, frozen_fixture_path
 from .forget import apply_forget, plan_forget
 from .git_rollback_drill import run_synthetic_git_rollback_drill
 from .index import rebuild_index, search_index
-from .ingest import plan_inbox, shadow_inbox_source
+from .ingest import plan_inbox, shadow_inbox_source, stage_inbox_source
 from .permission_audit import audit_permissions
 from .publication import apply_publication, plan_publication
 from .pulse import emit_due_reminders
@@ -35,7 +35,7 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
     validate = config_subcommands.add_parser("validate", help="Validate paths without writing")
     validate.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
 
-    ingest = subcommands.add_parser("ingest", help="Inspect Inbox sources without writing")
+    ingest = subcommands.add_parser("ingest", help="Inspect or stage exact Inbox sources")
     ingest_mode = ingest.add_mutually_exclusive_group()
     ingest_mode.add_argument(
         "--dry-run",
@@ -47,20 +47,27 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
         action="store_true",
         help="Extract one exact source without persisting candidates",
     )
-    ingest.add_argument("--source", help="Inbox-relative source path; required with --shadow")
+    ingest_mode.add_argument(
+        "--stage",
+        action="store_true",
+        help="Archive and stage one exact source into the private review queue",
+    )
+    ingest.add_argument(
+        "--source", help="Inbox-relative source path; required with --shadow or --stage"
+    )
     ingest.add_argument(
         "--conversation",
         help="Exact external conversation ID; required when the source contains more than one",
     )
     ingest.add_argument(
         "--confirm-sha",
-        help="Exact lowercase source SHA-256; required with --shadow",
+        help="Exact lowercase source SHA-256; required with --shadow or --stage",
     )
     ingest.add_argument(
         "--max-segments",
         type=int,
         default=20,
-        help="Maximum model calls for one shadow run (1-100; default: 20)",
+        help="Maximum model calls for one shadow/stage run (1-100; default: 20)",
     )
     ingest.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
 
@@ -236,8 +243,9 @@ def run_command(args: Namespace, ctx: Any) -> int:
     if command == "ingest":
         dry_run = bool(getattr(args, "dry_run", False))
         shadow = bool(getattr(args, "shadow", False))
-        if not dry_run and not shadow:
-            print("NEXUS ingest requires exactly one of: --dry-run or --shadow")
+        stage = bool(getattr(args, "stage", False))
+        if not dry_run and not shadow and not stage:
+            print("NEXUS ingest requires exactly one of: --dry-run, --shadow or --stage")
             return 2
         try:
             config = from_plugin_context(ctx)
@@ -248,12 +256,17 @@ def run_command(args: Namespace, ctx: Any) -> int:
                     or getattr(args, "confirm_sha", None)
                     or getattr(args, "max_segments", 20) != 20
                 ):
-                    raise ValueError("source selection options are only valid with --shadow")
+                    raise ValueError(
+                        "source selection options are only valid with --shadow or --stage"
+                    )
                 payload = plan_inbox(config).to_dict()
             else:
                 if not getattr(args, "source", None) or not getattr(args, "confirm_sha", None):
-                    raise ValueError("--shadow requires --source and --confirm-sha")
-                payload = shadow_inbox_source(
+                    raise ValueError(
+                        f"--{'stage' if stage else 'shadow'} requires --source and --confirm-sha"
+                    )
+                runner = stage_inbox_source if stage else shadow_inbox_source
+                payload = runner(
                     config,
                     ctx.llm,
                     relative_path=args.source,
@@ -264,8 +277,9 @@ def run_command(args: Namespace, ctx: Any) -> int:
         except (NexusError, OSError, ValueError) as exc:
             payload = {
                 "ok": False,
-                "mode": "shadow" if shadow else "dry-run",
+                "mode": "stage" if stage else "shadow" if shadow else "dry-run",
                 "writes_performed": False,
+                "vault_writes": False,
                 "candidates_published": False,
                 "errors": [str(exc)],
             }
@@ -414,7 +428,7 @@ def run_command(args: Namespace, ctx: Any) -> int:
         return 0 if payload["ok"] else 2
     print(
         "Usage: hermes nexus "
-        "{status|config validate|ingest {--dry-run|--shadow}|eval --shadow|review ...|"
+        "{status|config validate|ingest {--dry-run|--shadow|--stage}|eval --shadow|review ...|"
         "rebuild|search|reminders --emit-local|retention --dry-run|forget ...|audit permissions|"
         "drill restore --synthetic|drill git-rollback --synthetic}"
     )
@@ -425,16 +439,25 @@ def _print_ingest_payload(payload: dict[str, Any], *, as_json: bool) -> None:
     if as_json:
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         return
-    if payload.get("mode") == "shadow":
+    if payload.get("mode") in {"shadow", "stage"}:
         source = payload.get("source", {})
         extraction = payload.get("extraction", {})
-        print("NEXUS ingest shadow — no writes or publication")
+        if payload.get("mode") == "stage":
+            print("NEXUS ingest stage — private review state only; no Vault publication")
+        else:
+            print("NEXUS ingest shadow — no writes or publication")
         if isinstance(source, dict) and isinstance(extraction, dict):
             print(
                 f"conversations: {source.get('conversations', 0)}, "
                 f"messages: {source.get('messages', 0)}, "
                 f"segments: {extraction.get('segments', 0)}, "
                 f"candidates: {extraction.get('candidates', 0)}"
+            )
+        review = payload.get("review", {})
+        if isinstance(review, dict) and payload.get("mode") == "stage":
+            print(
+                f"review created: {review.get('created', 0)}, "
+                f"reused: {review.get('reused', 0)}"
             )
         for error in payload.get("errors", []):
             print(f"error: {error}")

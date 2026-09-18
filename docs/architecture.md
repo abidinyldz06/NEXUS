@@ -19,8 +19,11 @@ NEXUS follows Hermes's footprint ladder:
 4. fixed cron scripts after local canary;
 5. no new core tool in v0.1.
 
-## Current shadow-mode invariant
+## Current ingestion invariant
 
-The current implementation is read-only. `write_enabled` is hard-coded false in
-status output. Config validation and ingestion dry-run may inspect sources but
-create no production state. Extraction candidates are not published.
+Dry-run and shadow ingestion remain read-only. Private staging is a separate,
+explicit exact-path and SHA-confirmed mode: all bounded model calls finish before
+any write, then only the content-addressed raw/quarantine store, source-lineage
+state and append-only review queue may change. Staging never writes the Vault or
+publishes a candidate. Canonical publication remains a separate reviewed and
+exact-ID-confirmed operation.

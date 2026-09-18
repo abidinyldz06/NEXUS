@@ -90,6 +90,10 @@ class ReviewStore:
         self.path = self.directory / "events-v1.jsonl"
 
     def replay(self) -> dict[str, ReviewItem]:
+        if self.directory.exists() and (
+            self.directory.is_symlink() or not self.directory.is_dir()
+        ):
+            raise ReviewStoreError("review directory must be a real directory")
         if not self.path.exists():
             return {}
         if self.path.is_symlink() or not self.path.is_file():

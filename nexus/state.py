@@ -42,6 +42,9 @@ class SourceStateStore:
         self.path = path.expanduser()
         if not self.path.is_absolute() or self.path.is_symlink():
             raise StateError("state path must be absolute and not a symlink")
+        parent = self.path.parent
+        if parent.exists() and (parent.is_symlink() or not parent.is_dir()):
+            raise StateError("state directory must be a real directory")
         self._state = self._load()
 
     def _load(self) -> dict[str, Any]:
@@ -149,7 +152,11 @@ class SourceStateStore:
 
     def _save(self) -> None:
         parent = self.path.parent
+        if parent.exists() and (parent.is_symlink() or not parent.is_dir()):
+            raise StateError("state directory must be a real directory")
         parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if parent.is_symlink():
+            raise StateError("state directory must not be a symlink")
         os.chmod(parent, 0o700)
         payload = json.dumps(self._state, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
         with tempfile.NamedTemporaryFile(

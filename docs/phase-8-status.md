@@ -168,6 +168,15 @@ dry-run or exact ID-confirmed apply, and does not enable unattended publishing.
   pinned to this exact commit; 122 installed-copy tests and Plugin Doctor pass.
 - Direct launchd inspection after the prompt-v2 install showed the gateway
   running with PID `46827`.
+- PR #27 was squash-merged as
+  `ed9df38fb730d3de8ee3ac9432d596f3599651e4`, adding exact-source, write-free
+  ingest shadow orchestration. The active Hermes plugin is pinned to that exact
+  commit; 126 installed-copy tests, bytecode compilation and Plugin Doctor pass.
+  GitHub reported no configured `main` CI runs for the merge commit.
+- Direct launchd inspection after the PR #27 install showed the gateway running
+  with PID `57397`. At `2026-09-18 07:56 +03`, the daily 09:00 canary had not yet
+  reached its first scheduled window; only the earlier successful direct run was
+  present, so scheduled-canary acceptance remains open.
 
 ## Not yet delivered
 
