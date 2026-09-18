@@ -6,12 +6,18 @@ import json
 import sys
 from argparse import ArgumentParser, Namespace
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from . import __version__
 from .config import from_plugin_context
 from .errors import ConfigurationError, NexusError, NexusIndexError
-from .eval import evaluate_with_llm_report, frozen_fixture_path
+from .eval import (
+    PrivateEvalFixture,
+    evaluate_with_llm_report,
+    frozen_fixture_path,
+    load_private_fixture,
+)
 from .forget import apply_forget, plan_forget
 from .git_rollback_drill import run_synthetic_git_rollback_drill
 from .index import rebuild_index, search_index
@@ -78,6 +84,16 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
         "--shadow",
         action="store_true",
         help="Required safety gate; call the model but do not persist candidates",
+    )
+    eval_command.add_argument(
+        "--private-dataset",
+        metavar="JSON_BASENAME",
+        help="Evaluate one SHA-confirmed fixture from data_path/eval/private",
+    )
+    eval_command.add_argument(
+        "--confirm-sha",
+        metavar="SHA256",
+        help="Exact lowercase SHA-256 required with --private-dataset",
     )
     eval_command.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
 
@@ -289,7 +305,33 @@ def run_command(args: Namespace, ctx: Any) -> int:
         if not bool(getattr(args, "shadow", False)):
             print("Phase 3 only supports: hermes nexus eval --shadow")
             return 2
-        payload = _shadow_eval_payload(ctx)
+        private_dataset = getattr(args, "private_dataset", None)
+        confirmed_sha256 = getattr(args, "confirm_sha", None)
+        try:
+            if private_dataset is None:
+                if confirmed_sha256 is not None:
+                    raise ValueError("--confirm-sha is only valid with --private-dataset")
+                fixture = frozen_fixture_path()
+                dataset_kind = "frozen"
+            else:
+                if confirmed_sha256 is None:
+                    raise ValueError("--private-dataset requires --confirm-sha")
+                fixture = load_private_fixture(
+                    from_plugin_context(ctx).data_path,
+                    private_dataset,
+                    confirmed_sha256,
+                )
+                dataset_kind = "private"
+            payload = _shadow_eval_payload(ctx, fixture, dataset_kind=dataset_kind)
+        except (NexusError, OSError, ValueError) as exc:
+            payload = {
+                "ok": False,
+                "mode": "shadow",
+                "dataset": "private" if private_dataset is not None else "frozen",
+                "writes_performed": False,
+                "candidates_published": False,
+                "errors": [str(exc)],
+            }
         _print_eval_payload(payload, as_json=bool(getattr(args, "as_json", False)))
         return 0 if payload["ok"] else 2
     if command == "review":
@@ -477,13 +519,19 @@ def _print_ingest_payload(payload: dict[str, Any], *, as_json: bool) -> None:
         print(f"error: {error}")
 
 
-def _shadow_eval_payload(ctx: Any) -> dict[str, Any]:
+def _shadow_eval_payload(
+    ctx: Any,
+    fixture: Path | PrivateEvalFixture,
+    *,
+    dataset_kind: str,
+) -> dict[str, Any]:
     try:
-        report = evaluate_with_llm_report(frozen_fixture_path(), ctx.llm)
+        report = evaluate_with_llm_report(fixture, ctx.llm)
     except Exception:
         return {
             "ok": False,
             "mode": "shadow",
+            "dataset": dataset_kind,
             "writes_performed": False,
             "candidates_published": False,
             "errors": ["shadow evaluation failed without exposing provider details"],
@@ -491,10 +539,13 @@ def _shadow_eval_payload(ctx: Any) -> dict[str, Any]:
     return {
         "ok": report.accepted,
         "mode": "shadow",
+        "dataset": dataset_kind,
         "writes_performed": False,
         "candidates_published": False,
         "report": report.to_dict(),
-        "errors": [] if report.accepted else ["frozen holdout acceptance thresholds were not met"],
+        "errors": []
+        if report.accepted
+        else [f"{dataset_kind} dataset acceptance thresholds were not met"],
     }
 
 
@@ -502,7 +553,10 @@ def _print_eval_payload(payload: dict[str, Any], *, as_json: bool) -> None:
     if as_json:
         print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         return
-    print("NEXUS frozen evaluation — shadow mode; no candidates published")
+    print(
+        f"NEXUS {payload.get('dataset', 'frozen')} evaluation — "
+        "shadow mode; no candidates published"
+    )
     report = payload.get("report", {})
     if isinstance(report, dict):
         metrics = report.get("metrics", {})

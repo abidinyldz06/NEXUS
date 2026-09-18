@@ -668,6 +668,109 @@ class CliTests(unittest.TestCase):
         self.assertEqual(1.0, payload["report"]["metrics"]["expected_kind_precision"])
         self.assertEqual(1.0, payload["report"]["metrics"]["exact_case_match_rate"])
 
+    def test_private_eval_requires_exact_sha_and_reports_aggregates_only(self) -> None:
+        class PrivateFixtureLlm:
+            def complete_structured(self, **kwargs):
+                envelope = json.loads(kwargs["input"][0]["text"].split("\n", 1)[1])
+                span_id = envelope["spans"][0]["span_id"]
+                parsed = {
+                    "schema_version": 1,
+                    "candidates": [
+                        {
+                            "kind": "memory",
+                            "statement": "Synthetic private expectation",
+                            "entity_mentions": [],
+                            "temporal_expression": None,
+                            "source_span_ids": [span_id],
+                            "confidence": 0.95,
+                            "ambiguity_flags": [],
+                            "possible_supersedes": [],
+                        }
+                    ],
+                    "ignored_span_ids": [],
+                    "warnings": [],
+                }
+                return SimpleNamespace(
+                    parsed=parsed,
+                    text=json.dumps(parsed),
+                    provider="private-fixture-provider",
+                    model="private-fixture-model",
+                    agent_id="private-fixture-agent",
+                    usage=SimpleNamespace(input_tokens=10, output_tokens=5, total_tokens=15),
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            data_path = Path(directory)
+            private_root = data_path / "eval/private"
+            private_root.mkdir(parents=True)
+            private_root.chmod(0o700)
+            fixture = private_root / "golden-v1.json"
+            secret_content = "PRIVATE_GOLDEN_CONTENT_MUST_NOT_APPEAR"
+            fixture.write_text(
+                json.dumps(
+                    {
+                        "fixture_version": 1,
+                        "dataset": "private-golden",
+                        "cases": [
+                            {
+                                "id": "private-case-1",
+                                "messages": [
+                                    {
+                                        "id": "private-message-1",
+                                        "role": "user",
+                                        "content": secret_content,
+                                    }
+                                ],
+                                "expected_kinds": ["memory"],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            fixture.chmod(0o600)
+            digest = sha256(fixture.read_bytes()).hexdigest()
+            parser = parser_for(
+                FakeContext(
+                    {"data_path": str(data_path)},
+                    llm=PrivateFixtureLlm(),
+                )
+            )
+
+            missing_confirmation = parser.parse_args(
+                ["eval", "--shadow", "--private-dataset", fixture.name, "--json"]
+            )
+            missing_stream = io.StringIO()
+            with contextlib.redirect_stdout(missing_stream):
+                missing_result = missing_confirmation.func(missing_confirmation)
+
+            args = parser.parse_args(
+                [
+                    "eval",
+                    "--shadow",
+                    "--private-dataset",
+                    fixture.name,
+                    "--confirm-sha",
+                    digest,
+                    "--json",
+                ]
+            )
+            stream = io.StringIO()
+            with contextlib.redirect_stdout(stream):
+                result = args.func(args)
+
+            payload = json.loads(stream.getvalue())
+            self.assertEqual(2, missing_result)
+            self.assertIn("requires --confirm-sha", missing_stream.getvalue())
+            self.assertEqual(0, result)
+            self.assertTrue(payload["ok"])
+            self.assertEqual("private", payload["dataset"])
+            self.assertFalse(payload["writes_performed"])
+            self.assertFalse(payload["candidates_published"])
+            self.assertNotIn(secret_content, stream.getvalue())
+            self.assertNotIn(fixture.name, stream.getvalue())
+            self.assertEqual(1, payload["report"]["metrics"]["cases"])
+
     def test_review_cli_lists_and_approves_without_vault_writes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
