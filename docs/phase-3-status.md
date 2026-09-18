@@ -10,7 +10,8 @@ bounded retry and a frozen contract evaluation are present. The packaged frozen
 holdout passed through the configured live provider/model without publishing or
 persisting candidates.
 
-ChatGPT support remains experimental until a real export shape is inspected.
+The real ChatGPT `chat.html` source shape now passes aggregate-only parsing;
+real-conversation extraction quality remains unaccepted.
 The active Hermes profile is pinned to the accepted prompt-v2 merge commit
 recorded below and enabled. The shadow run did not modify the Vault, private
 state, cron jobs or backup; the gateway was restarted only to load the exact
@@ -75,7 +76,8 @@ installed plugin commit.
 
 ## Remaining acceptance gates
 
-- Inspect one real ChatGPT export and rerun the source-to-segment pipeline.
+- Run bounded exact-source shadow extraction on selected real ChatGPT
+  conversations and review aggregate/audit results without staging.
 - The expanded synthetic set remains smaller than the planned private golden
   dataset and is not by itself full real-world model-quality acceptance. The
   runner is merged and installed, but human-labeled real cases are not yet

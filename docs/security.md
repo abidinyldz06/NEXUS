@@ -21,6 +21,9 @@ only return JSON matching the NEXUS candidate schema.
   directory. The subprocess runs under `umask 077`; successful JSONL output is
   opened without following symlinks and tightened to `0600` before the wrapper
   returns it.
+- ChatGPT `chat.html` imports decode only the JSON value assigned to `jsonData`;
+  embedded JavaScript is never executed. Unrelated HTML remains on the manual
+  non-rendering text path.
 - Review edit input must be an absolute, regular, non-symlink JSON file no larger
   than 1 MiB and must preserve the candidate's existing fields.
 - Private ingest staging requires one Inbox-relative path and its exact lowercase
