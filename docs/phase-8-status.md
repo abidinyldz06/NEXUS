@@ -4,8 +4,7 @@ Date: 2026-09-18
 
 ## Current slices
 
-Six merged Phase 8 slices and one locally verified delivery candidate implement
-a fail-closed, read-only retention planner,
+Seven merged Phase 8 slices implement a fail-closed, read-only retention planner,
 a metadata-only permission audit, temporary synthetic restore and external
 git-dir rollback drills, a record-scoped canonical forget workflow and explicit
 approved memory/commitment publication. They do
@@ -65,11 +64,10 @@ unattended publishing.
 
 ## Verification
 
-- Current commitment-publication branch: 137 Python 3.11 unit tests passed;
-  bytecode compilation, diff whitespace checks and Plugin Doctor also passed.
-- Installed `main`: 132 tests passed at exact merge commit
-  `e14b1be1bd7054fcb8788ba1784c817905205256`; GitHub reported no configured
-  `main` CI runs for that commit.
+- Current merged and installed `main`: 137 Python 3.11 unit tests passed at exact
+  merge commit `4d745856760f23afb9728dee53952732d21fa8ec`; bytecode compilation,
+  diff whitespace checks and Plugin Doctor also passed. GitHub reported no
+  configured `main` CI runs for that commit.
 - Expanded 12-case live shadow passed with prompt v2 at 100% recall, 90%
   precision, 91.67% exact-case match, 100% empty-case precision/provenance and
   zero schema failures; no writes or publication occurred.
@@ -199,6 +197,12 @@ unattended publishing.
 - Hermes later recorded the first automatic 09:00 reminder canary as `completed`
   with `source=builtin` at `2026-09-18T09:00:04+03:00`. Six scheduled runs remain
   before the seven-day acceptance gate closes.
+- PR #29 was squash-merged as
+  `4d745856760f23afb9728dee53952732d21fa8ec`, adding reviewed commitment
+  publication. The active Hermes plugin is pinned to that exact commit; 137
+  installed-copy tests, bytecode compilation and Plugin Doctor pass. GitHub
+  reported no configured `main` CI runs for the merge commit, and the controlled
+  gateway restart produced running PID `95168`.
 
 ## Not yet delivered
 
@@ -213,16 +217,17 @@ unattended publishing.
   scheduled runs before final v0.1 acceptance.
 - No production memory publication has been authorized or applied. Apply has
   been exercised only against temporary synthetic Vaults.
-- Commitment publication is locally verified but is not yet merged or installed.
-  No production commitment or reminder state has been written.
+- No production commitment publication has been authorized or applied. Apply has
+  been exercised only against temporary synthetic Vaults, so no production
+  commitment or reminder state has been written.
 
 ## Delivery state
 
 The retention dry-run, permission-audit/backup-policy, synthetic restore-drill,
 synthetic Git rollback, record-scoped canonical forget, approved-memory
 publication and exact-source private staging slices are merged, installed and
-accepted within their narrow safety boundaries. Commitment publication remains
-a locally verified delivery candidate until its PR is merged and installed.
+accepted within their narrow safety boundaries. Reviewed commitment publication
+is also merged, installed and accepted within its synthetic-only safety boundary.
 Retention found no expiry candidates, permission audit found no insecure or
 unsafe entries, and both drill verifications used temporary synthetic data only.
 No retention deletion, permission repair, production backup capability or

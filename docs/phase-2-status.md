@@ -61,7 +61,7 @@ queue, while keeping the canonical Vault and publication path untouched.
 - A changed conversation kept its source ID and advanced to revision 2.
 - Symlink, oversize, format mismatch, malformed export and post-discovery mutation
   cases failed closed.
-- Current local branch combined suite: 137 tests passed. Shadow coverage proves exact SHA,
+- Current merged and installed suite: 137 tests passed. Shadow coverage proves exact SHA,
   aggregate-only output, no private writes, explicit multi-conversation selection
   and pre-model segment-limit refusal.
 - Synthetic stage coverage proves wrong-SHA and model-failure zero-write behavior,
