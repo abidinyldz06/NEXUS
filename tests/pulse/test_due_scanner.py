@@ -36,6 +36,7 @@ def due_commitment(index: int) -> Commitment:
         due_date="2026-09-18",
         due_precision=DuePrecision.DAY,
         notify=True,
+        extractor={"model": "fixture"},
     )
 
 
@@ -63,6 +64,7 @@ class DueScannerTests(unittest.TestCase):
                 (vault / repository.record_path(item)).read_text(encoding="utf-8")
             )
             self.assertEqual("2026-09-18T06:00:00Z", payload["notified_at"])
+            self.assertEqual({"model": "fixture"}, payload["extractor"])
 
     def test_digest_marks_at_most_twenty_items_per_run(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

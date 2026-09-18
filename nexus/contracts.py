@@ -310,6 +310,7 @@ class Commitment:
     status: CommitmentStatus = CommitmentStatus.OPEN
     notify: bool = False
     notified_at: str | None = None
+    extractor: dict[str, Any] = field(default_factory=dict)
     schema_version: int = SCHEMA_VERSION
 
     def __post_init__(self) -> None:
@@ -335,6 +336,8 @@ class Commitment:
             raise ContractError("notify must be a boolean")
         if self.notified_at is not None:
             _require_datetime(self.notified_at, "notified_at")
+        if not isinstance(self.extractor, dict):
+            raise ContractError("extractor must be an object")
         if self.notify and self.due_precision is DuePrecision.AMBIGUOUS:
             raise ContractError("ambiguous commitments cannot enable notifications")
 

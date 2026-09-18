@@ -1,19 +1,21 @@
 # Phase 8 delivery status
 
-Date: 2026-09-17
+Date: 2026-09-18
 
 ## Current slices
 
-Six merged Phase 8 slices implement a fail-closed, read-only retention planner,
+Six merged Phase 8 slices and one locally verified delivery candidate implement
+a fail-closed, read-only retention planner,
 a metadata-only permission audit, temporary synthetic restore and external
 git-dir rollback drills, a record-scoped canonical forget workflow and explicit
-approved-memory publication. They do
+approved memory/commitment publication. They do
 not implement retention deletion, event-log compaction, subject-wide privacy
 erasure, production backup/restore or production Vault Git history. Production
 canonical data has not been deleted.
 
-The sixth slice is limited to APPROVED/EDITED memory review items, requires
-dry-run or exact ID-confirmed apply, and does not enable unattended publishing.
+The publication slices are limited to APPROVED/EDITED memory or commitment
+review items, require dry-run or exact ID-confirmed apply, and do not enable
+unattended publishing.
 
 ## Implemented
 
@@ -55,10 +57,19 @@ dry-run or exact ID-confirmed apply, and does not enable unattended publishing.
 - Idempotent repeat apply and recovery of a missing private review audit without
   rewriting canonical Vault bytes.
 - Exact target/view rollback when initial publication index rebuild fails.
+- Closed commitment completion shape with model-unresolved actor and
+  `notify=false`, followed by audited human edit.
+- Canonical actor/target existence checks, deterministic commitment ID, exact
+  review-ID apply, reminder-index rebuild and idempotent replay without changing
+  Current-Memory view.
 
 ## Verification
 
-- Python 3.11 unit tests: 122 passed on `main` and the installed plugin copy.
+- Current commitment-publication branch: 137 Python 3.11 unit tests passed;
+  bytecode compilation, diff whitespace checks and Plugin Doctor also passed.
+- Installed `main`: 132 tests passed at exact merge commit
+  `e14b1be1bd7054fcb8788ba1784c817905205256`; GitHub reported no configured
+  `main` CI runs for that commit.
 - Expanded 12-case live shadow passed with prompt v2 at 100% recall, 90%
   precision, 91.67% exact-case match, 100% empty-case precision/provenance and
   zero schema failures; no writes or publication occurred.
@@ -177,6 +188,17 @@ dry-run or exact ID-confirmed apply, and does not enable unattended publishing.
   with PID `57397`. At `2026-09-18 07:56 +03`, the daily 09:00 canary had not yet
   reached its first scheduled window; only the earlier successful direct run was
   present, so scheduled-canary acceptance remains open.
+- PR #28 was squash-merged as
+  `e14b1be1bd7054fcb8788ba1784c817905205256`, adding exact-source private review
+  staging. The active Hermes plugin is pinned to that exact commit; 132
+  installed-copy tests, bytecode compilation and Plugin Doctor pass. GitHub
+  reported no configured `main` CI runs for the merge commit.
+- Direct launchd inspection after the PR #28 install showed the gateway running
+  with PID `61559`. At `2026-09-18 08:18 +03`, the 09:00 scheduled canary had not
+  yet reached its first window; only the earlier successful direct run remained.
+- Hermes later recorded the first automatic 09:00 reminder canary as `completed`
+  with `source=builtin` at `2026-09-18T09:00:04+03:00`. Six scheduled runs remain
+  before the seven-day acceptance gate closes.
 
 ## Not yet delivered
 
@@ -187,17 +209,20 @@ dry-run or exact ID-confirmed apply, and does not enable unattended publishing.
   policy is exercised only with temporary synthetic data.
 - No production Vault external git-dir rollback canary or real Vault Git history;
   installed acceptance used temporary synthetic files only.
-- Phase 7 local-only reminder canary remains time-gated through seven scheduled
-  runs before final v0.1 acceptance.
+- Phase 7 local-only reminder canary remains time-gated through six more
+  scheduled runs before final v0.1 acceptance.
 - No production memory publication has been authorized or applied. Apply has
   been exercised only against temporary synthetic Vaults.
+- Commitment publication is locally verified but is not yet merged or installed.
+  No production commitment or reminder state has been written.
 
 ## Delivery state
 
 The retention dry-run, permission-audit/backup-policy, synthetic restore-drill,
-synthetic Git rollback, record-scoped canonical forget and approved-memory
-publication slices are merged, installed and accepted within their narrow
-safety boundaries.
+synthetic Git rollback, record-scoped canonical forget, approved-memory
+publication and exact-source private staging slices are merged, installed and
+accepted within their narrow safety boundaries. Commitment publication remains
+a locally verified delivery candidate until its PR is merged and installed.
 Retention found no expiry candidates, permission audit found no insecure or
 unsafe entries, and both drill verifications used temporary synthetic data only.
 No retention deletion, permission repair, production backup capability or

@@ -65,6 +65,13 @@ kullanır, source reference'ları korur, Current-Memory view'i ve derived indeks
 yeniler ve private publication audit'i ekler. Bu komut otomatik yayın değildir;
 production apply ayrıca hedefe özel operasyon onayı gerektirir.
 
+Yedinci dar dilim aynı explicit dry-run/exact-ID apply kapısını onaylanmış veya
+düzenlenmiş `commitment` adaylarına genişletir. Staging actor kimliğini boş ve
+`notify=false` bırakır; operatör mevcut kapalı alanları edit ederek actor/target
+entity ID'lerini ve tarihi doğrulamadıkça publication planı çalışmaz. Başarılı
+apply canonical commitment'ı ve reminder indeksini günceller, Current-Memory
+view'ine dokunmaz ve otomatik yayın açmaz.
+
 Güncel 12-vakalı frozen holdout, aktif `ollama-cloud` / `glm-5.3-flash` rotasında
 prompt v2 ile shadow kabul kapısını geçmiştir: recall `%100`, precision `%90`,
 exact-case `%91,67`, empty-case precision ve provenance `%100`, schema failure
@@ -165,8 +172,9 @@ sayıları basar ve raw/state/review/Vault yazmaz.
 alanına içerik-adresli olarak alır, source lineage state'ini idempotent günceller
 ve yalnız policy'nin review'a uygun bulduğu adayları private append-only review
 kuyruğuna ekler. Tekrar çalıştırma review adayını çoğaltmaz; çıktı yalnız toplu
-sayılar verir. Vault'a yazmaz, aday yayınlamaz ve memory adayları insanın
-`memory_type` seçimini gerektirir.
+sayılar verir. Vault'a yazmaz, aday yayınlamaz; memory adayları insanın
+`memory_type`, commitment adayları ise actor/target/tarih/notification seçimini
+gerektirir.
 `eval --shadow` yalnız paketlenmiş sentetik frozen holdout'u aktif
 `nexus_extract` model yoluna gönderir; aday içeriği yazmaz veya yayınlamaz ve
 yalnız kalite/audit ölçümlerini ekrana verir. Review komutları yalnız private
@@ -185,8 +193,9 @@ bağımlılık sayısı sıfırken hedefi siler, memory view'i yeniler, indeksi 
 ve içeriksiz private audit olayı yazar. Bu kayıt-bazlı workflow raw/quarantine
 dosyalarını veya subject-wide kişisel veri kopyalarını temizlemez.
 `review publish REV_ID --dry-run` yalnız APPROVED/EDITED durumundaki `memory`
-adayını ve deterministik hedefini doğrular. `--apply --confirm REV_ID` canonical
-kaydı, generated view'i ve derived indeksi günceller; aynı içeriğin tekrarı
+veya `commitment` adayını ve deterministik hedefini doğrular. `--apply --confirm
+REV_ID` canonical kaydı ve derived indeksi günceller; memory için generated view
+de yenilenir, commitment için değiştirilmez. Aynı içeriğin tekrarı
 idempotent'tır. Canonical commit sonrasında private review audit yazımı geçici
 olarak başarısız olursa komut hata verir; aynı apply komutunun tekrarı eksik audit'i
 tamamlar ve canonical kaydı yeniden yazmaz.
@@ -203,7 +212,7 @@ Backup sınıflandırması ve restore güvenlik sınırı:
 [`docs/backup-policy.md`](docs/backup-policy.md).
 Canonical kayıt unutma güvenlik akışı:
 [`docs/forget-workflow.md`](docs/forget-workflow.md).
-Onaylı hafıza yayınlama güvenlik akışı:
+Onaylı hafıza/commitment yayınlama güvenlik akışı:
 [`docs/publication-workflow.md`](docs/publication-workflow.md).
 
 Extraction servisi yalnız plugin-owned `nexus_extract` auxiliary task'ını kullanır;

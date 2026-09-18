@@ -43,6 +43,11 @@ class JsonSchemaTests(unittest.TestCase):
         self.assertIn("publication", review["properties"])
         self.assertNotIn("publication", review["required"])
 
+    def test_commitment_extractor_is_allowed_but_optional_for_legacy_v1_records(self) -> None:
+        commitment = self.schema["$defs"]["commitment"]
+        self.assertEqual({"type": "object"}, commitment["properties"]["extractor"])
+        self.assertNotIn("extractor", commitment["required"])
+
 
 if __name__ == "__main__":
     unittest.main()
