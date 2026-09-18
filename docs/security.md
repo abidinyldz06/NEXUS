@@ -71,6 +71,10 @@ only return JSON matching the NEXUS candidate schema.
   actor/target entities. Staging cannot choose an actor or enable notification;
   those fields require an audited human edit. Apply writes only the commitment,
   rebuilds the reminder index and never changes Current-Memory view.
+- Approved-entity publication accepts only a separate closed candidate shape,
+  requires an exact review-ID confirmation and leaves entity type as an audited
+  human choice. It rejects display/normalized-name mismatch and same-type exact
+  alias/linked-note collisions before writing a deterministic canonical entity.
 - Permission audit reads metadata only, reports aggregate issue counts and
   treats symlinks, non-regular entries, ownership mismatch and group/world
   access as failures without changing modes.

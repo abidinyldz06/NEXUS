@@ -25,9 +25,11 @@ class StageLlm:
         *,
         statement: str = "Kullanıcı kısa yanıtları tercih ediyor.",
         kind: str = "memory",
+        entity_mentions: tuple[str, ...] = (),
     ) -> None:
         self.statement = statement
         self.kind = kind
+        self.entity_mentions = entity_mentions
         self.calls = 0
 
     def complete_structured(self, **kwargs):
@@ -41,7 +43,7 @@ class StageLlm:
                     {
                         "kind": self.kind,
                         "statement": self.statement,
-                        "entity_mentions": [],
+                        "entity_mentions": list(self.entity_mentions),
                         "temporal_expression": None,
                         "source_span_ids": [spans[0]["span_id"]],
                         "confidence": 0.96,
@@ -283,6 +285,40 @@ class IngestMetadataTests(unittest.TestCase):
             self.assertIsNone(item.candidate["actor_entity_id"])
             self.assertEqual("ambiguous", item.candidate["due_precision"])
             self.assertFalse(item.candidate["notify"])
+
+    def test_staged_entity_has_closed_human_completion_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = _stage_config(Path(directory))
+            discovered = _source(config, "Hasan Usta benim tesisatçım.")
+
+            stage_inbox_source(
+                config,
+                StageLlm(
+                    kind="entity",
+                    statement="Hasan Usta kişisi.",
+                    entity_mentions=("Hasan Usta",),
+                ),
+                relative_path="note.md",
+                confirmed_sha256=discovered.content_sha256,
+            )
+
+            item = ReviewStore(config.data_path).list()[0]
+            self.assertEqual("entity", item.candidate_kind)
+            self.assertEqual(
+                {
+                    "display_name",
+                    "normalized_name",
+                    "entity_type",
+                    "aliases",
+                    "linked_notes",
+                    "extractor",
+                },
+                set(item.candidate),
+            )
+            self.assertEqual("Hasan Usta", item.candidate["display_name"])
+            self.assertEqual("hasan usta", item.candidate["normalized_name"])
+            self.assertIsNone(item.candidate["entity_type"])
+            self.assertIn("entity_type_required", item.reason_codes)
 
 
 if __name__ == "__main__":

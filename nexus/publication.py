@@ -13,12 +13,15 @@ from .config import NexusConfig
 from .contracts import (
     Commitment,
     DuePrecision,
+    Entity,
+    EntityType,
     Impact,
     Memory,
     MemoryType,
     ReviewItem,
     ReviewStatus,
 )
+from .entity import normalize_alias
 from .errors import ContractError, NexusIndexError, PublicationError, ReviewStoreError, VaultError
 from .ids import IdPrefix, new_id
 from .index import RebuildResult, rebuild_index
@@ -31,6 +34,14 @@ from .vault.rebuild_views import MemoryViewEntry, render_memory_view_entries
 
 _MEMORY_REQUIRED_FIELDS = {"statement", "memory_type", "confidence", "impact"}
 _MEMORY_OPTIONAL_FIELDS = {"entity_ids", "extractor"}
+_ENTITY_FIELDS = {
+    "display_name",
+    "normalized_name",
+    "entity_type",
+    "aliases",
+    "linked_notes",
+    "extractor",
+}
 _COMMITMENT_FIELDS = {
     "statement",
     "actor_entity_id",
@@ -45,7 +56,7 @@ _COMMITMENT_FIELDS = {
     "extractor",
 }
 
-PublishRecord = Memory | Commitment
+PublishRecord = Memory | Entity | Commitment
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,13 +202,65 @@ def _commitment_from_review(item: ReviewItem) -> Commitment:
         raise PublicationError("commitment candidate cannot form a canonical record") from exc
 
 
+def _entity_from_review(item: ReviewItem) -> Entity:
+    candidate = item.candidate
+    if set(candidate) != _ENTITY_FIELDS:
+        raise PublicationError("entity candidate must match the closed publication shape")
+    display_name = candidate.get("display_name")
+    normalized_name = candidate.get("normalized_name")
+    aliases = candidate.get("aliases")
+    linked_notes = candidate.get("linked_notes")
+    extractor = candidate.get("extractor")
+    if not isinstance(display_name, str) or not display_name.strip():
+        raise PublicationError("entity candidate display_name must not be empty")
+    if not isinstance(normalized_name, str) or not normalized_name.strip():
+        raise PublicationError("entity candidate normalized_name must not be empty")
+    if normalized_name != normalize_alias(display_name):
+        raise PublicationError("entity candidate normalized_name must match display_name")
+    if not isinstance(aliases, list) or not isinstance(linked_notes, list):
+        raise PublicationError("entity candidate aliases and linked_notes must be arrays")
+    if not isinstance(extractor, dict):
+        raise PublicationError("entity candidate extractor must be an object")
+    try:
+        return Entity(
+            id=_record_id(item.id, IdPrefix.ENTITY),
+            type=EntityType(candidate["entity_type"]),
+            display_name=display_name.strip(),
+            normalized_name=normalized_name,
+            aliases=tuple(aliases),
+            linked_notes=tuple(linked_notes),
+            source_refs=item.source_refs,
+        )
+    except (ContractError, KeyError, TypeError, ValueError, VaultError) as exc:
+        raise PublicationError("entity candidate cannot form a canonical record") from exc
+
+
 def _record_from_review(item: ReviewItem) -> tuple[PublishRecord, str]:
     _require_approved(item)
     if item.candidate_kind == "memory":
         return _memory_from_review(item), "memory"
     if item.candidate_kind == "commitment":
         return _commitment_from_review(item), "commitment"
-    raise PublicationError("this publish slice supports memory or commitment review items only")
+    if item.candidate_kind == "entity":
+        return _entity_from_review(item), "entity"
+    raise PublicationError(
+        "this publish slice supports memory, commitment or entity review items only"
+    )
+
+
+def _entity_names(payload: dict[str, object]) -> set[str]:
+    values = [payload.get("display_name"), payload.get("normalized_name")]
+    aliases = payload.get("aliases", [])
+    if isinstance(aliases, list):
+        values.extend(aliases)
+    return {normalize_alias(value) for value in values if isinstance(value, str) and value.strip()}
+
+
+def _entity_linked_notes(payload: dict[str, object]) -> set[str]:
+    linked_notes = payload.get("linked_notes", [])
+    if not isinstance(linked_notes, list):
+        return set()
+    return {value for value in linked_notes if isinstance(value, str) and value.strip()}
 
 
 def _analyze(config: NexusConfig, review_id: str) -> _PublicationAnalysis:
@@ -209,10 +272,33 @@ def _analyze(config: NexusConfig, review_id: str) -> _PublicationAnalysis:
     entities = {indexed.record_id for indexed in records if indexed.kind == "entity"}
     if isinstance(record, Memory):
         referenced_entities = record.entity_ids
-    else:
+    elif isinstance(record, Commitment):
         referenced_entities = (record.actor_entity_id, *record.target_entity_ids)
+    else:
+        referenced_entities = ()
     if any(entity_id not in entities for entity_id in referenced_entities):
         raise PublicationError(f"{record_kind} candidate references a missing canonical entity")
+    if isinstance(record, Entity):
+        candidate_names = {
+            normalize_alias(record.display_name),
+            normalize_alias(record.normalized_name),
+            *(normalize_alias(alias) for alias in record.aliases),
+        }
+        candidate_notes = set(record.linked_notes)
+        collision = any(
+            indexed.kind == "entity"
+            and indexed.payload.get("type") == record.type.value
+            and (
+                bool(candidate_names & _entity_names(indexed.payload))
+                or bool(candidate_notes & _entity_linked_notes(indexed.payload))
+            )
+            for indexed in records
+            if indexed.record_id != record.id
+        )
+        if collision:
+            raise PublicationError(
+                "entity candidate conflicts with an existing exact typed alias or linked note"
+            )
     existing = next((item for item in records if item.record_id == record.id), None)
     if existing is not None:
         if existing.kind != record_kind or existing.payload != to_primitive(record):

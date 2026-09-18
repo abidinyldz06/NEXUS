@@ -259,6 +259,10 @@ class Entity:
         _require_enum(self.type, EntityType, "type")
         _require_text(self.display_name, "display_name")
         _require_text(self.normalized_name, "normalized_name")
+        for alias in self.aliases:
+            _require_text(alias, "aliases item")
+        for linked_note in self.linked_notes:
+            _require_text(linked_note, "linked_notes item")
         if any(not isinstance(item, SourceRef) for item in self.source_refs):
             raise ContractError("source_refs items must be SourceRef values")
 
