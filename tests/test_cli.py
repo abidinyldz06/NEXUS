@@ -65,7 +65,7 @@ class CliTests(unittest.TestCase):
             json.loads(stream.getvalue())["write_scope"],
         )
 
-    def test_ingest_requires_explicit_dry_run(self) -> None:
+    def test_ingest_requires_explicit_mode(self) -> None:
         parser = parser_for(FakeContext())
         args = parser.parse_args(["ingest", "--json"])
         stream = io.StringIO()
@@ -74,7 +74,7 @@ class CliTests(unittest.TestCase):
             result = args.func(args)
 
         self.assertEqual(2, result)
-        self.assertIn("only supports", stream.getvalue())
+        self.assertIn("requires exactly one", stream.getvalue())
 
     def test_ingest_dry_run_parses_without_writing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -105,6 +105,276 @@ class CliTests(unittest.TestCase):
             self.assertFalse(payload["writes_performed"])
             self.assertEqual(1, payload["summary"]["messages"])
             self.assertFalse((root / "private").exists())
+
+    def test_ingest_shadow_requires_exact_source_and_reports_aggregates_only(self) -> None:
+        class ShadowLlm:
+            def complete_structured(self, **kwargs):
+                envelope = json.loads(kwargs["input"][0]["text"].split("\n", 1)[1])
+                span_ids = [item["span_id"] for item in envelope["spans"]]
+                parsed = {
+                    "schema_version": 1,
+                    "candidates": [
+                        {
+                            "kind": "memory",
+                            "statement": "Synthetic durable preference",
+                            "entity_mentions": [],
+                            "temporal_expression": None,
+                            "source_span_ids": span_ids,
+                            "confidence": 0.95,
+                            "ambiguity_flags": [],
+                            "possible_supersedes": [],
+                        }
+                    ],
+                    "ignored_span_ids": [],
+                    "warnings": [],
+                }
+                return SimpleNamespace(
+                    parsed=parsed,
+                    text=json.dumps(parsed),
+                    provider="fixture-provider",
+                    model="fixture-model",
+                    agent_id="fixture-agent",
+                    usage=SimpleNamespace(input_tokens=10, output_tokens=5, total_tokens=15),
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inbox = root / "inbox"
+            inbox.mkdir()
+            note = inbox / "private-note.md"
+            private_text = "DO_NOT_PRINT synthetic durable preference"
+            note.write_text(private_text, encoding="utf-8")
+            old = time.time() - 60
+            os.utime(note, (old, old))
+            digest = sha256(note.read_bytes()).hexdigest()
+            context = FakeContext(
+                {
+                    "inbox_path": str(inbox),
+                    "data_path": str(root / "private"),
+                    "source_stable_seconds": 1,
+                },
+                llm=ShadowLlm(),
+            )
+            parser = parser_for(context)
+            args = parser.parse_args(
+                [
+                    "ingest",
+                    "--shadow",
+                    "--source",
+                    note.name,
+                    "--confirm-sha",
+                    digest,
+                    "--json",
+                ]
+            )
+            stream = io.StringIO()
+
+            with contextlib.redirect_stdout(stream):
+                result = args.func(args)
+
+            output = stream.getvalue()
+            payload = json.loads(output)
+            self.assertEqual(0, result)
+            self.assertTrue(payload["ok"])
+            self.assertFalse(payload["writes_performed"])
+            self.assertFalse(payload["candidates_published"])
+            self.assertEqual(20, payload["extraction"]["segment_limit"])
+            self.assertEqual({"memory": 1}, payload["extraction"]["candidate_kinds"])
+            self.assertEqual(["fixture-model"], payload["audit"]["models"])
+            self.assertNotIn(private_text, output)
+            self.assertNotIn("Synthetic durable preference", output)
+            self.assertFalse((root / "private").exists())
+
+    def test_ingest_shadow_rejects_wrong_confirmation_before_model_call(self) -> None:
+        class NoCallLlm:
+            def complete_structured(self, **kwargs):
+                raise AssertionError("model must not be called for a mismatched SHA")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inbox = root / "inbox"
+            inbox.mkdir()
+            note = inbox / "note.md"
+            note.write_text("Synthetic", encoding="utf-8")
+            old = time.time() - 60
+            os.utime(note, (old, old))
+            parser = parser_for(
+                FakeContext(
+                    {"inbox_path": str(inbox), "source_stable_seconds": 1},
+                    llm=NoCallLlm(),
+                )
+            )
+            args = parser.parse_args(
+                [
+                    "ingest",
+                    "--shadow",
+                    "--source",
+                    note.name,
+                    "--confirm-sha",
+                    "0" * 64,
+                    "--json",
+                ]
+            )
+            stream = io.StringIO()
+
+            with contextlib.redirect_stdout(stream):
+                result = args.func(args)
+
+            payload = json.loads(stream.getvalue())
+            self.assertEqual(2, result)
+            self.assertFalse(payload["ok"])
+            self.assertFalse(payload["writes_performed"])
+            self.assertIn("does not match", payload["errors"][0])
+
+    def test_ingest_shadow_requires_conversation_for_multi_conversation_source(self) -> None:
+        class NoCallLlm:
+            def complete_structured(self, **kwargs):
+                raise AssertionError("model must not be called before conversation selection")
+
+        def conversation(identifier: str) -> dict[str, object]:
+            message_id = f"message-{identifier}"
+            return {
+                "id": identifier,
+                "current_node": message_id,
+                "mapping": {
+                    message_id: {
+                        "id": message_id,
+                        "parent": None,
+                        "message": {
+                            "id": message_id,
+                            "author": {"role": "user"},
+                            "content": {"parts": [f"Synthetic {identifier}"]},
+                        },
+                    }
+                },
+            }
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inbox = root / "inbox"
+            inbox.mkdir()
+            export = inbox / "conversations.json"
+            export.write_text(
+                json.dumps([conversation("conversation-1"), conversation("conversation-2")]),
+                encoding="utf-8",
+            )
+            old = time.time() - 60
+            os.utime(export, (old, old))
+            digest = sha256(export.read_bytes()).hexdigest()
+            parser = parser_for(
+                FakeContext(
+                    {"inbox_path": str(inbox), "source_stable_seconds": 1},
+                    llm=NoCallLlm(),
+                )
+            )
+            args = parser.parse_args(
+                [
+                    "ingest",
+                    "--shadow",
+                    "--source",
+                    export.name,
+                    "--confirm-sha",
+                    digest,
+                    "--json",
+                ]
+            )
+            stream = io.StringIO()
+
+            with contextlib.redirect_stdout(stream):
+                result = args.func(args)
+
+            payload = json.loads(stream.getvalue())
+            self.assertEqual(2, result)
+            self.assertIn("require --conversation", payload["errors"][0])
+
+            class SelectedLlm:
+                def complete_structured(self, **kwargs):
+                    envelope = json.loads(kwargs["input"][0]["text"].split("\n", 1)[1])
+                    span_ids = [item["span_id"] for item in envelope["spans"]]
+                    parsed = {
+                        "schema_version": 1,
+                        "candidates": [],
+                        "ignored_span_ids": span_ids,
+                        "warnings": [],
+                    }
+                    return SimpleNamespace(
+                        parsed=parsed,
+                        text=json.dumps(parsed),
+                        provider="fixture-provider",
+                        model="fixture-model",
+                        agent_id="fixture-agent",
+                        usage=SimpleNamespace(input_tokens=10, output_tokens=5, total_tokens=15),
+                    )
+
+            selected_parser = parser_for(
+                FakeContext(
+                    {"inbox_path": str(inbox), "source_stable_seconds": 1},
+                    llm=SelectedLlm(),
+                )
+            )
+            selected_args = selected_parser.parse_args(
+                [
+                    "ingest",
+                    "--shadow",
+                    "--source",
+                    export.name,
+                    "--confirm-sha",
+                    digest,
+                    "--conversation",
+                    "conversation-2",
+                    "--json",
+                ]
+            )
+            selected_stream = io.StringIO()
+            with contextlib.redirect_stdout(selected_stream):
+                selected_result = selected_args.func(selected_args)
+
+            selected_payload = json.loads(selected_stream.getvalue())
+            self.assertEqual(0, selected_result)
+            self.assertEqual(1, selected_payload["source"]["conversations"])
+            self.assertEqual(1, selected_payload["audit"]["successful_calls"])
+
+    def test_ingest_shadow_rejects_segment_limit_before_model_call(self) -> None:
+        class NoCallLlm:
+            def complete_structured(self, **kwargs):
+                raise AssertionError("model must not be called for an invalid segment limit")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inbox = root / "inbox"
+            inbox.mkdir()
+            note = inbox / "note.md"
+            note.write_text("Synthetic", encoding="utf-8")
+            old = time.time() - 60
+            os.utime(note, (old, old))
+            digest = sha256(note.read_bytes()).hexdigest()
+            parser = parser_for(
+                FakeContext(
+                    {"inbox_path": str(inbox), "source_stable_seconds": 1},
+                    llm=NoCallLlm(),
+                )
+            )
+            args = parser.parse_args(
+                [
+                    "ingest",
+                    "--shadow",
+                    "--source",
+                    note.name,
+                    "--confirm-sha",
+                    digest,
+                    "--max-segments",
+                    "0",
+                    "--json",
+                ]
+            )
+            stream = io.StringIO()
+
+            with contextlib.redirect_stdout(stream):
+                result = args.func(args)
+
+            payload = json.loads(stream.getvalue())
+            self.assertEqual(2, result)
+            self.assertIn("between 1 and 100", payload["errors"][0])
 
     def test_retention_requires_dry_run_and_reports_aggregate_counts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
