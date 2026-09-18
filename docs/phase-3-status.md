@@ -35,8 +35,7 @@ installed plugin commit.
   and high-risk user facts.
 - Explicit `hermes nexus eval --shadow` safety gate for the packaged frozen
   fixture; no candidate content is persisted or printed.
-- The current delivery candidate adds an optional private-golden shadow path
-  under `data_path/eval/private/` with
+- An optional private-golden shadow path under `data_path/eval/private/` with
   basename-only selection, exact SHA-256 confirmation, symlink/size checks and
   aggregate-only output.
 - Provider, model, agent, prompt/schema version, fixture hash and token-usage
@@ -79,6 +78,6 @@ installed plugin commit.
 - Inspect one real ChatGPT export and rerun the source-to-segment pipeline.
 - The expanded synthetic set remains smaller than the planned private golden
   dataset and is not by itself full real-world model-quality acceptance. The
-  delivery candidate supplies the runner, but human-labeled real cases are not
-  yet present and no private-golden acceptance run has been claimed.
+  runner is merged and installed, but human-labeled real cases are not yet
+  present and no private-golden acceptance run has been claimed.
 - Keep auto-publish disabled; Phase 4 policy/review must not be started implicitly.

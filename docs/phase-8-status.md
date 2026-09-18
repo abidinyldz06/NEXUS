@@ -77,8 +77,8 @@ apply, and do not enable unattended publishing.
 
 ## Verification
 
-- Current merged and installed `main`: 152 Python unit tests passed at exact
-  merge commit `c515b90bd7425e873e18ceb9be9af6d1821c59d4`; bytecode compilation,
+- Current merged and installed `main`: 155 Python unit tests passed at exact
+  merge commit `3e382c5e67a5b848c93ea1787fa3b31f303da822`; bytecode compilation,
   diff whitespace checks and Plugin Doctor also passed. GitHub reported no
   configured `main` CI runs for that commit.
 - The correction-publication delivery candidate passed 152 working-tree and
@@ -239,6 +239,15 @@ apply, and do not enable unattended publishing.
   installed-copy tests, bytecode compilation and Plugin Doctor pass. GitHub
   reported no configured `main` CI runs, and the controlled gateway restart
   produced running PID `39976`.
+- PR #35 was squash-merged as
+  `3e382c5e67a5b848c93ea1787fa3b31f303da822`, adding the SHA-confirmed,
+  aggregate-only private golden shadow runner. The active Hermes plugin is
+  pinned to that exact commit; 155 installed-copy tests, bytecode compilation
+  and Plugin Doctor pass. The command surface exposes the private dataset and
+  exact digest gates, but no human-labeled fixture was present and no private
+  model-quality acceptance run was claimed. The controlled gateway restart
+  produced running PIDs `82737`/`82734`; cron reports the gateway active while
+  launchd status still reports the existing detached-process discrepancy.
 
 ## Not yet delivered
 

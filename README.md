@@ -16,8 +16,8 @@ deterministik policy, tekrar oynatılabilir review kuyruğu ve atomik canonical
 Vault writer, disposable SQLite FTS5 indeks ve local-only Pulse scanner içerir.
 ChatGPT adapter gerçek
 export doğrulanana kadar experimental'dır. Aktif kurulum merge commit'i
-`ed9df38fb730d3de8ee3ac9432d596f3599651e4` ile sabitlenmiş; 126 kurulu-kopya
-testi, Plugin Doctor,
+`3e382c5e67a5b848c93ea1787fa3b31f303da822` ile sabitlenmiş; 155 kurulu-kopya
+testi, bytecode doğrulaması, Plugin Doctor,
 local/no-agent reminder canary, retention dry-run ve salt-okunur production
 permission audit, iki synthetic drill, yazmasız canonical forget ve approved
 memory publish dry-run'ları ile doğrulanmıştır. Sistem
@@ -98,6 +98,11 @@ prompt v2 ile shadow kabul kapısını geçmiştir: recall `%100`, precision `%9
 exact-case `%91,67`, empty-case precision ve provenance `%100`, schema failure
 `0`. Bu sentetik contract kanıtıdır; private golden-dataset kabulü veya
 auto-publish yetkisi değildir.
+
+Aktif kurulum ayrıca owner-only `data_path/eval/private/` altında basename ve
+exact SHA-256 ile seçilen private golden fixture'ı aggregate-only shadow modunda
+çalıştırabilir. İnsan etiketli gerçek fixture henüz sağlanmadığı için bu yolun
+model-kalite kabul koşusu yapılmamıştır.
 
 Phase 4 review kararları yalnız Vault dışındaki private data dizininde `0600`
 append-only JSONL olayları olarak saklanır. Approve/edit kararı tek başına
