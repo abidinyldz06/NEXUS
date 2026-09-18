@@ -1,0 +1,51 @@
+{
+  "date": "2026-09-18",
+  "source_commit": "6dc8d5d5b8644cb8807c7902285786aba9ed15ee",
+  "fixture": "nexus/eval/fixtures/extraction_holdout_v2.json",
+  "fixture_sha256": "c195bec7f1adc64bea8df7b2d0804a3fdfa47181732ffbcb1a5c49cc0d14f084",
+  "mode": "live-shadow-no-publish",
+  "accepted": true,
+  "provider": "ollama-cloud",
+  "model": "glm-5.3-flash",
+  "agent_id": "default",
+  "prompt_version": "nexus-extraction-prompt-v2",
+  "prompt_sha256": "49e2c0eba2ae2f0ed4662e183a00ceeb6581c1f81e2b98d525b9bdda63de6f4b",
+  "schema_version": 1,
+  "successful_calls": 12,
+  "metrics": {
+    "cases": 12,
+    "segments": 12,
+    "candidates": 10,
+    "provenance_rate": 1.0,
+    "expected_kind_recall": 1.0,
+    "expected_kind_precision": 0.9,
+    "exact_case_match_rate": 0.9166666666666666,
+    "empty_case_precision": 1.0,
+    "schema_failures": 0
+  },
+  "usage": {
+    "input_tokens": 10926,
+    "output_tokens": 10263,
+    "total_tokens": 21189
+  },
+  "writes_performed": false,
+  "candidates_published": false,
+  "predecessor_attempt": {
+    "source_commit": "06b8794a24c0de9f813f80286c66e547fe7c1c19",
+    "prompt_version": "nexus-extraction-prompt-v1",
+    "accepted": false,
+    "expected_kind_recall": 0.8888888888888888,
+    "expected_kind_precision": 0.6666666666666666,
+    "exact_case_match_rate": 0.6666666666666666,
+    "empty_case_precision": 1.0,
+    "provenance_rate": 1.0,
+    "schema_failures": 0,
+    "writes_performed": false,
+    "candidates_published": false
+  },
+  "limitations": [
+    "The holdout contains twelve synthetic contract cases, not a private real-world golden dataset.",
+    "Candidate statements and source content are intentionally not recorded.",
+    "This result does not authorize auto-publish or production writes."
+  ]
+}

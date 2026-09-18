@@ -59,10 +59,10 @@ no output and left the derived SQLite index byte-for-byte unchanged.
 - A Telegram canary requires explicit approval and user-observed delivery; it is
   not accepted by unit tests or an HTTP response alone.
 
-## Operational update — 2026-09-17
+## Operational update — 2026-09-18
 
-- The active Hermes plugin has advanced to Phase 8 merge commit
-  `bd46229aefbddfc76849f3223044d77658fb812e`; Phase 7 reminder behavior remains
+- The active Hermes plugin has advanced to extraction prompt-v2 merge commit
+  `6dc8d5d5b8644cb8807c7902285786aba9ed15ee`; Phase 7 reminder behavior remains
   covered by the combined test suite and Plugin Doctor.
 - The local/no-agent canary survived the controlled gateway restart and remains
   active. Its manual test execution completed successfully without creating a

@@ -58,9 +58,10 @@ dry-run or exact ID-confirmed apply, and does not enable unattended publishing.
 
 ## Verification
 
-- Python 3.11 unit tests: 121 passed on `main` and the installed plugin copy.
-- Expanded eval holdout source branch: 122 tests passed; installed live-shadow
-  acceptance remains pending until merge.
+- Python 3.11 unit tests: 122 passed on `main` and the installed plugin copy.
+- Expanded 12-case live shadow passed with prompt v2 at 100% recall, 90%
+  precision, 91.67% exact-case match, 100% empty-case precision/provenance and
+  zero schema failures; no writes or publication occurred.
 - Approved-memory publication coverage includes CLI dry-run/apply, provenance,
   idempotency, rollback, audit retry and legacy v1 schema compatibility.
 - Old/fresh raw and quarantine boundaries passed.
@@ -157,6 +158,16 @@ dry-run or exact ID-confirmed apply, and does not enable unattended publishing.
   without printing content or session identity.
 - Direct launchd inspection after this install showed the gateway running with
   PID `92561`.
+- PR #24 was squash-merged as
+  `06b8794a24c0de9f813f80286c66e547fe7c1c19`, adding the 12-case holdout and
+  precision/exact-case acceptance gates. Its prompt-v1 live run failed closed
+  without writes or publication.
+- PR #25 was squash-merged as
+  `6dc8d5d5b8644cb8807c7902285786aba9ed15ee`, tightening most-specific kind
+  classification without lowering thresholds. The active Hermes plugin is
+  pinned to this exact commit; 122 installed-copy tests and Plugin Doctor pass.
+- Direct launchd inspection after the prompt-v2 install showed the gateway
+  running with PID `46827`.
 
 ## Not yet delivered
 
