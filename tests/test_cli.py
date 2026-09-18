@@ -226,6 +226,81 @@ class CliTests(unittest.TestCase):
             self.assertFalse(payload["writes_performed"])
             self.assertIn("does not match", payload["errors"][0])
 
+    def test_ingest_stage_writes_private_review_state_without_vault_publication(self) -> None:
+        class StageLlm:
+            def complete_structured(self, **kwargs):
+                envelope = json.loads(kwargs["input"][0]["text"].split("\n", 1)[1])
+                span_ids = [item["span_id"] for item in envelope["spans"]]
+                parsed = {
+                    "schema_version": 1,
+                    "candidates": [
+                        {
+                            "kind": "memory",
+                            "statement": "Synthetic durable preference",
+                            "entity_mentions": [],
+                            "temporal_expression": None,
+                            "source_span_ids": span_ids,
+                            "confidence": 0.95,
+                            "ambiguity_flags": [],
+                            "possible_supersedes": [],
+                        }
+                    ],
+                    "ignored_span_ids": [],
+                    "warnings": [],
+                }
+                return SimpleNamespace(
+                    parsed=parsed,
+                    provider="fixture-provider",
+                    model="fixture-model",
+                    agent_id="fixture-agent",
+                    usage=SimpleNamespace(input_tokens=10, output_tokens=5, total_tokens=15),
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inbox = root / "inbox"
+            inbox.mkdir()
+            note = inbox / "note.md"
+            note.write_text("Kısa yanıtları tercih ederim.", encoding="utf-8")
+            old = time.time() - 60
+            os.utime(note, (old, old))
+            digest = sha256(note.read_bytes()).hexdigest()
+            vault = root / "vault-must-not-exist"
+            context = FakeContext(
+                {
+                    "vault_path": str(vault),
+                    "inbox_path": str(inbox),
+                    "data_path": str(root / "private"),
+                    "source_stable_seconds": 1,
+                },
+                llm=StageLlm(),
+            )
+            parser = parser_for(context)
+            args = parser.parse_args(
+                [
+                    "ingest",
+                    "--stage",
+                    "--source",
+                    note.name,
+                    "--confirm-sha",
+                    digest,
+                    "--json",
+                ]
+            )
+            stream = io.StringIO()
+
+            with contextlib.redirect_stdout(stream):
+                result = args.func(args)
+
+            payload = json.loads(stream.getvalue())
+            self.assertEqual(0, result)
+            self.assertTrue(payload["writes_performed"])
+            self.assertFalse(payload["vault_writes"])
+            self.assertFalse(payload["candidates_published"])
+            self.assertEqual(1, payload["review"]["created"])
+            self.assertEqual(1, len(ReviewStore(root / "private").list()))
+            self.assertFalse(vault.exists())
+
     def test_ingest_shadow_requires_conversation_for_multi_conversation_source(self) -> None:
         class NoCallLlm:
             def complete_structured(self, **kwargs):

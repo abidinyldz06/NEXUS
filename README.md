@@ -16,7 +16,8 @@ deterministik policy, tekrar oynatılabilir review kuyruğu ve atomik canonical
 Vault writer, disposable SQLite FTS5 indeks ve local-only Pulse scanner içerir.
 ChatGPT adapter gerçek
 export doğrulanana kadar experimental'dır. Aktif kurulum merge commit'i
-`6dc8d5d5b8644cb8807c7902285786aba9ed15ee` ile sabitlenmiş; Plugin Doctor,
+`ed9df38fb730d3de8ee3ac9432d596f3599651e4` ile sabitlenmiş; 126 kurulu-kopya
+testi, Plugin Doctor,
 local/no-agent reminder canary, retention dry-run ve salt-okunur production
 permission audit, iki synthetic drill, yazmasız canonical forget ve approved
 memory publish dry-run'ları ile doğrulanmıştır. Sistem
@@ -31,8 +32,8 @@ sıkılaştırır.
   mevcut commitment'ın `notified_at` state'ini güncelleyebilir,
 - retention komutundan Hermes config/cron/gateway dosyalarını değiştirmez;
   reminder canary ayrı olarak local/no-agent çalışır,
-- yalnız açık `eval --shadow` veya exact-source `ingest --shadow` komutlarında
-  model çağrısı yapar,
+- yalnız açık `eval --shadow`, exact-source `ingest --shadow` veya SHA-onaylı
+  `ingest --stage` komutlarında model çağrısı yapar,
 - Telegram veya başka bir dış kanala notification göndermez.
 
 Phase 8'in ilk iki dar parçası olarak retention dry-run ve permission audit aktif
@@ -135,6 +136,7 @@ hermes nexus status
 hermes nexus config validate
 hermes nexus ingest --dry-run
 hermes nexus ingest --shadow --source FILE --confirm-sha SHA256 --conversation ID
+hermes nexus ingest --stage --source FILE --confirm-sha SHA256 --conversation ID
 hermes nexus eval --shadow
 hermes nexus review list
 hermes nexus review show REV_ID
@@ -158,12 +160,20 @@ hermes nexus drill git-rollback --synthetic
 konuşmalı export'ta exact `--conversation` ister, varsayılan 20 ve en fazla 100
 segment sınırını model çağrısından önce uygular; yalnız aggregate tür/audit
 sayıları basar ve raw/state/review/Vault yazmaz.
+`ingest --stage` aynı exact-source ve segment sınırlarını kullanır. Tüm model
+çağrıları başarıyla tamamlandıktan sonra kaynağı owner-only raw/quarantine
+alanına içerik-adresli olarak alır, source lineage state'ini idempotent günceller
+ve yalnız policy'nin review'a uygun bulduğu adayları private append-only review
+kuyruğuna ekler. Tekrar çalıştırma review adayını çoğaltmaz; çıktı yalnız toplu
+sayılar verir. Vault'a yazmaz, aday yayınlamaz ve memory adayları insanın
+`memory_type` seçimini gerektirir.
 `eval --shadow` yalnız paketlenmiş sentetik frozen holdout'u aktif
 `nexus_extract` model yoluna gönderir; aday içeriği yazmaz veya yayınlamaz ve
 yalnız kalite/audit ölçümlerini ekrana verir. Review komutları yalnız private
 olay kaydını değiştirir ve `vault_writes: false` raporlar. `rebuild` ve `search`
-yalnız Vault dışındaki disposable indeksi değiştirir/okur. Mutating ingest,
-automatic canonical record publish ve dış-kanal reminder teslimi kapalıdır. Reminder komutu
+yalnız Vault dışındaki disposable indeksi değiştirir/okur. Ingest mutation yalnız
+exact-source `--stage` ile private raw/state/review alanıyla sınırlıdır; automatic
+canonical record publish ve dış-kanal reminder teslimi kapalıdır. Reminder komutu
 yalnız local output üretir ve işlenen canonical commitment'ın notification state'ini
 güvenli biçimde günceller.
 

@@ -1,4 +1,4 @@
-"""Write-free Phase 2 ingestion planning and exact-source shadow extraction."""
+"""Exact-source ingestion planning, shadow extraction and private review staging."""
 
 from __future__ import annotations
 
@@ -6,15 +6,21 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
+from typing import Any
 
 from .config import NexusConfig
-from .contracts import Source, SourceAvailability
+from .commitments import resolve_due
+from .contracts import DuePrecision, Impact, Source, SourceAvailability, SourceRef
 from .errors import ParseError, SourceError
-from .extraction.service import PROMPT_VERSION, ExtractionService
-from .raw_store import DiscoveredSource, discover_inbox, read_discovered
-from .segmenter import segment_conversation
+from .extraction.schema import CandidateKind, ExtractionCandidate
+from .extraction.service import PROMPT_VERSION, ExtractionOutcome, ExtractionService
+from .fingerprints import stable_hash
+from .policy import PolicyAction, PolicyInput, evaluate_policy
+from .raw_store import DiscoveredSource, RawStore, discover_inbox, read_discovered
+from .review import ReviewStore, create_review_item
+from .segmenter import ConversationSegment, segment_conversation
 from .sources import ChatGPTAdapter, HermesAdapter, ManualAdapter, ParsedSource, SourceAdapter
-from .state import SourceObservation
+from .state import SourceObservation, SourceStateStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +125,62 @@ class ShadowIngestReport:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class StagedIngestReport:
+    source_type: str
+    adapter: str
+    source_sha256: str
+    conversations: int
+    messages: int
+    segments: int
+    candidates: int
+    review_items_created: int
+    review_items_reused: int
+    discarded: int
+    quarantined: int
+    source_revision: int
+    duplicate_source: bool
+    raw_disposition: str
+    writes_performed: bool
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "ok": True,
+            "mode": "stage",
+            "writes_performed": self.writes_performed,
+            "vault_writes": False,
+            "candidates_published": False,
+            "source": {
+                "type": self.source_type,
+                "adapter": self.adapter,
+                "sha256": self.source_sha256,
+                "conversations": self.conversations,
+                "messages": self.messages,
+                "revision": self.source_revision,
+                "duplicate": self.duplicate_source,
+                "raw_disposition": self.raw_disposition,
+            },
+            "extraction": {
+                "segments": self.segments,
+                "candidates": self.candidates,
+                "discarded": self.discarded,
+                "quarantined": self.quarantined,
+            },
+            "review": {
+                "created": self.review_items_created,
+                "reused": self.review_items_reused,
+            },
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedIngest:
+    source: DiscoveredSource
+    parsed: ParsedSource
+    conversation_index: int
+    segments: tuple[ConversationSegment, ...]
+
+
 ADAPTERS: tuple[SourceAdapter, ...] = (ChatGPTAdapter(), HermesAdapter(), ManualAdapter())
 
 
@@ -171,6 +233,54 @@ def shadow_inbox_source(
     max_attempts: int = 2,
 ) -> ShadowIngestReport:
     """Run one exact Inbox source through extraction without persisting content."""
+    prepared = _prepare_exact_source(
+        config,
+        relative_path=relative_path,
+        confirmed_sha256=confirmed_sha256,
+        conversation_id=conversation_id,
+        max_segments=max_segments,
+        max_segment_chars=max_segment_chars,
+    )
+    service = ExtractionService(llm, max_attempts=max_attempts)
+    outcomes = tuple(service.extract(segment) for segment in prepared.segments)
+    kind_counts: Counter[str] = Counter(
+        candidate.kind.value
+        for outcome in outcomes
+        for candidate in outcome.result.candidates
+    )
+    audits = [outcome.audit for outcome in outcomes]
+    return ShadowIngestReport(
+        source_type=prepared.parsed.source_type.value,
+        adapter=f"{prepared.parsed.adapter_name}@{prepared.parsed.adapter_version}",
+        source_sha256=prepared.source.content_sha256,
+        conversations=1,
+        messages=len(prepared.parsed.conversations[prepared.conversation_index].messages),
+        segments=len(prepared.segments),
+        segment_limit=max_segments,
+        candidates=sum(len(outcome.result.candidates) for outcome in outcomes),
+        candidate_kinds=dict(sorted(kind_counts.items())),
+        warnings=sum(len(outcome.result.warnings) for outcome in outcomes),
+        providers=tuple(sorted({audit.provider for audit in audits if audit.provider})),
+        models=tuple(sorted({audit.model for audit in audits if audit.model})),
+        agent_ids=tuple(sorted({audit.agent_id for audit in audits if audit.agent_id})),
+        prompt_version=audits[0].prompt_version if audits else PROMPT_VERSION,
+        prompt_sha256=service.prompt_sha256,
+        successful_calls=len(audits),
+        input_tokens=sum(audit.input_tokens for audit in audits),
+        output_tokens=sum(audit.output_tokens for audit in audits),
+        total_tokens=sum(audit.total_tokens for audit in audits),
+    )
+
+
+def _prepare_exact_source(
+    config: NexusConfig,
+    *,
+    relative_path: str,
+    confirmed_sha256: str,
+    conversation_id: str | None,
+    max_segments: int,
+    max_segment_chars: int,
+) -> _PreparedIngest:
     selected_path = PurePosixPath(relative_path)
     if (
         not relative_path
@@ -212,59 +322,255 @@ def shadow_inbox_source(
     if conversation_id is None:
         if len(parsed.conversations) != 1:
             raise SourceError("multi-conversation sources require --conversation")
-        conversations = parsed.conversations
+        conversation_index = 0
     else:
-        conversations = tuple(
-            item
-            for item in parsed.conversations
+        indexes = tuple(
+            index
+            for index, item in enumerate(parsed.conversations)
             if item.external_conversation_id == conversation_id
         )
-        if len(conversations) != 1:
+        if len(indexes) != 1:
             raise SourceError("selected conversation was not found uniquely")
+        conversation_index = indexes[0]
+    conversation = parsed.conversations[conversation_index]
     segments = tuple(
-        segment
-        for conversation in conversations
-        for segment in segment_conversation(conversation, max_chars=max_segment_chars)
+        segment_conversation(conversation, max_chars=max_segment_chars)
     )
     if not segments:
         raise SourceError("selected source contains no extractable segments")
     if len(segments) > max_segments:
         raise SourceError("selected conversation exceeds max-segments before model execution")
 
-    service = ExtractionService(llm, max_attempts=max_attempts)
-    kind_counts: Counter[str] = Counter()
-    audits = []
-    segment_count = 0
-    candidate_count = 0
-    warning_count = 0
-    for segment in segments:
-        outcome = service.extract(segment)
-        audits.append(outcome.audit)
-        segment_count += 1
-        candidate_count += len(outcome.result.candidates)
-        warning_count += len(outcome.result.warnings)
-        kind_counts.update(item.kind.value for item in outcome.result.candidates)
+    return _PreparedIngest(
+        source=source,
+        parsed=parsed,
+        conversation_index=conversation_index,
+        segments=segments,
+    )
 
-    return ShadowIngestReport(
-        source_type=parsed.source_type.value,
-        adapter=f"{parsed.adapter_name}@{parsed.adapter_version}",
-        source_sha256=source.content_sha256,
-        conversations=len(conversations),
-        messages=sum(len(item.messages) for item in conversations),
-        segments=segment_count,
-        segment_limit=max_segments,
-        candidates=candidate_count,
-        candidate_kinds=dict(sorted(kind_counts.items())),
-        warnings=warning_count,
-        providers=tuple(sorted({audit.provider for audit in audits if audit.provider})),
-        models=tuple(sorted({audit.model for audit in audits if audit.model})),
-        agent_ids=tuple(sorted({audit.agent_id for audit in audits if audit.agent_id})),
-        prompt_version=audits[0].prompt_version if audits else PROMPT_VERSION,
-        prompt_sha256=service.prompt_sha256,
-        successful_calls=len(audits),
-        input_tokens=sum(audit.input_tokens for audit in audits),
-        output_tokens=sum(audit.output_tokens for audit in audits),
-        total_tokens=sum(audit.total_tokens for audit in audits),
+
+def _source_ref(
+    source_id: str,
+    segment: ConversationSegment,
+    candidate: ExtractionCandidate,
+) -> SourceRef:
+    by_id = {message.message_id: message for message in segment.messages}
+    evidence = tuple(
+        (span_id, by_id[span_id].content_sha256) for span_id in candidate.source_span_ids
+    )
+    return SourceRef(
+        source_id=source_id,
+        conversation_id=segment.conversation_id,
+        span_ids=candidate.source_span_ids,
+        span_sha256=stable_hash(evidence),
+    )
+
+
+def _source_timestamp(
+    segment: ConversationSegment,
+    candidate: ExtractionCandidate,
+) -> str | None:
+    cited = set(candidate.source_span_ids)
+    timestamps = sorted(
+        message.created_at
+        for message in segment.messages
+        if message.message_id in cited and message.created_at is not None
+    )
+    return timestamps[0] if timestamps else None
+
+
+def _policy_input(
+    candidate: ExtractionCandidate,
+    segment: ConversationSegment,
+    *,
+    timezone_name: str,
+) -> PolicyInput:
+    cited = set(candidate.source_span_ids)
+    user_asserted = any(
+        message.message_id in cited and message.role == "user" for message in segment.messages
+    )
+    due_precision = None
+    if candidate.kind is CandidateKind.COMMITMENT:
+        source_at = _source_timestamp(segment, candidate)
+        if source_at is None:
+            due_precision = DuePrecision.AMBIGUOUS
+        else:
+            due_precision = resolve_due(
+                candidate.statement,
+                source_at=source_at,
+                timezone=timezone_name,
+            ).due_precision
+    return PolicyInput(
+        kind=candidate.kind,
+        statement=candidate.statement,
+        confidence=candidate.confidence,
+        source_span_ids=candidate.source_span_ids,
+        impact=Impact.LOW,
+        due_precision=due_precision,
+        ambiguity_flags=candidate.ambiguity_flags,
+        user_asserted=user_asserted,
+    )
+
+
+def _review_candidate(
+    candidate: ExtractionCandidate,
+    outcome: ExtractionOutcome,
+    decision_action: PolicyAction,
+    *,
+    impact: Impact,
+    sensitivity: str,
+) -> dict[str, Any]:
+    audit = outcome.audit
+    extractor = {
+        "provider": audit.provider,
+        "model": audit.model,
+        "agent_id": audit.agent_id,
+        "prompt_version": audit.prompt_version,
+        "prompt_sha256": audit.prompt_sha256,
+        "schema_version": audit.schema_version,
+        "segment_fingerprint": audit.segment_fingerprint,
+        "entity_mentions": list(candidate.entity_mentions),
+        "temporal_expression": candidate.temporal_expression,
+        "ambiguity_flags": list(candidate.ambiguity_flags),
+        "possible_supersedes": list(candidate.possible_supersedes),
+        "policy_action": decision_action.value,
+        "sensitivity": sensitivity,
+    }
+    if candidate.kind is CandidateKind.MEMORY:
+        return {
+            "statement": candidate.statement,
+            "memory_type": None,
+            "confidence": candidate.confidence,
+            "impact": impact.value,
+            "entity_ids": [],
+            "extractor": extractor,
+        }
+    return {
+        "statement": candidate.statement,
+        "confidence": candidate.confidence,
+        "impact": impact.value,
+        "entity_mentions": list(candidate.entity_mentions),
+        "temporal_expression": candidate.temporal_expression,
+        "ambiguity_flags": list(candidate.ambiguity_flags),
+        "possible_supersedes": list(candidate.possible_supersedes),
+        "extractor": extractor,
+    }
+
+
+def stage_inbox_source(
+    config: NexusConfig,
+    llm: object,
+    *,
+    relative_path: str,
+    confirmed_sha256: str,
+    conversation_id: str | None = None,
+    max_segments: int = 20,
+    max_segment_chars: int = 12_000,
+    max_attempts: int = 2,
+) -> StagedIngestReport:
+    """Extract one exact source into private review state without Vault writes."""
+    prepared = _prepare_exact_source(
+        config,
+        relative_path=relative_path,
+        confirmed_sha256=confirmed_sha256,
+        conversation_id=conversation_id,
+        max_segments=max_segments,
+        max_segment_chars=max_segment_chars,
+    )
+    service = ExtractionService(llm, max_attempts=max_attempts)
+    outcomes = tuple(service.extract(segment) for segment in prepared.segments)
+    conversation = prepared.parsed.conversations[prepared.conversation_index]
+    state_store = SourceStateStore(config.data_path / "state/sources-v1.json")
+    review_store = ReviewStore(config.data_path)
+    existing_fingerprints = {
+        item.candidate_fingerprint for item in review_store.list()
+    }
+
+    quarantine_source = any(
+        evaluate_policy(
+            _policy_input(candidate, segment, timezone_name=config.timezone)
+        ).action
+        is PolicyAction.QUARANTINE
+        for segment, outcome in zip(prepared.segments, outcomes, strict=True)
+        for candidate in outcome.result.candidates
+    )
+    raw_store = RawStore(config.data_path)
+    destination_root = config.data_path / ("quarantine" if quarantine_source else "raw")
+    raw_destination = (
+        destination_root
+        / prepared.source.content_sha256[:2]
+        / f"{prepared.source.content_sha256}{prepared.source.suffix}"
+    )
+    raw_preexisting = raw_destination.exists()
+    if quarantine_source:
+        raw_store.quarantine(prepared.source)
+        raw_disposition = "quarantine"
+    else:
+        raw_store.archive(prepared.source)
+        raw_disposition = "archive"
+
+    observation = state_store.observe(
+        source_type=prepared.parsed.source_type,
+        external_id=conversation.external_conversation_id,
+        content_sha256=conversation.content_sha256,
+    )
+    created = reused = discarded = quarantined = 0
+    for segment, outcome in zip(prepared.segments, outcomes, strict=True):
+        for candidate in outcome.result.candidates:
+            decision = evaluate_policy(
+                _policy_input(candidate, segment, timezone_name=config.timezone)
+            )
+            if decision.action is PolicyAction.DISCARD:
+                discarded += 1
+                continue
+            if decision.action is PolicyAction.QUARANTINE:
+                quarantined += 1
+                continue
+            reasons = list(decision.reason_codes)
+            if decision.action is PolicyAction.WOULD_PUBLISH:
+                reasons.append("auto_publish_disabled")
+            if candidate.kind is CandidateKind.MEMORY:
+                reasons.append("memory_type_required")
+            item = create_review_item(
+                candidate_kind=candidate.kind.value,
+                candidate=_review_candidate(
+                    candidate,
+                    outcome,
+                    decision.action,
+                    impact=decision.impact,
+                    sensitivity=decision.sensitivity.value,
+                ),
+                reason_codes=reasons,
+                source_refs=(
+                    _source_ref(observation.source_id, segment, candidate),
+                ),
+            )
+            fingerprint = item.candidate_fingerprint
+            review_store.enqueue(item)
+            if fingerprint in existing_fingerprints:
+                reused += 1
+            else:
+                existing_fingerprints.add(fingerprint)
+                created += 1
+
+    return StagedIngestReport(
+        source_type=prepared.parsed.source_type.value,
+        adapter=f"{prepared.parsed.adapter_name}@{prepared.parsed.adapter_version}",
+        source_sha256=prepared.source.content_sha256,
+        conversations=1,
+        messages=len(conversation.messages),
+        segments=len(prepared.segments),
+        candidates=sum(len(outcome.result.candidates) for outcome in outcomes),
+        review_items_created=created,
+        review_items_reused=reused,
+        discarded=discarded,
+        quarantined=quarantined,
+        source_revision=observation.revision,
+        duplicate_source=observation.duplicate,
+        raw_disposition=raw_disposition,
+        writes_performed=(
+            not raw_preexisting or not observation.duplicate or created > 0
+        ),
     )
 
 

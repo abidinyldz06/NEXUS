@@ -9,9 +9,9 @@ adapter is validated against a synthetic `conversations.json` fixture, not a rea
 user export. It must not be described as real-export compatible until that private
 shape is inspected without committing its contents.
 
-The exposed ingestion CLI remains write-free. In addition to parser-only dry-run,
-one exact source can now be sent through the configured extraction route in
-shadow mode without changing raw state, review state or the Vault.
+Dry-run and shadow ingestion remain write-free. A separate exact-source staging
+mode now connects extraction to owner-private raw/source state and the review
+queue, while keeping the canonical Vault and publication path untouched.
 
 ## Implemented
 
@@ -30,6 +30,13 @@ shadow mode without changing raw state, review state or the Vault.
   segments before execution.
 - Shadow output contains only source shape, candidate-kind counts and model audit
   totals; candidate statements and source content are never printed or persisted.
+- Exact path + SHA-gated `hermes nexus ingest --stage` completes every bounded
+  model call before writing, archives or quarantines the source by content hash,
+  updates source lineage idempotently and enqueues reviewable candidates without
+  canonical publication.
+- Stage output is aggregate-only. Policy discard/quarantine candidates are not
+  written to review, repeated runs reuse the existing review fingerprint and
+  extracted memory candidates require a human-selected subtype before publish.
 
 ## Verification
 
@@ -51,9 +58,12 @@ shadow mode without changing raw state, review state or the Vault.
 - A changed conversation kept its source ID and advanced to revision 2.
 - Symlink, oversize, format mismatch, malformed export and post-discovery mutation
   cases failed closed.
-- Current combined suite: 126 tests passed. Shadow coverage proves exact SHA,
+- Current combined suite: 132 tests passed. Shadow coverage proves exact SHA,
   aggregate-only output, no private writes, explicit multi-conversation selection
   and pre-model segment-limit refusal.
+- Synthetic stage coverage proves wrong-SHA and model-failure zero-write behavior,
+  owner-only raw/state modes, review idempotency, quarantine routing and zero
+  Vault writes. No configured production Inbox source was staged.
 
 ## Remaining gate
 
@@ -61,6 +71,9 @@ shadow mode without changing raw state, review state or the Vault.
 - Record any format delta and add only a redacted/minimized regression fixture.
 - Re-run the Phase 2 suite and exact-source Hermes ingest shadow before marking
   Phase 2 fully accepted.
+- Run staging against a specifically approved real target only after the export
+  shape passes shadow validation; private raw/review writes are not implied by
+  read-only acceptance.
 
 The Hermes official-export shape is accepted. The user explicitly chose to
 proceed on 2026-09-16 with ChatGPT support marked experimental. That separate
