@@ -18,6 +18,7 @@ from .contracts import (
     Impact,
     Memory,
     MemoryType,
+    Relation,
     ReviewItem,
     ReviewStatus,
 )
@@ -42,6 +43,18 @@ _ENTITY_FIELDS = {
     "linked_notes",
     "extractor",
 }
+_RELATION_FIELDS = {
+    "statement",
+    "from_entity_id",
+    "predicate",
+    "to_entity_id",
+    "literal",
+    "confidence",
+    "impact",
+    "extractor",
+}
+_RELATION_PREDICATES = {"works_at", "owns", "related_to", "has_role"}
+_LITERAL_RELATION_PREDICATES = {"has_role"}
 _COMMITMENT_FIELDS = {
     "statement",
     "actor_entity_id",
@@ -56,7 +69,7 @@ _COMMITMENT_FIELDS = {
     "extractor",
 }
 
-PublishRecord = Memory | Entity | Commitment
+PublishRecord = Memory | Entity | Relation | Commitment
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,6 +248,36 @@ def _entity_from_review(item: ReviewItem) -> Entity:
         raise PublicationError("entity candidate cannot form a canonical record") from exc
 
 
+def _relation_from_review(item: ReviewItem) -> Relation:
+    candidate = item.candidate
+    if set(candidate) != _RELATION_FIELDS:
+        raise PublicationError("relation candidate must match the closed publication shape")
+    statement = candidate.get("statement")
+    predicate = candidate.get("predicate")
+    extractor = candidate.get("extractor")
+    if not isinstance(statement, str) or not statement.strip():
+        raise PublicationError("relation candidate statement must not be empty")
+    if not isinstance(predicate, str) or predicate not in _RELATION_PREDICATES:
+        raise PublicationError("relation candidate predicate is not allowlisted")
+    if not isinstance(extractor, dict):
+        raise PublicationError("relation candidate extractor must be an object")
+    if candidate.get("literal") is not None and predicate not in _LITERAL_RELATION_PREDICATES:
+        raise PublicationError("relation candidate predicate does not allow a literal target")
+    try:
+        return Relation(
+            id=_record_id(item.id, IdPrefix.RELATION),
+            from_entity_id=candidate["from_entity_id"],
+            predicate=predicate,
+            source_refs=item.source_refs,
+            confidence=candidate["confidence"],
+            impact=Impact(candidate["impact"]),
+            to_entity_id=candidate["to_entity_id"],
+            literal=candidate["literal"],
+        )
+    except (ContractError, KeyError, TypeError, ValueError, VaultError) as exc:
+        raise PublicationError("relation candidate cannot form a canonical record") from exc
+
+
 def _record_from_review(item: ReviewItem) -> tuple[PublishRecord, str]:
     _require_approved(item)
     if item.candidate_kind == "memory":
@@ -243,8 +286,10 @@ def _record_from_review(item: ReviewItem) -> tuple[PublishRecord, str]:
         return _commitment_from_review(item), "commitment"
     if item.candidate_kind == "entity":
         return _entity_from_review(item), "entity"
+    if item.candidate_kind == "relation":
+        return _relation_from_review(item), "relation"
     raise PublicationError(
-        "this publish slice supports memory, commitment or entity review items only"
+        "this publish slice supports memory, commitment, entity or relation review items only"
     )
 
 
@@ -274,6 +319,12 @@ def _analyze(config: NexusConfig, review_id: str) -> _PublicationAnalysis:
         referenced_entities = record.entity_ids
     elif isinstance(record, Commitment):
         referenced_entities = (record.actor_entity_id, *record.target_entity_ids)
+    elif isinstance(record, Relation):
+        referenced_entities = (
+            (record.from_entity_id, record.to_entity_id)
+            if record.to_entity_id is not None
+            else (record.from_entity_id,)
+        )
     else:
         referenced_entities = ()
     if any(entity_id not in entities for entity_id in referenced_entities):
@@ -299,6 +350,19 @@ def _analyze(config: NexusConfig, review_id: str) -> _PublicationAnalysis:
             raise PublicationError(
                 "entity candidate conflicts with an existing exact typed alias or linked note"
             )
+    if isinstance(record, Relation):
+        duplicate = any(
+            indexed.kind == "relation"
+            and indexed.status == "active"
+            and indexed.payload.get("from_entity_id") == record.from_entity_id
+            and indexed.payload.get("predicate") == record.predicate
+            and indexed.payload.get("to_entity_id") == record.to_entity_id
+            and indexed.payload.get("literal") == record.literal
+            for indexed in records
+            if indexed.record_id != record.id
+        )
+        if duplicate:
+            raise PublicationError("relation candidate duplicates an existing active relation")
     existing = next((item for item in records if item.record_id == record.id), None)
     if existing is not None:
         if existing.kind != record_kind or existing.payload != to_primitive(record):

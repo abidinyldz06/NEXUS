@@ -320,6 +320,43 @@ class IngestMetadataTests(unittest.TestCase):
             self.assertIsNone(item.candidate["entity_type"])
             self.assertIn("entity_type_required", item.reason_codes)
 
+    def test_staged_relation_has_closed_human_completion_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = _stage_config(Path(directory))
+            discovered = _source(config, "Ayşe NEXUS projesinde çalışıyor.")
+
+            stage_inbox_source(
+                config,
+                StageLlm(
+                    kind="relation",
+                    statement="Ayşe NEXUS projesinde çalışıyor.",
+                    entity_mentions=("Ayşe", "NEXUS"),
+                ),
+                relative_path="note.md",
+                confirmed_sha256=discovered.content_sha256,
+            )
+
+            item = ReviewStore(config.data_path).list()[0]
+            self.assertEqual("relation", item.candidate_kind)
+            self.assertEqual(
+                {
+                    "statement",
+                    "from_entity_id",
+                    "predicate",
+                    "to_entity_id",
+                    "literal",
+                    "confidence",
+                    "impact",
+                    "extractor",
+                },
+                set(item.candidate),
+            )
+            self.assertIsNone(item.candidate["from_entity_id"])
+            self.assertIsNone(item.candidate["predicate"])
+            self.assertIsNone(item.candidate["to_entity_id"])
+            self.assertIsNone(item.candidate["literal"])
+            self.assertIn("relation_fields_required", item.reason_codes)
+
 
 if __name__ == "__main__":
     unittest.main()

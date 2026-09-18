@@ -75,6 +75,9 @@ only return JSON matching the NEXUS candidate schema.
   requires an exact review-ID confirmation and leaves entity type as an audited
   human choice. It rejects display/normalized-name mismatch and same-type exact
   alias/linked-note collisions before writing a deterministic canonical entity.
+- Approved-relation publication leaves canonical entity IDs and predicate as
+  audited human choices, requires both referenced entities to exist, enforces a
+  narrow predicate/literal allowlist and refuses an identical active relation.
 - Permission audit reads metadata only, reports aggregate issue counts and
   treats symlinks, non-regular entries, ownership mismatch and group/world
   access as failures without changing modes.
