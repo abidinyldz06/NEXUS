@@ -1,6 +1,6 @@
 # Phase 3 delivery status
 
-Date: 2026-09-16
+Date: 2026-09-18
 
 ## Outcome
 
@@ -11,10 +11,10 @@ holdout passed through the configured live provider/model without publishing or
 persisting candidates.
 
 ChatGPT support remains experimental until a real export shape is inspected.
-The active Hermes profile now has the plugin pinned at the source commit recorded
-below and enabled. Its only added NEXUS setting is the verified existing
-`vault_path`. The Vault contents, gateway process, cron jobs and backup were not
-modified; the gateway was not restarted.
+The active Hermes profile is pinned to the accepted prompt-v2 merge commit
+recorded below and enabled. The shadow run did not modify the Vault, private
+state, cron jobs or backup; the gateway was restarted only to load the exact
+installed plugin commit.
 
 ## Implemented
 
@@ -45,7 +45,7 @@ modified; the gateway was not restarted.
 - Python bytecode compilation passed.
 - NEXUS record and extraction JSON Schemas passed Draft 2020-12 meta-validation.
 - `hermes plugins doctor . --ci` passed discovery, import and registration.
-- Wheel build passed and includes all nested packages, `prompt_v1.txt` and the
+- Clean wheel build passed and includes all nested packages, `prompt_v2.txt` and the
   packaged frozen holdout fixture.
 - Expanded contract holdout: 12 cases, 12 segments, provenance 100%,
   expected-kind recall/precision 100%, exact-case match 100%, empty-case
@@ -58,13 +58,21 @@ modified; the gateway was not restarted.
   `bd0cb5aff63081ae3e868e87ecf3466aa96b9c91`.
 - The live result is recorded in `eval/baseline-phase3-live-shadow.json` without
   candidate statements or source content.
+- The first expanded run with prompt v1 failed closed at recall 88.89%,
+  precision 66.67% and exact-case 66.67%; no writes or publication occurred.
+- Prompt v2 kept the fixture and thresholds unchanged and passed the 12-case
+  live shadow on `ollama-cloud` / `glm-5.3-flash`: recall 100%, precision 90%,
+  exact-case 91.67%, empty-case precision/provenance 100%, schema failures 0 and
+  21,189 total tokens. Installed source commit:
+  `6dc8d5d5b8644cb8807c7902285786aba9ed15ee`.
+- The expanded result is recorded in
+  `eval/baseline-phase3-expanded-live-shadow.json` using aggregate/audit metadata
+  only; `writes_performed=false` and `candidates_published=false`.
 - Invalid spans, uncovered spans, malformed output and provider failures fail closed.
 
 ## Remaining acceptance gates
 
 - Inspect one real ChatGPT export and rerun the source-to-segment pipeline.
-- Run the expanded 12-case fixture through the configured live model in shadow
-  mode and record only aggregate/audit metadata.
 - The expanded synthetic set remains smaller than the planned private golden
   dataset and is not by itself full real-world model-quality acceptance.
 - Keep auto-publish disabled; Phase 4 policy/review must not be started implicitly.

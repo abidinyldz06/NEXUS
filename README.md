@@ -16,7 +16,7 @@ deterministik policy, tekrar oynatılabilir review kuyruğu ve atomik canonical
 Vault writer, disposable SQLite FTS5 indeks ve local-only Pulse scanner içerir.
 ChatGPT adapter gerçek
 export doğrulanana kadar experimental'dır. Aktif kurulum merge commit'i
-`bd46229aefbddfc76849f3223044d77658fb812e` ile sabitlenmiş; Plugin Doctor,
+`6dc8d5d5b8644cb8807c7902285786aba9ed15ee` ile sabitlenmiş; Plugin Doctor,
 local/no-agent reminder canary, retention dry-run ve salt-okunur production
 permission audit, iki synthetic drill, yazmasız canonical forget ve approved
 memory publish dry-run'ları ile doğrulanmıştır. Sistem
@@ -63,10 +63,11 @@ kullanır, source reference'ları korur, Current-Memory view'i ve derived indeks
 yeniler ve private publication audit'i ekler. Bu komut otomatik yayın değildir;
 production apply ayrıca hedefe özel operasyon onayı gerektirir.
 
-İlk iki-vakalı frozen holdout, aktif `ollama-cloud` / `glm-5.3` rotasında shadow
-modda başarıyla çalışmıştır. Güncel paketlenmiş holdout 12 sentetik vakaya ve
-expected-kind precision/exact-case metriklerine genişletilmiştir; canlı v2 shadow
-koşusu yapılmadan geniş model-kalitesi kanıtı veya auto-publish yetkisi değildir.
+Güncel 12-vakalı frozen holdout, aktif `ollama-cloud` / `glm-5.3-flash` rotasında
+prompt v2 ile shadow kabul kapısını geçmiştir: recall `%100`, precision `%90`,
+exact-case `%91,67`, empty-case precision ve provenance `%100`, schema failure
+`0`. Bu sentetik contract kanıtıdır; private golden-dataset kabulü veya
+auto-publish yetkisi değildir.
 
 Phase 4 review kararları yalnız Vault dışındaki private data dizininde `0600`
 append-only JSONL olayları olarak saklanır. Approve/edit kararı tek başına
