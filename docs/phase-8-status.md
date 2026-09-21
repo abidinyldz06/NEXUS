@@ -77,8 +77,8 @@ apply, and do not enable unattended publishing.
 
 ## Verification
 
-- Current merged and installed `main`: 155 Python unit tests passed at exact
-  merge commit `3e382c5e67a5b848c93ea1787fa3b31f303da822`; bytecode compilation,
+- Current merged and installed `main`: 158 Python unit tests passed at exact
+  merge commit `076c13bc7dd003a6cd70ecce8d71ff1fc5534d5e`; bytecode compilation,
   diff whitespace checks and Plugin Doctor also passed. GitHub reported no
   configured `main` CI runs for that commit.
 - The correction-publication delivery candidate passed 152 working-tree and
@@ -248,6 +248,17 @@ apply, and do not enable unattended publishing.
   model-quality acceptance run was claimed. The controlled gateway restart
   produced running PIDs `82737`/`82734`; cron reports the gateway active while
   launchd status still reports the existing detached-process discrepancy.
+- PR #36 was squash-merged as
+  `008735e432b6b3e31859bc9fdd860c7baf1a3241`, recording the exact installed
+  private-golden runner evidence without claiming a human-labeled acceptance run.
+- PR #37 was squash-merged as
+  `076c13bc7dd003a6cd70ecce8d71ff1fc5534d5e`, adding safe extraction of the
+  embedded `jsonData` payload in ChatGPT HTML exports without executing script.
+  The active Hermes plugin is pinned to that exact commit; 158 installed-copy
+  tests, bytecode compilation and Plugin Doctor pass. The real export dry-run
+  parsed 208 conversations and 8,065 messages with no writes. A subsequent
+  ten-conversation shadow attempt failed closed on six conversations, so real
+  export operational/model-quality acceptance remains open.
 
 ## Not yet delivered
 
@@ -260,6 +271,9 @@ apply, and do not enable unattended publishing.
   installed acceptance used temporary synthetic files only.
 - Phase 7 local-only reminder canary remains time-gated through six more
   scheduled runs before final v0.1 acceptance.
+- Real ChatGPT export parsing is accepted, but real-export shadow extraction is
+  not operationally accepted until the repeated structured-output failures are
+  resolved and a bounded rerun completes successfully.
 - No production memory publication has been authorized or applied. Apply has
   been exercised only against temporary synthetic Vaults.
 - No production commitment publication has been authorized or applied. Apply has
