@@ -15,6 +15,11 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(config.write_ready)
         self.assertFalse(config.auto_publish_enabled)
         self.assertFalse(config.sensitive_auto_publish)
+        self.assertFalse(config.decision_classifier_enabled)
+        self.assertFalse(config.decision_llm_fallback_enabled)
+        self.assertEqual("classify", config.decision_classifier_executable)
+        self.assertEqual(0.85, config.decision_high_confidence)
+        self.assertEqual(0.6, config.decision_low_risk_min)
         self.assertIn("vault_path is not configured", config.validate_existing_paths())
 
     def test_existing_vault_passes_read_only_validation(self) -> None:

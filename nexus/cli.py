@@ -11,7 +11,14 @@ from typing import Any
 
 from . import __version__
 from .config import from_plugin_context
-from .errors import ConfigurationError, NexusError, NexusIndexError
+from .decision import route_text
+from .errors import (
+    ConfigurationError,
+    DecisionError,
+    ExtractionError,
+    NexusError,
+    NexusIndexError,
+)
 from .eval import (
     PrivateEvalFixture,
     evaluate_with_llm_report,
@@ -106,6 +113,17 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
         "rebuild", help="Rebuild the disposable SQLite index from the canonical Vault"
     )
     rebuild.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
+
+    route = subcommands.add_parser(
+        "route", help="Shadow-classify one utterance without executing or writing"
+    )
+    route.add_argument(
+        "--shadow",
+        action="store_true",
+        help="Required safety gate; classify but never execute, store or publish",
+    )
+    route.add_argument("--text", help="Utterance to classify; never written to disk")
+    route.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
 
     search = subcommands.add_parser("search", help="Search the derived SQLite index")
     search.add_argument("query", help="Words to find; treated as literal terms")
@@ -299,6 +317,8 @@ def run_command(args: Namespace, ctx: Any) -> int:
                 "candidates_published": False,
                 "errors": [str(exc)],
             }
+            if isinstance(exc, ExtractionError):
+                payload["failure_class"] = exc.failure_class
         _print_ingest_payload(payload, as_json=bool(getattr(args, "as_json", False)))
         return 0 if payload["ok"] else 2
     if command == "eval":
@@ -363,6 +383,28 @@ def run_command(args: Namespace, ctx: Any) -> int:
     if command == "rebuild":
         payload = _rebuild_payload(ctx)
         _print_index_payload(payload, as_json=bool(getattr(args, "as_json", False)))
+        return 0 if payload["ok"] else 2
+    if command == "route":
+        if not bool(getattr(args, "shadow", False)):
+            print("Phase A only supports: hermes nexus route --shadow")
+            return 2
+        try:
+            if not getattr(args, "text", None):
+                raise DecisionError("route --shadow requires --text")
+            payload = route_text(
+                args.text,
+                from_plugin_context(ctx),
+                llm=getattr(ctx, "llm", None),
+            ).to_dict()
+        except (NexusError, OSError, ValueError) as exc:
+            payload = {
+                "ok": False,
+                "mode": "shadow",
+                "writes_performed": False,
+                "would_execute": False,
+                "errors": [str(exc)],
+            }
+        _print_route_payload(payload, as_json=bool(getattr(args, "as_json", False)))
         return 0 if payload["ok"] else 2
     if command == "search":
         payload = _search_payload(args, ctx)
@@ -471,8 +513,8 @@ def run_command(args: Namespace, ctx: Any) -> int:
     print(
         "Usage: hermes nexus "
         "{status|config validate|ingest {--dry-run|--shadow|--stage}|eval --shadow|review ...|"
-        "rebuild|search|reminders --emit-local|retention --dry-run|forget ...|audit permissions|"
-        "drill restore --synthetic|drill git-rollback --synthetic}"
+        "rebuild|route --shadow|search|reminders --emit-local|retention --dry-run|forget ...|"
+        "audit permissions|drill restore --synthetic|drill git-rollback --synthetic}"
     )
     return 2
 
@@ -503,6 +545,8 @@ def _print_ingest_payload(payload: dict[str, Any], *, as_json: bool) -> None:
             )
         for error in payload.get("errors", []):
             print(f"error: {error}")
+        if payload.get("failure_class"):
+            print(f"failure_class: {payload['failure_class']}")
         return
     summary = payload.get("summary", {})
     print("NEXUS ingest dry-run — no writes performed")
@@ -641,6 +685,27 @@ def _search_payload(args: Namespace, ctx: Any) -> dict[str, Any]:
         }
     except (ConfigurationError, NexusIndexError, OSError) as exc:
         return {"ok": False, "vault_writes": False, "errors": [str(exc)]}
+
+
+def _print_route_payload(payload: dict[str, Any], *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        return
+    print("NEXUS route shadow — no execution, writes or publication")
+    if payload.get("ok", False):
+        print(
+            f"category: {payload.get('category')}, "
+            f"confidence: {payload.get('confidence')}, "
+            f"backend: {payload.get('backend')}, "
+            f"would_execute: {str(bool(payload.get('would_execute'))).lower()}"
+        )
+        print(
+            f"external classifier: {str(bool(payload.get('external_classifier_invoked'))).lower()}, "
+            f"needs review: {str(bool(payload.get('needs_human_review'))).lower()}, "
+            f"review band: {payload.get('review_band')}"
+        )
+    for error in payload.get("errors", []):
+        print(f"error: {error}")
 
 
 def _print_index_payload(payload: dict[str, Any], *, as_json: bool) -> None:

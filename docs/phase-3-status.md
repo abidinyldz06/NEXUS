@@ -10,8 +10,10 @@ bounded retry and a frozen contract evaluation are present. The packaged frozen
 holdout passed through the configured live provider/model without publishing or
 persisting candidates.
 
-The real ChatGPT `chat.html` source shape now passes aggregate-only parsing;
-real-conversation extraction quality remains unaccepted.
+The real ChatGPT `chat.html` source shape now passes aggregate-only parsing.
+A bounded ten-conversation operational shadow attempt completed safely but only
+four conversations completed structured extraction; real-conversation
+operational and model-quality acceptance therefore remain open.
 The active Hermes profile is pinned to the accepted prompt-v2 merge commit
 recorded below and enabled. The shadow run did not modify the Vault, private
 state, cron jobs or backup; the gateway was restarted only to load the exact
@@ -73,11 +75,25 @@ installed plugin commit.
   `eval/baseline-phase3-expanded-live-shadow.json` using aggregate/audit metadata
   only; `writes_performed=false` and `candidates_published=false`.
 - Invalid spans, uncovered spans, malformed output and provider failures fail closed.
+- The installed ChatGPT HTML adapter parsed the real export as 208 conversations
+  and 8,065 messages in dry-run mode with zero rejected sources and no writes.
+- A deterministic ten-conversation sample covered six one-segment, three
+  two-segment and one three-segment conversations. Four runs completed on
+  `ollama-cloud` / `glm-5.3-flash`; together they processed 22 messages and four
+  segments, made four successful calls, produced one correction candidate and
+  nine warnings, and used 13,162 total tokens.
+- The remaining six runs failed closed after two bounded structured-extraction
+  attempts each. No source content, conversation identity or candidate statement
+  is committed in the evidence; no review staging, Vault write or publication
+  occurred. The aggregate result is recorded in
+  `eval/baseline-phase3-real-export-shadow.json`.
 
 ## Remaining acceptance gates
 
-- Run bounded exact-source shadow extraction on selected real ChatGPT
-  conversations and review aggregate/audit results without staging.
+- Resolve the repeated structured-output/provider failures and rerun the same
+  bounded real-export class successfully before claiming operational acceptance.
+  Shadow ingest now uses three bounded attempts and a content-free
+  `failure_class`; that does not by itself close operational acceptance.
 - The expanded synthetic set remains smaller than the planned private golden
   dataset and is not by itself full real-world model-quality acceptance. The
   runner is merged and installed, but human-labeled real cases are not yet

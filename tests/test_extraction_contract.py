@@ -254,6 +254,18 @@ class ExtractionContractTests(unittest.TestCase):
 
         self.assertEqual(2, len(llm.calls))
         self.assertNotIn("secret provider detail", str(raised.exception))
+        self.assertEqual("provider_or_runtime", raised.exception.failure_class)
+
+    def test_invalid_json_failure_class_does_not_echo_payload(self) -> None:
+        class BrokenJsonLlm:
+            def complete_structured(self, **kwargs):
+                return SimpleNamespace(parsed=None, text="not-json {", usage=None)
+
+        with self.assertRaises(ExtractionError) as raised:
+            ExtractionService(BrokenJsonLlm(), max_attempts=2).extract(segment())
+
+        self.assertEqual("invalid_json", raised.exception.failure_class)
+        self.assertNotIn("not-json", str(raised.exception))
 
     def test_frozen_contract_holdout_records_expected_metrics(self) -> None:
         fixture = frozen_fixture_path()

@@ -76,6 +76,37 @@ class CliTests(unittest.TestCase):
         self.assertEqual(2, result)
         self.assertIn("requires exactly one", stream.getvalue())
 
+    def test_route_requires_shadow_gate(self) -> None:
+        parser = parser_for(FakeContext())
+        args = parser.parse_args(["route", "--text", "merhaba", "--json"])
+        stream = io.StringIO()
+
+        with contextlib.redirect_stdout(stream):
+            result = args.func(args)
+
+        self.assertEqual(2, result)
+        self.assertIn("route --shadow", stream.getvalue())
+
+    def test_route_shadow_classifies_without_source_echo_or_writes(self) -> None:
+        parser = parser_for(FakeContext())
+        args = parser.parse_args(
+            ["route", "--shadow", "--text", "Bugün hava çok güzel ya", "--json"]
+        )
+        stream = io.StringIO()
+
+        with contextlib.redirect_stdout(stream):
+            result = args.func(args)
+
+        payload = json.loads(stream.getvalue())
+        self.assertEqual(0, result)
+        self.assertEqual("chat", payload["category"])
+        self.assertFalse(payload["writes_performed"])
+        self.assertFalse(payload["would_execute"])
+        self.assertFalse(payload["needs_human_review"])
+        self.assertEqual("low_risk_band", payload["review_band"])
+        self.assertFalse(payload["external_classifier_invoked"])
+        self.assertNotIn("Bugün hava çok güzel ya", stream.getvalue())
+
     def test_ingest_dry_run_parses_without_writing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

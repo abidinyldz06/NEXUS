@@ -80,6 +80,7 @@ class ExtractionService:
             data_envelope, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         )
 
+        last_class = "structured_output"
         for attempt in range(1, self.max_attempts + 1):
             try:
                 response = self.llm.complete_structured(
@@ -116,9 +117,17 @@ class ExtractionService:
                         total_tokens=int(getattr(usage, "total_tokens", 0) or 0),
                     ),
                 )
+            except json.JSONDecodeError:
+                last_class = "invalid_json"
+            except ExtractionError:
+                last_class = "schema_invalid"
+            except TimeoutError:
+                last_class = "timeout"
             except Exception:
-                if attempt == self.max_attempts:
-                    break
+                last_class = "provider_or_runtime"
+            if attempt == self.max_attempts:
+                break
         raise ExtractionError(
-            f"structured extraction failed after {self.max_attempts} bounded attempt(s)"
+            f"structured extraction failed after {self.max_attempts} bounded attempt(s)",
+            failure_class=last_class,
         )

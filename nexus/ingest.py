@@ -231,7 +231,8 @@ def shadow_inbox_source(
     conversation_id: str | None = None,
     max_segments: int = 20,
     max_segment_chars: int = 12_000,
-    max_attempts: int = 2,
+    max_attempts: int = 3,
+    timeout_seconds: float = 90,
 ) -> ShadowIngestReport:
     """Run one exact Inbox source through extraction without persisting content."""
     prepared = _prepare_exact_source(
@@ -242,7 +243,9 @@ def shadow_inbox_source(
         max_segments=max_segments,
         max_segment_chars=max_segment_chars,
     )
-    service = ExtractionService(llm, max_attempts=max_attempts)
+    service = ExtractionService(
+        llm, max_attempts=max_attempts, timeout_seconds=timeout_seconds
+    )
     outcomes = tuple(service.extract(segment) for segment in prepared.segments)
     kind_counts: Counter[str] = Counter(
         candidate.kind.value

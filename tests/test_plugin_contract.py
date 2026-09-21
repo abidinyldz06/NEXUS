@@ -44,8 +44,10 @@ class PluginContractTests(unittest.TestCase):
         module.register(context)
 
         self.assertEqual("nexus_extract", context.auxiliary[0][0])
+        self.assertEqual("nexus_route", context.auxiliary[1][0])
         self.assertEqual("nexus", context.commands[0]["name"])
         self.assertEqual(1, len(context.commands))
+        self.assertEqual(2, len(context.auxiliary))
 
 
 if __name__ == "__main__":

@@ -14,6 +14,11 @@ def register(ctx: Any) -> None:
         display_name="NEXUS memory extraction",
         description="Extract provenance-backed memory candidates from untrusted text.",
     )
+    ctx.register_auxiliary_task(
+        "nexus_route",
+        display_name="NEXUS live-route classification",
+        description="Shadow-classify one utterance; never execute tools or publish memory.",
+    )
 
     def setup_fn(parser: Any) -> None:
         configure_parser(parser, handler_fn)
