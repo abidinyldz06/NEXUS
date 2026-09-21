@@ -87,13 +87,23 @@ installed plugin commit.
   is committed in the evidence; no review staging, Vault write or publication
   occurred. The aggregate result is recorded in
   `eval/baseline-phase3-real-export-shadow.json`.
+- A 2026-09-21 rerun of the same ten-conversation class with three bounded
+  attempts completed 6/10 on `ollama-cloud` / `glm-5.3-flash`. Four runs failed
+  closed. Hermes auxiliary logs show those failures as 90s `nexus_extract`
+  request timeouts (then mislabeled `provider_or_runtime` because SDK timeout
+  types are not `TimeoutError`). Successful runs produced 13 candidates across
+  memory/entity/relation/commitment, 9 segments, 64,601 total tokens, and no
+  writes. Aggregate evidence:
+  `eval/baseline-phase3-real-export-shadow-2026-09-21.json`. Operational
+  acceptance remains open.
 
 ## Remaining acceptance gates
 
-- Resolve the repeated structured-output/provider failures and rerun the same
-  bounded real-export class successfully before claiming operational acceptance.
-  Shadow ingest now uses three bounded attempts and a content-free
-  `failure_class`; that does not by itself close operational acceptance.
+- Extraction now classifies SDK timeouts as `timeout` and HTTP status errors as
+  `http_4xx` / `http_5xx` without echoing provider payloads. The 6/10 result is
+  still not operational acceptance: long segments hit the Hermes auxiliary 90s
+  cap. Raising that cap or shrinking segments is a separate operator decision;
+  this class was not rerun after the label mapping change.
 - The expanded synthetic set remains smaller than the planned private golden
   dataset and is not by itself full real-world model-quality acceptance. The
   runner is merged and installed, but human-labeled real cases are not yet

@@ -15,6 +15,41 @@ from .schema import EXTRACTION_JSON_SCHEMA, ExtractionResult, validate_extractio
 PROMPT_VERSION = "nexus-extraction-prompt-v2"
 
 
+def _exception_chain(exc: BaseException) -> tuple[BaseException, ...]:
+    seen: list[BaseException] = []
+    current: BaseException | None = exc
+    while current is not None and current not in seen:
+        seen.append(current)
+        current = current.__cause__ or current.__context__
+    return tuple(seen)
+
+
+def classify_extraction_failure(exc: BaseException) -> str:
+    """Map a complete_structured failure to a content-free failure_class.
+
+    Exception messages are never copied into the returned label.
+    """
+    if isinstance(exc, json.JSONDecodeError):
+        return "invalid_json"
+    if isinstance(exc, ExtractionError):
+        return "schema_invalid"
+    for item in _exception_chain(exc):
+        if isinstance(item, TimeoutError):
+            return "timeout"
+        name = type(item).__name__.lower()
+        if "timeout" in name:
+            return "timeout"
+        status = getattr(item, "status_code", None)
+        if status is None:
+            status = getattr(item, "status", None)
+        if isinstance(status, int) and not isinstance(status, bool):
+            if 400 <= status < 500:
+                return "http_4xx"
+            if 500 <= status < 600:
+                return "http_5xx"
+    return "provider_or_runtime"
+
+
 @dataclass(frozen=True, slots=True)
 class ExtractionAudit:
     provider: str
@@ -121,10 +156,8 @@ class ExtractionService:
                 last_class = "invalid_json"
             except ExtractionError:
                 last_class = "schema_invalid"
-            except TimeoutError:
-                last_class = "timeout"
-            except Exception:
-                last_class = "provider_or_runtime"
+            except Exception as exc:
+                last_class = classify_extraction_failure(exc)
             if attempt == self.max_attempts:
                 break
         raise ExtractionError(

@@ -256,6 +256,54 @@ class ExtractionContractTests(unittest.TestCase):
         self.assertNotIn("secret provider detail", str(raised.exception))
         self.assertEqual("provider_or_runtime", raised.exception.failure_class)
 
+    def test_sdk_timeout_errors_map_to_timeout_without_echoing(self) -> None:
+        class APITimeoutError(Exception):
+            pass
+
+        llm = FakeLlm([APITimeoutError("Request timed out. secret"), APITimeoutError("again")])
+
+        with self.assertRaises(ExtractionError) as raised:
+            ExtractionService(llm, max_attempts=2).extract(segment())
+
+        self.assertEqual("timeout", raised.exception.failure_class)
+        self.assertNotIn("secret", str(raised.exception))
+        self.assertNotIn("Request timed out", str(raised.exception))
+
+    def test_http_status_errors_map_without_echoing_body(self) -> None:
+        class FakeHTTPError(Exception):
+            def __init__(self, status_code: int, body: str) -> None:
+                super().__init__(body)
+                self.status_code = status_code
+
+        llm = FakeLlm(
+            [FakeHTTPError(404, "model secret-body"), FakeHTTPError(404, "again secret-body")]
+        )
+
+        with self.assertRaises(ExtractionError) as raised:
+            ExtractionService(llm, max_attempts=2).extract(segment())
+
+        self.assertEqual("http_4xx", raised.exception.failure_class)
+        self.assertNotIn("secret-body", str(raised.exception))
+
+    def test_timeout_cause_chain_is_classified_without_source_text(self) -> None:
+        class APITimeoutError(Exception):
+            pass
+
+        class Wrapper(Exception):
+            pass
+
+        inner = APITimeoutError("hidden timeout payload")
+        wrapped = Wrapper("wrapper secret")
+        wrapped.__cause__ = inner
+        llm = FakeLlm([wrapped, wrapped])
+
+        with self.assertRaises(ExtractionError) as raised:
+            ExtractionService(llm, max_attempts=2).extract(segment())
+
+        self.assertEqual("timeout", raised.exception.failure_class)
+        self.assertNotIn("secret", str(raised.exception))
+        self.assertNotIn("hidden timeout", str(raised.exception))
+
     def test_invalid_json_failure_class_does_not_echo_payload(self) -> None:
         class BrokenJsonLlm:
             def complete_structured(self, **kwargs):
