@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .nexus.cli import configure_parser, run_command
+from .nexus.decision.hook import build_pre_llm_handler
 
 
 def register(ctx: Any) -> None:
@@ -33,6 +34,7 @@ def register(ctx: Any) -> None:
         setup_fn=setup_fn,
         handler_fn=handler_fn,
     )
+    ctx.register_hook("pre_llm_call", build_pre_llm_handler(ctx))
 
 
 __all__ = ["register"]

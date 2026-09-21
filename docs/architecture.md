@@ -21,6 +21,10 @@ to an external classifier. Configured confidence thresholds affect only
 `needs_human_review` / `review_band`. They do not authorize execution
 (`would_execute` stays false).
 
+A `pre_llm_call` hook may inject that same shadow metadata into the current
+Hermes user turn. The hook fails open on error, does not call tools, and does
+not treat a label as permission to act.
+
 ## Extension footprint
 
 NEXUS follows Hermes's footprint ladder:
