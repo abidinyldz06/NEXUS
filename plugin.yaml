@@ -65,3 +65,19 @@ config_schema:
     type: str
     default: "0.60"
     description: "Recorded low-risk threshold; not enforced for execution in Phase A."
+  decision_timeout_seconds:
+    type: str
+    default: "2.5"
+    description: "Classifier timeout in seconds (hard cap 15)."
+  decision_log_enabled:
+    type: bool
+    default: true
+    description: "Shadow-route JSONL logging under data_path (privacy-safe)."
+  decision_log_preview:
+    type: bool
+    default: false
+    description: "Opt-in 48-char preview in the shadow log; default off."
+  decision_log_path:
+    type: str
+    default: "logs/classifier.jsonl"
+    description: "Relative to data_path; absolute paths are rejected."
