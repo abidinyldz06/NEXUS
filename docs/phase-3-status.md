@@ -92,6 +92,8 @@ installed plugin commit.
 
 - Resolve the repeated structured-output/provider failures and rerun the same
   bounded real-export class successfully before claiming operational acceptance.
+  Shadow ingest now uses three bounded attempts and a content-free
+  `failure_class`; that does not by itself close operational acceptance.
 - The expanded synthetic set remains smaller than the planned private golden
   dataset and is not by itself full real-world model-quality acceptance. The
   runner is merged and installed, but human-labeled real cases are not yet

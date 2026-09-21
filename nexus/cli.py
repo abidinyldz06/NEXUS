@@ -12,7 +12,13 @@ from typing import Any
 from . import __version__
 from .config import from_plugin_context
 from .decision import route_text
-from .errors import ConfigurationError, DecisionError, NexusError, NexusIndexError
+from .errors import (
+    ConfigurationError,
+    DecisionError,
+    ExtractionError,
+    NexusError,
+    NexusIndexError,
+)
 from .eval import (
     PrivateEvalFixture,
     evaluate_with_llm_report,
@@ -311,6 +317,8 @@ def run_command(args: Namespace, ctx: Any) -> int:
                 "candidates_published": False,
                 "errors": [str(exc)],
             }
+            if isinstance(exc, ExtractionError):
+                payload["failure_class"] = exc.failure_class
         _print_ingest_payload(payload, as_json=bool(getattr(args, "as_json", False)))
         return 0 if payload["ok"] else 2
     if command == "eval":
@@ -537,6 +545,8 @@ def _print_ingest_payload(payload: dict[str, Any], *, as_json: bool) -> None:
             )
         for error in payload.get("errors", []):
             print(f"error: {error}")
+        if payload.get("failure_class"):
+            print(f"failure_class: {payload['failure_class']}")
         return
     summary = payload.get("summary", {})
     print("NEXUS ingest dry-run — no writes performed")
@@ -691,7 +701,8 @@ def _print_route_payload(payload: dict[str, Any], *, as_json: bool) -> None:
         )
         print(
             f"external classifier: {str(bool(payload.get('external_classifier_invoked'))).lower()}, "
-            f"needs review: {str(bool(payload.get('needs_human_review'))).lower()}"
+            f"needs review: {str(bool(payload.get('needs_human_review'))).lower()}, "
+            f"review band: {payload.get('review_band')}"
         )
     for error in payload.get("errors", []):
         print(f"error: {error}")

@@ -36,6 +36,10 @@ class HermesExportError(SourceError):
 class ExtractionError(NexusError):
     """Structured extraction failed without producing a trusted result."""
 
+    def __init__(self, message: str, *, failure_class: str = "structured_output") -> None:
+        super().__init__(message)
+        self.failure_class = failure_class
+
 
 class EvaluationError(NexusError):
     """A model evaluation fixture is missing, unsafe or does not match approval."""

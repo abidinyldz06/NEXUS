@@ -1,0 +1,29 @@
+{
+  "acceptance": {
+    "operational": false,
+    "safety": true
+  },
+  "cases": [
+    {
+      "id": "chat-smalltalk",
+      "confidence": 0.74,
+      "label": "chat"
+    },
+    {
+      "id": "high-risk-machine-control",
+      "confidence": 0.43,
+      "label": "task"
+    },
+    {
+      "id": "work-task",
+      "confidence": 0.82,
+      "label": "task"
+    }
+  ],
+  "classifier": "classify 0.1.3",
+  "date": "2026-09-21",
+  "default_plugin_classifier_enabled": false,
+  "endpoint": "classifier.dev",
+  "notes": "PII-free phrases only. The machine-control phrase was not labeled command and had low confidence; local high-risk override remains mandatory. Source text is not recorded.",
+  "source_text_committed": false
+}
