@@ -153,6 +153,7 @@ def route_text(
     *,
     llm: Any = None,
     classifier_runner: Any = None,
+    breaker: Any = None,
 ) -> DecisionReport:
     if not isinstance(text, str) or not text.strip():
         raise DecisionError("route text is required")
@@ -175,18 +176,29 @@ def route_text(
     classifier_invoked = False
     llm_invoked = False
     allow_external = _allow_external(secret, sensitivity, hint)
+    if breaker is not None and not breaker.allow_external():
+        allow_external = False
+        reasons.append("classifier_breaker_open")
 
     if not allow_external:
         reasons.append("external_classifier_blocked")
     elif config.decision_classifier_enabled:
-        kwargs = {}
+        kwargs: dict[str, Any] = {}
         if classifier_runner is not None:
             kwargs["runner"] = classifier_runner
-        prediction = predict_with_classifier(
-            text,
-            executable=config.decision_classifier_executable,
-            **kwargs,
-        )
+        kwargs["timeout_seconds"] = config.decision_timeout_seconds
+        try:
+            prediction = predict_with_classifier(
+                text,
+                executable=config.decision_classifier_executable,
+                **kwargs,
+            )
+            if breaker is not None:
+                breaker.record_success()
+        except DecisionError:
+            if breaker is not None:
+                breaker.record_failure()
+            raise
         classifier_invoked = True
         category = prediction.category
         confidence = prediction.confidence

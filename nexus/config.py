@@ -76,6 +76,42 @@ def _boolean(value: object, *, field_name: str) -> bool:
     raise ConfigurationError(f"{field_name} must be a boolean")
 
 
+def _positive_number(value: object, *, field_name: str) -> float:
+    if isinstance(value, bool):
+        raise ConfigurationError(f"{field_name} must be a positive number")
+    try:
+        parsed = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise ConfigurationError(f"{field_name} must be a positive number") from exc
+    if not parsed > 0 or parsed != parsed:
+        raise ConfigurationError(f"{field_name} must be a positive number")
+    return parsed
+
+
+def _decision_timeout(value: object) -> float:
+    """Classifier timeout in seconds: fast by default, hard-capped."""
+    parsed = _positive_number(value, field_name="decision_timeout_seconds")
+    if parsed > 15:
+        raise ConfigurationError("decision_timeout_seconds must be <= 15")
+    return parsed
+
+
+def _relative_data_path(value: object) -> Path:
+    """Shadow-log path: relative under data_path, or absolute fail-closed."""
+    if value is None or str(value).strip() == "":
+        return Path("logs/classifier.jsonl")
+    path = Path(str(value))
+    if ".." in path.parts:
+        raise ConfigurationError(
+            "decision_log_path must not contain '..' path segments"
+        )
+    if path.is_absolute():
+        raise ConfigurationError(
+            "decision_log_path must be relative; it resolves under data_path"
+        )
+    return path
+
+
 @dataclass(frozen=True, slots=True)
 class NexusConfig:
     """Resolved runtime configuration.
@@ -99,6 +135,10 @@ class NexusConfig:
     decision_classifier_executable: str = "classify"
     decision_high_confidence: float = 0.85
     decision_low_risk_min: float = 0.60
+    decision_timeout_seconds: float = 2.5
+    decision_log_enabled: bool = True
+    decision_log_preview: bool = False
+    decision_log_path: Path = Path("logs/classifier.jsonl")
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, Any]) -> "NexusConfig":
@@ -160,6 +200,20 @@ class NexusConfig:
                 values.get("decision_low_risk_min", 0.60),
                 field_name="decision_low_risk_min",
             ),
+            decision_timeout_seconds=_decision_timeout(
+                values.get("decision_timeout_seconds", 2.5)
+            ),
+            decision_log_enabled=_boolean(
+                values.get("decision_log_enabled", True),
+                field_name="decision_log_enabled",
+            ),
+            decision_log_preview=_boolean(
+                values.get("decision_log_preview", False),
+                field_name="decision_log_preview",
+            ),
+            decision_log_path=_relative_data_path(
+                values.get("decision_log_path", "logs/classifier.jsonl")
+            ),
         )
         if config.sensitive_auto_publish:
             raise ConfigurationError(
@@ -180,6 +234,11 @@ class NexusConfig:
     @property
     def raw_path(self) -> Path:
         return self.data_path / "raw"
+
+    @property
+    def decision_log_full_path(self) -> Path:
+        """Shadow log path, resolved under the private data dir."""
+        return self.data_path / self.decision_log_path
 
     @property
     def write_ready(self) -> bool:
@@ -215,6 +274,10 @@ PLUGIN_CONFIG_KEYS = (
     "decision_classifier_executable",
     "decision_high_confidence",
     "decision_low_risk_min",
+    "decision_timeout_seconds",
+    "decision_log_enabled",
+    "decision_log_preview",
+    "decision_log_path",
 )
 
 
@@ -235,6 +298,10 @@ def from_plugin_context(ctx: Any) -> NexusConfig:
         "decision_classifier_executable": "classify",
         "decision_high_confidence": 0.85,
         "decision_low_risk_min": 0.60,
+        "decision_timeout_seconds": 2.5,
+        "decision_log_enabled": True,
+        "decision_log_preview": False,
+        "decision_log_path": "logs/classifier.jsonl",
     }
     values = {key: ctx.get_config(key, defaults.get(key)) for key in PLUGIN_CONFIG_KEYS}
     return NexusConfig.from_mapping(values)
