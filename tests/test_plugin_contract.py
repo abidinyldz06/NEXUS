@@ -33,6 +33,8 @@ class PluginContractTests(unittest.TestCase):
 
         self.assertIn("manifest_version: 1", manifest)
         self.assertIn("api_version: 1", manifest)
+        self.assertIn("provides_hooks:", manifest)
+        self.assertIn("- pre_llm_call", manifest)
 
     def test_registers_one_cli_and_namespaced_auxiliary_task(self) -> None:
         root = Path(__file__).resolve().parents[1]
