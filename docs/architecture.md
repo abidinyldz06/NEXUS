@@ -17,8 +17,9 @@ It must not sit inside ChatGPT/Hermes ingest, segmentation or `nexus_extract`.
 `hermes nexus route --shadow` may apply local rules, an opt-in classifier.dev
 adapter, or an opt-in Hermes structured fallback. It never executes commands,
 never writes review/Vault/index state, and never sends secret or sensitive text
-to an external classifier. Candidate confidence thresholds are recorded in
-config but are not enforced for execution.
+to an external classifier. Configured confidence thresholds affect only
+`needs_human_review` / `review_band`. They do not authorize execution
+(`would_execute` stays false).
 
 ## Extension footprint
 

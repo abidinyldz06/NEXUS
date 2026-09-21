@@ -102,6 +102,8 @@ class CliTests(unittest.TestCase):
         self.assertEqual("chat", payload["category"])
         self.assertFalse(payload["writes_performed"])
         self.assertFalse(payload["would_execute"])
+        self.assertFalse(payload["needs_human_review"])
+        self.assertEqual("low_risk_band", payload["review_band"])
         self.assertFalse(payload["external_classifier_invoked"])
         self.assertNotIn("Bugün hava çok güzel ya", stream.getvalue())
 

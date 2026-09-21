@@ -28,7 +28,9 @@ same untrusted class: it cannot authorize tools or publication.
 - Live-route `route --shadow` never writes state. Secret-like values and
   finance/health/identity/credential/external-action text are not sent to
   classifier.dev. High-risk command phrases cannot execute from a classifier
-  score; Phase A always reports `would_execute: false` and requires human review.
+  score; Phase A always reports `would_execute: false`. Configured 0.85 / 0.60
+  bands set review flags only: high-risk, identity, customer, command and
+  unknown routes still require review.
 - Review edit input must be an absolute, regular, non-symlink JSON file no larger
   than 1 MiB and must preserve the candidate's existing fields.
 - Private ingest staging requires one Inbox-relative path and its exact lowercase

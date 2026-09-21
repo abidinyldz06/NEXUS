@@ -57,14 +57,18 @@ class DecisionRouterTests(unittest.TestCase):
         self.assertIn("external_classifier_blocked", report.reason_codes)
         self.assertNotIn("pasaport", json.dumps(report.to_dict()))
 
-    def test_local_chat_does_not_write_or_enforce_confidence_policy(self) -> None:
+    def test_local_chat_uses_thresholds_only_for_review_flags(self) -> None:
         report = route_text("Bugün hava çok güzel ya", _config())
         payload = report.to_dict()
 
         self.assertEqual(RouteCategory.CHAT, report.category)
         self.assertEqual("local_rules", report.backend)
         self.assertFalse(payload["writes_performed"])
-        self.assertFalse(payload["candidate_policy"]["enforced"])
+        self.assertFalse(payload["would_execute"])
+        self.assertFalse(payload["needs_human_review"])
+        self.assertEqual("low_risk_band", payload["review_band"])
+        self.assertTrue(payload["candidate_policy"]["enforced"])
+        self.assertEqual("review_flags", payload["candidate_policy"]["enforced_for"])
         self.assertEqual(0.85, payload["candidate_policy"]["high_confidence"])
         self.assertEqual(0.6, payload["candidate_policy"]["low_risk_min"])
 
@@ -105,6 +109,8 @@ class DecisionRouterTests(unittest.TestCase):
         self.assertEqual(RouteCategory.CHAT, report.category)
         self.assertEqual(0.91, report.confidence)
         self.assertEqual("classifier.dev", report.backend)
+        self.assertFalse(report.to_dict()["needs_human_review"])
+        self.assertEqual("high_confidence", report.to_dict()["review_band"])
         self.assertEqual("--json", captured["command"][2])
         self.assertNotIn("Bugün hava çok güzel ya", " ".join(str(part) for part in captured["command"]))
         self.assertNotIn("CLASSIFY_API_KEY", captured["env"])
@@ -129,6 +135,9 @@ class DecisionRouterTests(unittest.TestCase):
 
         self.assertTrue(report.llm_fallback_invoked)
         self.assertEqual(RouteCategory.TASK, report.category)
+        self.assertTrue(report.to_dict()["needs_human_review"])
+        self.assertEqual("below_low_risk_min", report.to_dict()["review_band"])
+        self.assertFalse(report.to_dict()["would_execute"])
         self.assertEqual("nexus_route", seen["task"])
         self.assertTrue(str(seen["input"][0]["text"]).startswith("UNTRUSTED_DATA_JSON"))
 

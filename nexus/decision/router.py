@@ -14,6 +14,16 @@ from .classifier import predict_with_classifier
 from .llm import predict_with_llm
 
 MAX_ROUTE_CHARS = 4000
+_LOW_RISK_CATEGORIES = frozenset(
+    {RouteCategory.CHAT, RouteCategory.TEMPORARY_INFORMATION}
+)
+_ALWAYS_REVIEW_CATEGORIES = frozenset(
+    {
+        RouteCategory.COMMAND,
+        RouteCategory.CUSTOMER_OR_CRM,
+        RouteCategory.UNKNOWN,
+    }
+)
 
 _COMMAND_PHRASES = (
     "yeniden başlat",
@@ -58,6 +68,8 @@ class DecisionReport:
     llm_fallback_invoked: bool
     high_confidence: float
     low_risk_min: float
+    needs_human_review: bool
+    review_band: str
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -65,8 +77,9 @@ class DecisionReport:
             "mode": "shadow",
             "writes_performed": False,
             "would_execute": False,
-            "needs_human_review": True,
-            "approval_policy": "always_required_in_phase_a",
+            "needs_human_review": self.needs_human_review,
+            "review_band": self.review_band,
+            "approval_policy": "thresholds_for_review_flags_only",
             "category": self.category.value,
             "confidence": self.confidence,
             "backend": self.backend,
@@ -78,7 +91,8 @@ class DecisionReport:
             "candidate_policy": {
                 "high_confidence": self.high_confidence,
                 "low_risk_min": self.low_risk_min,
-                "enforced": False,
+                "enforced": True,
+                "enforced_for": "review_flags",
             },
         }
 
@@ -105,6 +119,32 @@ def _local_hint(folded: str) -> _LocalHint:
 
 def _allow_external(secret: bool, sensitivity: Sensitivity, hint: _LocalHint) -> bool:
     return not secret and sensitivity is Sensitivity.NONE and not hint.high_risk
+
+
+def _review_flags(
+    *,
+    category: RouteCategory,
+    confidence: float,
+    sensitivity: Sensitivity,
+    high_risk: bool,
+    high_confidence: float,
+    low_risk_min: float,
+) -> tuple[bool, str]:
+    if (
+        high_risk
+        or sensitivity is not Sensitivity.NONE
+        or category in _ALWAYS_REVIEW_CATEGORIES
+    ):
+        return True, "required"
+    if confidence < low_risk_min:
+        return True, "below_low_risk_min"
+    if confidence < high_confidence:
+        if category in _LOW_RISK_CATEGORIES:
+            return False, "low_risk_band"
+        return True, "medium_confidence"
+    if category in _LOW_RISK_CATEGORIES:
+        return False, "high_confidence"
+    return True, "high_confidence_not_low_risk"
 
 
 def route_text(
@@ -163,6 +203,15 @@ def route_text(
         confidence = 1.0
         backend = "local_rules"
 
+    needs_review, review_band = _review_flags(
+        category=category,
+        confidence=confidence,
+        sensitivity=sensitivity,
+        high_risk=hint.high_risk,
+        high_confidence=config.decision_high_confidence,
+        low_risk_min=config.decision_low_risk_min,
+    )
+
     return DecisionReport(
         category=category,
         confidence=confidence,
@@ -174,6 +223,8 @@ def route_text(
         llm_fallback_invoked=llm_invoked,
         high_confidence=config.decision_high_confidence,
         low_risk_min=config.decision_low_risk_min,
+        needs_human_review=needs_review,
+        review_band=review_band,
     )
 
 
