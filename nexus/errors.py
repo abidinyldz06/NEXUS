@@ -87,3 +87,7 @@ class RestoreDrillError(NexusError):
 
 class GitRollbackDrillError(NexusError):
     """An isolated external git-dir rollback drill failed closed."""
+
+
+class DecisionError(NexusError):
+    """A live-route shadow decision cannot be produced safely."""

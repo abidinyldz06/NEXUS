@@ -38,6 +38,32 @@ def _positive_int(value: object, *, field_name: str) -> int:
     return parsed
 
 
+def _unit_interval(value: object, *, field_name: str) -> float:
+    if isinstance(value, bool):
+        raise ConfigurationError(f"{field_name} must be a number between 0 and 1")
+    try:
+        parsed = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise ConfigurationError(f"{field_name} must be a number between 0 and 1") from exc
+    if parsed != parsed or parsed < 0 or parsed > 1:
+        raise ConfigurationError(f"{field_name} must be a number between 0 and 1")
+    return parsed
+
+
+def _classifier_executable(value: object) -> str:
+    if value is None or str(value).strip() == "":
+        return "classify"
+    executable = str(value).strip()
+    if executable == "classify":
+        return executable
+    path = Path(executable)
+    if path.is_absolute() and ".." not in path.parts:
+        return executable
+    raise ConfigurationError(
+        "decision_classifier_executable must be 'classify' or an absolute path"
+    )
+
+
 def _boolean(value: object, *, field_name: str) -> bool:
     if isinstance(value, bool):
         return value
@@ -68,6 +94,11 @@ class NexusConfig:
     source_stable_seconds: int = 5
     auto_publish_enabled: bool = False
     sensitive_auto_publish: bool = False
+    decision_classifier_enabled: bool = False
+    decision_llm_fallback_enabled: bool = False
+    decision_classifier_executable: str = "classify"
+    decision_high_confidence: float = 0.85
+    decision_low_risk_min: float = 0.60
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, Any]) -> "NexusConfig":
@@ -110,11 +141,35 @@ class NexusConfig:
                 values.get("sensitive_auto_publish", False),
                 field_name="sensitive_auto_publish",
             ),
+            decision_classifier_enabled=_boolean(
+                values.get("decision_classifier_enabled", False),
+                field_name="decision_classifier_enabled",
+            ),
+            decision_llm_fallback_enabled=_boolean(
+                values.get("decision_llm_fallback_enabled", False),
+                field_name="decision_llm_fallback_enabled",
+            ),
+            decision_classifier_executable=_classifier_executable(
+                values.get("decision_classifier_executable", "classify")
+            ),
+            decision_high_confidence=_unit_interval(
+                values.get("decision_high_confidence", 0.85),
+                field_name="decision_high_confidence",
+            ),
+            decision_low_risk_min=_unit_interval(
+                values.get("decision_low_risk_min", 0.60),
+                field_name="decision_low_risk_min",
+            ),
         )
         if config.sensitive_auto_publish:
             raise ConfigurationError(
                 "sensitive_auto_publish must remain false until encrypted/excluded "
                 "backups are verified"
+            )
+        if config.decision_high_confidence < config.decision_low_risk_min:
+            raise ConfigurationError(
+                "decision_high_confidence must be greater than or equal to "
+                "decision_low_risk_min"
             )
         return config
 
@@ -155,6 +210,11 @@ PLUGIN_CONFIG_KEYS = (
     "source_stable_seconds",
     "auto_publish_enabled",
     "sensitive_auto_publish",
+    "decision_classifier_enabled",
+    "decision_llm_fallback_enabled",
+    "decision_classifier_executable",
+    "decision_high_confidence",
+    "decision_low_risk_min",
 )
 
 
@@ -170,6 +230,11 @@ def from_plugin_context(ctx: Any) -> NexusConfig:
         "source_stable_seconds": 5,
         "auto_publish_enabled": False,
         "sensitive_auto_publish": False,
+        "decision_classifier_enabled": False,
+        "decision_llm_fallback_enabled": False,
+        "decision_classifier_executable": "classify",
+        "decision_high_confidence": 0.85,
+        "decision_low_risk_min": 0.60,
     }
     values = {key: ctx.get_config(key, defaults.get(key)) for key in PLUGIN_CONFIG_KEYS}
     return NexusConfig.from_mapping(values)

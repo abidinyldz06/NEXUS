@@ -43,3 +43,23 @@ config_schema:
   sensitive_auto_publish:
     type: bool
     default: false
+  decision_classifier_enabled:
+    type: bool
+    default: false
+    description: "Experimental classifier.dev live-route; shadow only, default off."
+  decision_llm_fallback_enabled:
+    type: bool
+    default: false
+    description: "Optional Hermes structured-route fallback; shadow only, default off."
+  decision_classifier_executable:
+    type: str
+    default: "classify"
+    description: "Basename classify or an absolute classifier CLI path."
+  decision_high_confidence:
+    type: str
+    default: "0.85"
+    description: "Recorded candidate threshold; not enforced for execution in Phase A."
+  decision_low_risk_min:
+    type: str
+    default: "0.60"
+    description: "Recorded low-risk threshold; not enforced for execution in Phase A."

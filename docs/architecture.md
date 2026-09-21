@@ -9,6 +9,17 @@
 - Untrusted source text enters only a tool-free structured extraction call.
 - A deterministic policy engine and writer own all side effects.
 
+## Live-route DecisionRouter (Phase A)
+
+Live-turn classification is a separate shadow surface from memory extraction.
+It must not sit inside ChatGPT/Hermes ingest, segmentation or `nexus_extract`.
+
+`hermes nexus route --shadow` may apply local rules, an opt-in classifier.dev
+adapter, or an opt-in Hermes structured fallback. It never executes commands,
+never writes review/Vault/index state, and never sends secret or sensitive text
+to an external classifier. Candidate confidence thresholds are recorded in
+config but are not enforced for execution.
+
 ## Extension footprint
 
 NEXUS follows Hermes's footprint ladder:

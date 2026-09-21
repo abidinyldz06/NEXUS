@@ -182,6 +182,7 @@ hermes nexus review edit REV_ID --candidate-file /absolute/path/candidate.json
 hermes nexus review publish REV_ID --dry-run
 hermes nexus review publish REV_ID --apply --confirm REV_ID
 hermes nexus rebuild
+hermes nexus route --shadow --text "…"
 hermes nexus search "Türk kahvesi" --kind memory
 hermes nexus reminders --emit-local
 hermes nexus retention --dry-run
@@ -212,7 +213,9 @@ ekrana verir. Private fixture hazırlama sözleşmesi
 [`docs/private-golden-eval.md`](docs/private-golden-eval.md) içinde kayıtlıdır.
 Review komutları yalnız private
 olay kaydını değiştirir ve `vault_writes: false` raporlar. `rebuild` ve `search`
-yalnız Vault dışındaki disposable indeksi değiştirir/okur. Ingest mutation yalnız
+yalnız Vault dışındaki disposable indeksi değiştirir/okur. `route --shadow` tek
+bir cümleyi sınıflandırır; yazmaz, yayınlamaz ve çalıştırmaz, kaynak metni
+ekrana basmaz. Ingest mutation yalnız
 exact-source `--stage` ile private raw/state/review alanıyla sınırlıdır; automatic
 canonical record publish ve dış-kanal reminder teslimi kapalıdır. Reminder komutu
 yalnız local output üretir ve işlenen canonical commitment'ın notification state'ini

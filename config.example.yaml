@@ -14,3 +14,8 @@ plugins:
         source_stable_seconds: 5
         auto_publish_enabled: false
         sensitive_auto_publish: false
+        decision_classifier_enabled: false
+        decision_llm_fallback_enabled: false
+        decision_classifier_executable: "classify"
+        decision_high_confidence: "0.85"
+        decision_low_risk_min: "0.60"
