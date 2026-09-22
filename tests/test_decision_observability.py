@@ -249,15 +249,13 @@ class HookLoggingTests(unittest.TestCase):
             ctx = self._ctx(tmp)
             handler = build_pre_llm_handler(ctx)
             result = handler(user_message="Merhaba Hermes nasılsın?")
-            self.assertIsNotNone(result)
-            assert result is not None
-            self.assertIn("category=chat", result["context"])
+            # Sessiz shadow: kullanıcıya görünür context yok
+            self.assertIsNone(result)
             log_path = Path(tmp) / "logs" / "classifier.jsonl"
             self.assertTrue(log_path.exists())
             rows = [json.loads(line) for line in log_path.read_text().splitlines()]
             self.assertEqual(1, len(rows))
             self.assertEqual("chat", rows[0]["intent"])
-            self.assertFalse(rows[0]["success"] is False)
             # raw text never persisted without preview opt-in
             self.assertNotIn("nasılsın", log_path.read_text())
 
@@ -288,7 +286,7 @@ class HookLoggingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             ctx = self._ctx(tmp, decision_log_enabled=False)
             handler = build_pre_llm_handler(ctx)
-            self.assertIsNotNone(handler(user_message="nasılsın"))
+            self.assertIsNone(handler(user_message="nasılsın"))
             log_path = Path(tmp) / "logs" / "classifier.jsonl"
             self.assertFalse(log_path.exists())
 

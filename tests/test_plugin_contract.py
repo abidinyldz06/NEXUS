@@ -60,7 +60,7 @@ class PluginContractTests(unittest.TestCase):
         self.assertEqual(1, len(context.hooks))
         self.assertEqual("pre_llm_call", context.hooks[0][0])
 
-    def test_pre_llm_hook_injects_route_metadata_without_source_text(self) -> None:
+    def test_pre_llm_hook_stays_silent_and_logs_without_source_text(self) -> None:
         root = Path(__file__).resolve().parents[1]
         spec = importlib.util.spec_from_file_location(
             "nexus_plugin_entry_hook",
@@ -79,13 +79,8 @@ class PluginContractTests(unittest.TestCase):
 
         injected = callback(user_message=source)
 
-        assert isinstance(injected, dict)
-        context_text = injected["context"]
-        self.assertIn("category=customer_or_crm", context_text)
-        self.assertIn("would_execute=false", context_text)
-        self.assertIn("needs_human_review=true", context_text)
-        self.assertNotIn("pasaport", context_text)
-        self.assertNotIn(source, context_text)
+        # Sessiz shadow: kullanıcıya/model görünür context YOK, turn engellenmez.
+        assert injected is None
 
 
 if __name__ == "__main__":

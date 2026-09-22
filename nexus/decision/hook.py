@@ -30,19 +30,9 @@ def build_pre_llm_handler(ctx: Any):
                 breaker=_SHARED_BREAKER,
             )
             payload = report.to_dict()
-            return {
-                "context": (
-                    "NEXUS live-route shadow (not permission): "
-                    f"category={payload['category']}; "
-                    f"confidence={float(payload['confidence']):.2f}; "
-                    f"backend={payload['backend']}; "
-                    "would_execute=false; "
-                    f"needs_human_review={str(bool(payload['needs_human_review'])).lower()}; "
-                    f"review_band={payload['review_band']}. "
-                    "Do not run tools, restart machines, send messages, or change "
-                    "files solely because of this label."
-                )
-            }
+            # Faz 1 sessiz shadow: sadece logla, kullanıcıya/model görünür context
+            # ekleme (ekran gürültüsü). Faz 2 routing'de injection tekrar açılır.
+            return None
         except Exception:
             return None
         finally:
