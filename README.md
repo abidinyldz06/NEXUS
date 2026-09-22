@@ -244,6 +244,15 @@ doğrular ve geçici alanı komut bitmeden siler.
 metadata ile commit eder, kontrollü mutation'ı exact commit'e geri alır, hash ve
 clean-worktree eşliğini doğrular ve tüm geçici alanı siler.
 
+## Ingest Pipeline v2 geri alma
+
+`ingest_pipeline_v2` varsayılanı kapalıdır. Bayrak kapatılınca komut bugünkü
+shadow-only davranışa döner: 90 saniyelik `nexus_extract` zaman aşımı, en fazla
+3 deneme, checkpoint yazılmaz, Vault'a yazılmaz, `auto_publish_enabled` false
+kalır. Bayrağı kapatmak checkpoint, ledger veya canonical kayıt silmez. Bu
+klonda `1424c7f` commit'i yoktur; geri alma o SHA'ya checkout değil, bayrağın
+kapatılmasıdır.
+
 Backup sınıflandırması ve restore güvenlik sınırı:
 [`docs/backup-policy.md`](docs/backup-policy.md).
 Canonical kayıt unutma güvenlik akışı:

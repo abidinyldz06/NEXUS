@@ -81,8 +81,21 @@ _SENSITIVITY_TERMS: dict[Sensitivity, tuple[str, ...]] = {
 _SECRET_VALUE_PATTERNS = (
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", re.IGNORECASE),
     re.compile(r"\b(?:sk|ghp|github_pat)_[A-Za-z0-9_-]{16,}\b"),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\bBearer\s+\S+", re.IGNORECASE),
     re.compile(r"\b(?:password|parola|şifre|token|api[_ -]?key)\s*[:=]\s*\S+", re.IGNORECASE),
+    re.compile(
+        r"\b[A-Z][A-Z0-9_]*(?:SECRET|TOKEN|API_KEY|ACCESS_KEY)[A-Z0-9_]*\s*=\s*\S+"
+    ),
 )
+
+
+def redact_secrets(text: str) -> str:
+    """Replace secret-shaped substrings. Derived stores must not keep them."""
+    redacted = text
+    for pattern in _SECRET_VALUE_PATTERNS:
+        redacted = pattern.sub("[redacted]", redacted)
+    return redacted
 
 
 def classify_sensitivity(statement: str) -> Sensitivity:

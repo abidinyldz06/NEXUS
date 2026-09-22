@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from hashlib import sha256
 
 from .fingerprints import segment_fingerprint
-from .normalize import NormalizedConversation, NormalizedMessage
+from .normalize import NormalizedConversation, NormalizedMessage, normalize_text
 
 
 SEGMENTER_VERSION = "nexus-segmenter-v1"
+SEGMENT_ID_SCHEMA_VERSION = "nexus-segment-schema-v2"
+_FIELD_SEPARATOR = "\x1f"
+_PART_SEPARATOR = "\x1e"
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +23,12 @@ class ConversationSegment:
     fingerprint: str
     overlap_span_ids: tuple[str, ...] = ()
     oversized_turn: bool = False
+    segment_id: str = ""
+    start_message_index: int = 0
+    end_message_index: int = 0
+    schema_version: str = ""
+    content_hash: str = ""
+    split_fallback: bool = False
 
     @property
     def span_ids(self) -> tuple[str, ...]:
@@ -111,3 +121,172 @@ def segment_conversation(
         )
         for index, (messages, overlap_ids, oversized) in enumerate(groups, start=1)
     )
+
+
+def normalize_for_segment_id(text: str) -> str:
+    """Normalize text before it is hashed into a segment id.
+
+    Newlines (``\\r\\n`` and ``\\r``) become ``\\n``. Trailing whitespace on
+    each line is removed, then the whole string is stripped. Unicode form is
+    NFC. Callers hash the UTF-8 encoding of this result. Message order stays
+    the conversation order; texts are not re-sorted.
+    """
+    return normalize_text(text)
+
+
+def normalized_content_hash(texts: tuple[str, ...] | list[str]) -> str:
+    """Hash normalized parts in the given order."""
+    payload = _PART_SEPARATOR.join(normalize_for_segment_id(text) for text in texts)
+    return sha256(payload.encode("utf-8")).hexdigest()
+
+
+def deterministic_segment_id(
+    *,
+    conversation_id: str,
+    start_message_index: int,
+    end_message_index: int,
+    schema_version: str,
+    content_hash: str,
+) -> str:
+    """Stable id for one input and one schema version.
+
+    The material is ``conversation_id``, inclusive message indexes, schema
+    version and the normalized content hash, joined by a field separator so
+    adjacent fields cannot collide.
+    """
+    material = _FIELD_SEPARATOR.join(
+        (
+            conversation_id,
+            str(start_message_index),
+            str(end_message_index),
+            schema_version,
+            content_hash,
+        )
+    )
+    return sha256(material.encode("utf-8")).hexdigest()
+
+
+def _fallback_parts(text: str, target_chars: int) -> tuple[str, ...]:
+    """Split one oversized message without dropping characters.
+
+    Prefer a whitespace boundary inside the budget. If the window has no
+    space, cut at the budget. Joining the parts restores the normalized text.
+    """
+    rest = normalize_for_segment_id(text)
+    if not rest:
+        return ()
+    parts: list[str] = []
+    while rest:
+        if len(rest) <= target_chars:
+            parts.append(rest)
+            break
+        window = rest[:target_chars]
+        space = window.rfind(" ")
+        cut = space if space > 0 else target_chars
+        parts.append(rest[:cut])
+        rest = rest[cut:]
+    return tuple(parts)
+
+
+def _segment_from_messages(
+    conversation: NormalizedConversation,
+    *,
+    ordinal: int,
+    indexed: tuple[tuple[int, NormalizedMessage], ...],
+    texts: tuple[str, ...],
+    schema_version: str,
+    split_fallback: bool,
+) -> ConversationSegment:
+    start = indexed[0][0]
+    end = indexed[-1][0]
+    content_hash = normalized_content_hash(texts)
+    messages = tuple(item[1] for item in indexed)
+    return ConversationSegment(
+        conversation_id=conversation.external_conversation_id,
+        index=ordinal,
+        messages=messages,
+        fingerprint=segment_fingerprint(messages, version=SEGMENTER_VERSION),
+        segment_id=deterministic_segment_id(
+            conversation_id=conversation.external_conversation_id,
+            start_message_index=start,
+            end_message_index=end,
+            schema_version=schema_version,
+            content_hash=content_hash,
+        ),
+        start_message_index=start,
+        end_message_index=end,
+        schema_version=schema_version,
+        content_hash=content_hash,
+        split_fallback=split_fallback,
+        oversized_turn=split_fallback,
+    )
+
+
+def segment_conversation_v2(
+    conversation: NormalizedConversation,
+    *,
+    target_chars: int = 12_000,
+    schema_version: str = SEGMENT_ID_SCHEMA_VERSION,
+) -> tuple[ConversationSegment, ...]:
+    """Pack extractable messages on message boundaries.
+
+    ``target_chars`` is a character budget, not a token count. A turn stays
+    together while the next message still fits. A single message that exceeds
+    the budget uses :func:`_fallback_parts`. Flag-off callers keep using
+    :func:`segment_conversation` and v1 fingerprints.
+    """
+    if target_chars <= 0:
+        raise ValueError("target_chars must be positive")
+    indexed = [
+        (index, message)
+        for index, message in enumerate(conversation.messages)
+        if message.include_for_extraction and message.content_text
+    ]
+    if not indexed:
+        return ()
+
+    built: list[ConversationSegment] = []
+
+    def add_group(group: list[tuple[int, NormalizedMessage]], *, fallback: bool) -> None:
+        texts = tuple(message.content_text for _, message in group)
+        built.append(
+            _segment_from_messages(
+                conversation,
+                ordinal=len(built) + 1,
+                indexed=tuple(group),
+                texts=texts,
+                schema_version=schema_version,
+                split_fallback=fallback,
+            )
+        )
+
+    current: list[tuple[int, NormalizedMessage]] = []
+    size = 0
+    for index, message in indexed:
+        if len(normalize_for_segment_id(message.content_text)) > target_chars:
+            if current:
+                add_group(current, fallback=False)
+                current = []
+                size = 0
+            for part in _fallback_parts(message.content_text, target_chars):
+                built.append(
+                    _segment_from_messages(
+                        conversation,
+                        ordinal=len(built) + 1,
+                        indexed=((index, message),),
+                        texts=(part,),
+                        schema_version=schema_version,
+                        split_fallback=True,
+                    )
+                )
+            continue
+        message_size = len(normalize_for_segment_id(message.content_text))
+        if current and size + message_size > target_chars:
+            add_group(current, fallback=False)
+            current = []
+            size = 0
+        current.append((index, message))
+        size += message_size
+    if current:
+        add_group(current, fallback=False)
+    return tuple(built)

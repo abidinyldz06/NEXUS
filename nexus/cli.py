@@ -29,6 +29,7 @@ from .forget import apply_forget, plan_forget
 from .git_rollback_drill import run_synthetic_git_rollback_drill
 from .index import rebuild_index, search_index
 from .ingest import plan_inbox, shadow_inbox_source, stage_inbox_source
+from .ingest_v2 import run_inbox, status_payload
 from .permission_audit import audit_permissions
 from .publication import apply_publication, plan_publication
 from .pulse import emit_due_reminders
@@ -83,6 +84,14 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
         help="Maximum model calls for one shadow/stage run (1-100; default: 20)",
     )
     ingest.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
+    ingest_commands = ingest.add_subparsers(dest="ingest_command", required=False)
+    ingest_status = ingest_commands.add_parser(
+        "status", help="Show resumable ingest metadata without calling a model"
+    )
+    ingest_status.add_argument("ingest_id", nargs="?", help="Optional ingest id")
+    ingest_status.add_argument(
+        "--json", action="store_true", dest="status_json", help="Emit JSON"
+    )
 
     eval_command = subcommands.add_parser(
         "eval", help="Run the packaged frozen holdout without publishing"
@@ -275,6 +284,25 @@ def run_command(args: Namespace, ctx: Any) -> int:
         _print_payload(payload, as_json=bool(getattr(args, "as_json", False)))
         return 0 if payload["ok"] else 2
     if command == "ingest":
+        if getattr(args, "ingest_command", None) == "status":
+            try:
+                config = from_plugin_context(ctx)
+                payload = status_payload(config, getattr(args, "ingest_id", None))
+            except (NexusError, OSError, ValueError) as exc:
+                payload = {
+                    "ok": False,
+                    "ingest_pipeline_v2": False,
+                    "mode": "shadow-only",
+                    "extraction_called": False,
+                    "errors": [type(exc).__name__],
+                }
+            _print_payload(
+                payload,
+                as_json=bool(
+                    getattr(args, "status_json", False) or getattr(args, "as_json", False)
+                ),
+            )
+            return 0 if payload.get("ok") else 2
         dry_run = bool(getattr(args, "dry_run", False))
         shadow = bool(getattr(args, "shadow", False))
         stage = bool(getattr(args, "stage", False))
@@ -299,15 +327,29 @@ def run_command(args: Namespace, ctx: Any) -> int:
                     raise ValueError(
                         f"--{'stage' if stage else 'shadow'} requires --source and --confirm-sha"
                     )
-                runner = stage_inbox_source if stage else shadow_inbox_source
-                payload = runner(
-                    config,
-                    ctx.llm,
-                    relative_path=args.source,
-                    confirmed_sha256=args.confirm_sha,
-                    conversation_id=getattr(args, "conversation", None),
-                    max_segments=args.max_segments,
-                ).to_dict()
+                if config.ingest_pipeline_v2:
+                    payload = run_inbox(
+                        config,
+                        ctx.llm,
+                        relative_path=args.source,
+                        confirmed_sha256=args.confirm_sha,
+                        conversation_id=getattr(args, "conversation", None),
+                        max_segments=args.max_segments,
+                    ).to_dict()
+                    payload["writes_performed"] = False
+                    payload["vault_writes"] = False
+                    payload["candidates_published"] = False
+                    payload["mode"] = "v2"
+                else:
+                    runner = stage_inbox_source if stage else shadow_inbox_source
+                    payload = runner(
+                        config,
+                        ctx.llm,
+                        relative_path=args.source,
+                        confirmed_sha256=args.confirm_sha,
+                        conversation_id=getattr(args, "conversation", None),
+                        max_segments=args.max_segments,
+                    ).to_dict()
         except (NexusError, OSError, ValueError) as exc:
             payload = {
                 "ok": False,
