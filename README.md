@@ -246,12 +246,13 @@ clean-worktree eşliğini doğrular ve tüm geçici alanı siler.
 
 ## Ingest Pipeline v2 geri alma
 
-`ingest_pipeline_v2` varsayılanı kapalıdır. Bayrak kapatılınca komut bugünkü
-shadow-only davranışa döner: 90 saniyelik `nexus_extract` zaman aşımı, en fazla
-3 deneme, checkpoint yazılmaz, Vault'a yazılmaz, `auto_publish_enabled` false
-kalır. Bayrağı kapatmak checkpoint, ledger veya canonical kayıt silmez. Bu
-klonda `1424c7f` commit'i yoktur; geri alma o SHA'ya checkout değil, bayrağın
-kapatılmasıdır.
+`ingest_pipeline_v2` varsayılanı kapalıdır (pilot). Bayrak kapatılınca komut
+`1424c7f` shadow-only davranışa döner: 90 saniyelik `nexus_extract` hard timeout,
+en fazla 3 deneme, checkpoint yazılmaz, Vault'a yazılmaz. Bayrağı kapatmak
+checkpoint, ledger veya canonical kayıt silmez.
+`hermes nexus ingest pause` canlı yazımı durdurur; gölge JSONL kalır.
+`hermes nexus ingest status <ingest_id>` tek sorguda başarısızlık nedenini verir.
+`--long-unit-budget` yalnız insan tetiklemelidir (default 300s, her kullanım loglanır).
 
 Backup sınıflandırması ve restore güvenlik sınırı:
 [`docs/backup-policy.md`](docs/backup-policy.md).

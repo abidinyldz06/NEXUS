@@ -146,21 +146,16 @@ def deterministic_segment_id(
     start_message_index: int,
     end_message_index: int,
     schema_version: str,
-    content_hash: str,
+    part_index: int = 0,
 ) -> str:
-    """Stable id for one input and one schema version.
-
-    The material is ``conversation_id``, inclusive message indexes, schema
-    version and the normalized content hash, joined by a field separator so
-    adjacent fields cannot collide.
-    """
+    """Stable id for one conversation range, schema version and fallback part."""
     material = _FIELD_SEPARATOR.join(
         (
             conversation_id,
             str(start_message_index),
             str(end_message_index),
             schema_version,
-            content_hash,
+            str(part_index),
         )
     )
     return sha256(material.encode("utf-8")).hexdigest()
@@ -196,6 +191,7 @@ def _segment_from_messages(
     texts: tuple[str, ...],
     schema_version: str,
     split_fallback: bool,
+    part_index: int = 0,
 ) -> ConversationSegment:
     start = indexed[0][0]
     end = indexed[-1][0]
@@ -211,7 +207,7 @@ def _segment_from_messages(
             start_message_index=start,
             end_message_index=end,
             schema_version=schema_version,
-            content_hash=content_hash,
+            part_index=part_index,
         ),
         start_message_index=start,
         end_message_index=end,
@@ -268,7 +264,7 @@ def segment_conversation_v2(
                 add_group(current, fallback=False)
                 current = []
                 size = 0
-            for part in _fallback_parts(message.content_text, target_chars):
+            for part_index, part in enumerate(_fallback_parts(message.content_text, target_chars)):
                 built.append(
                     _segment_from_messages(
                         conversation,
@@ -277,6 +273,7 @@ def segment_conversation_v2(
                         texts=(part,),
                         schema_version=schema_version,
                         split_fallback=True,
+                        part_index=part_index,
                     )
                 )
             continue

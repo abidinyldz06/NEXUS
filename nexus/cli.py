@@ -29,7 +29,7 @@ from .forget import apply_forget, plan_forget
 from .git_rollback_drill import run_synthetic_git_rollback_drill
 from .index import rebuild_index, search_index
 from .ingest import plan_inbox, shadow_inbox_source, stage_inbox_source
-from .ingest_v2 import run_inbox, status_payload
+from .ingest_v2 import pause_ingest, run_inbox, status_payload
 from .permission_audit import audit_permissions
 from .publication import apply_publication, plan_publication
 from .pulse import emit_due_reminders
@@ -83,6 +83,15 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
         default=20,
         help="Maximum model calls for one shadow/stage run (1-100; default: 20)",
     )
+    ingest.add_argument(
+        "--long-unit-budget",
+        nargs="?",
+        const=300,
+        type=int,
+        default=None,
+        metavar="SECONDS",
+        help="Human-triggered long-unit lane for oversized turns (default 300s). Logged.",
+    )
     ingest.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
     ingest_commands = ingest.add_subparsers(dest="ingest_command", required=False)
     ingest_status = ingest_commands.add_parser(
@@ -91,6 +100,12 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
     ingest_status.add_argument("ingest_id", nargs="?", help="Optional ingest id")
     ingest_status.add_argument(
         "--json", action="store_true", dest="status_json", help="Emit JSON"
+    )
+    ingest_pause = ingest_commands.add_parser(
+        "pause", help="Stop live vault writes; shadow log remains"
+    )
+    ingest_pause.add_argument(
+        "--json", action="store_true", dest="pause_json", help="Emit JSON"
     )
 
     eval_command = subcommands.add_parser(
@@ -284,6 +299,25 @@ def run_command(args: Namespace, ctx: Any) -> int:
         _print_payload(payload, as_json=bool(getattr(args, "as_json", False)))
         return 0 if payload["ok"] else 2
     if command == "ingest":
+        if getattr(args, "ingest_command", None) == "pause":
+            try:
+                config = from_plugin_context(ctx)
+                payload = pause_ingest(config)
+            except (NexusError, OSError, ValueError) as exc:
+                payload = {
+                    "ok": False,
+                    "paused": False,
+                    "writes_performed": False,
+                    "vault_writes": False,
+                    "errors": [type(exc).__name__],
+                }
+            _print_payload(
+                payload,
+                as_json=bool(
+                    getattr(args, "pause_json", False) or getattr(args, "as_json", False)
+                ),
+            )
+            return 0 if payload.get("ok") else 2
         if getattr(args, "ingest_command", None) == "status":
             try:
                 config = from_plugin_context(ctx)
@@ -335,6 +369,7 @@ def run_command(args: Namespace, ctx: Any) -> int:
                         confirmed_sha256=args.confirm_sha,
                         conversation_id=getattr(args, "conversation", None),
                         max_segments=args.max_segments,
+                        long_unit_budget=getattr(args, "long_unit_budget", None),
                     ).to_dict()
                     payload["writes_performed"] = False
                     payload["vault_writes"] = False
@@ -554,7 +589,7 @@ def run_command(args: Namespace, ctx: Any) -> int:
         return 0 if payload["ok"] else 2
     print(
         "Usage: hermes nexus "
-        "{status|config validate|ingest {--dry-run|--shadow|--stage}|eval --shadow|review ...|"
+        "{status|config validate|ingest {--dry-run|--shadow|--stage|status|pause}|eval --shadow|review ...|"
         "rebuild|route --shadow|search|reminders --emit-local|retention --dry-run|forget ...|"
         "audit permissions|drill restore --synthetic|drill git-rollback --synthetic}"
     )

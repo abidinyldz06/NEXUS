@@ -8,6 +8,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from difflib import SequenceMatcher
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Callable
@@ -28,26 +29,23 @@ from .extraction.service import ExtractionService, classify_extraction_failure
 from .fingerprints import memory_fingerprint, stable_hash
 from .index.rebuild import rebuild_index
 from .normalize import NormalizedConversation, normalize_text
-from .policy import (
-    PolicyAction,
-    PolicyInput,
-    contains_secret_value,
-    evaluate_policy,
-    redact_secrets,
-)
+from .policy import contains_secret_value, ingest_write_disposition, redact_secrets
 from .segmenter import (
     SEGMENT_ID_SCHEMA_VERSION,
     ConversationSegment,
-    normalized_content_hash,
     segment_conversation_v2,
 )
 from .vault import VaultRepository
 
 V2_TARGET_TIMEOUT_SECONDS = 60
 V2_HARD_TIMEOUT_SECONDS = 90
+LONG_UNIT_DEFAULT_SECONDS = 300
 MAX_RETRIES = 2
 MAX_ATTEMPTS = 1 + MAX_RETRIES
+RETRY_BACKOFF_SECONDS = (1.0, 2.0)
+CLAIM_SIMILARITY_THRESHOLD = 0.92
 FAILED_SEGMENT = "FAILED_SEGMENT"
+CARRY_FORWARD_CHARS = 240
 
 _RETRYABLE = frozenset(
     {"timeout", "http_5xx", "transient_provider", "transient_transport"}
@@ -71,9 +69,14 @@ _OBSERVATION_KEYS = (
     "started_at",
     "finished_at",
     "schema_version",
+    "status",
     "segment_count",
     "segment_id",
     "segment_range",
+    "latency_ms",
+    "retries",
+    "token_estimate",
+    "segment_status",
     "segment_duration_ms",
     "attempt_count",
     "retry_count",
@@ -82,9 +85,14 @@ _OBSERVATION_KEYS = (
     "accepted_count",
     "rejected_count",
     "duplicate_prevented_count",
+    "duplicates_prevented",
+    "scrubbed",
     "superseded_count",
     "writes",
+    "written_files",
     "error_class",
+    "errors",
+    "long_unit",
     "final_status",
 )
 
@@ -139,22 +147,71 @@ def ledger_path(data_path: Path) -> Path:
 
 
 def ingest_log_path(data_path: Path) -> Path:
-    return data_path / "logs" / "ingest.jsonl"
+    return data_path / "ingest" / "v2" / "ingest_log.jsonl"
+
+
+def pause_flag_path(data_path: Path) -> Path:
+    return data_path / "ingest" / "v2" / "PAUSED"
+
+
+def review_queue_path(data_path: Path) -> Path:
+    return data_path / "ingest" / "v2" / "review_queue.jsonl"
+
+
+def is_paused(data_path: Path) -> bool:
+    flag = pause_flag_path(data_path)
+    return flag.is_file() and not flag.is_symlink()
+
+
+def set_paused(data_path: Path, paused: bool = True) -> None:
+    path = pause_flag_path(data_path)
+    if not paused:
+        if path.is_file() and not path.is_symlink():
+            path.unlink()
+        return
+    _prepare_dir(path.parent)
+    path.write_text("paused\n", encoding="utf-8")
+    path.chmod(0o600)
+
+
+def pause_ingest(config: NexusConfig) -> dict[str, Any]:
+    """Stop live vault writes. Shadow JSONL continues."""
+    set_paused(config.data_path, True)
+    return {
+        "ok": True,
+        "paused": True,
+        "writes_performed": False,
+        "vault_writes": False,
+        "mode": "shadow-log",
+        "message": "live writes paused; shadow log remains",
+    }
+
+
+def _queue_review(data_path: Path, payload: dict[str, Any]) -> None:
+    path = review_queue_path(data_path)
+    if path.is_symlink():
+        raise IngestV2Error("refusing to append through a symlink")
+    _prepare_dir(path.parent)
+    body = {
+        "ingest_id": payload.get("ingest_id"),
+        "conversation_id": payload.get("conversation_id"),
+        "segment_id": payload.get("segment_id"),
+        "reason": payload.get("reason"),
+        "failure_class": payload.get("failure_class"),
+    }
+    line = redact_secrets(json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    encoded = (line + "\n").encode("utf-8")
+    descriptor = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        os.write(descriptor, encoded)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def make_ingest_id(conversation: NormalizedConversation, schema_version: str) -> str:
-    texts = tuple(
-        message.content_text
-        for message in conversation.messages
-        if message.include_for_extraction and message.content_text
-    )
-    material = "|".join(
-        (
-            conversation.external_conversation_id,
-            schema_version,
-            normalized_content_hash(texts),
-        )
-    )
+    material = "|".join((conversation.external_conversation_id, schema_version))
     return sha256(material.encode("utf-8")).hexdigest()[:32]
 
 
@@ -313,9 +370,12 @@ class IngestRunReport:
     superseded_count: int = 0
     memories_created: int = 0
     extractor_calls: int = 0
+    scrubbed_count: int = 0
     mirror_status: str = "not_requested"
     vault_written: bool = False
     error_class: str | None = None
+    why: str | None = None
+    written_files: list[str] = field(default_factory=list)
     segment_statuses: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -329,44 +389,78 @@ class IngestRunReport:
             "accepted_count": self.accepted,
             "rejected_count": self.rejected,
             "duplicate_prevented_count": self.duplicate_prevented_count,
+            "duplicates_prevented": self.duplicate_prevented_count,
             "duplicates_created": 0,
+            "scrubbed": self.scrubbed_count,
             "memories_created": self.memories_created,
             "superseded_count": self.superseded_count,
             "extractor_calls": self.extractor_calls,
             "mirror_status": self.mirror_status,
             "vault_written": self.vault_written,
+            "written_files": list(self.written_files),
             "candidates_published": False,
             "auto_publish_enabled": False,
             "error_class": self.error_class,
+            "why": self.why or self.error_class,
             "segment_statuses": dict(self.segment_statuses),
         }
 
 
-def service_extractor(llm: object) -> Callable[[ConversationSegment], ExtractionResult]:
+def service_extractor(
+    llm: object,
+    *,
+    long_unit_budget: int | None = None,
+    carry_cell: list[str] | None = None,
+    long_unit_log: Callable[[dict[str, Any]], None] | None = None,
+) -> Callable[[ConversationSegment], ExtractionResult]:
     """One model attempt at the 60s target. The pipeline owns retries."""
     if V2_TARGET_TIMEOUT_SECONDS > V2_HARD_TIMEOUT_SECONDS:
         raise IngestV2Error("target timeout exceeds the 90s hard cap")
-
-    class _Capture:
-        def __init__(self) -> None:
-            self.last_exc: BaseException | None = None
-
-        def complete_structured(self, **kwargs: Any) -> Any:
-            timeout = float(kwargs.get("timeout", 0))
-            if timeout <= 0 or timeout > V2_HARD_TIMEOUT_SECONDS:
-                raise IngestV2Error("per-call timeout must stay within 1..90 seconds")
-            try:
-                return llm.complete_structured(**kwargs)  # type: ignore[attr-defined]
-            except Exception as exc:
-                self.last_exc = exc
-                raise
-
-    capture = _Capture()
-    service = ExtractionService(
-        capture, max_attempts=1, timeout_seconds=V2_TARGET_TIMEOUT_SECONDS
-    )
+    carry_cell = carry_cell if carry_cell is not None else [""]
 
     def extract(segment: ConversationSegment) -> ExtractionResult:
+        timeout = V2_TARGET_TIMEOUT_SECONDS
+        hard_cap = V2_HARD_TIMEOUT_SECONDS
+        long_unit = False
+        if long_unit_budget and (segment.split_fallback or segment.oversized_turn):
+            timeout = int(long_unit_budget)
+            hard_cap = max(V2_HARD_TIMEOUT_SECONDS, timeout)
+            long_unit = True
+            if long_unit_log is not None:
+                long_unit_log(
+                    {
+                        "segment_id": segment.segment_id,
+                        "timeout_seconds": timeout,
+                        "human_triggered": True,
+                    }
+                )
+
+        class _Capture:
+            def __init__(self) -> None:
+                self.last_exc: BaseException | None = None
+
+            def complete_structured(self, **kwargs: Any) -> Any:
+                call_timeout = float(kwargs.get("timeout", 0))
+                if call_timeout <= 0 or call_timeout > hard_cap:
+                    raise IngestV2Error("per-call timeout must stay within the configured cap")
+                instructions = str(kwargs.get("instructions") or "")
+                summary = carry_cell[0]
+                if summary:
+                    kwargs = dict(kwargs)
+                    kwargs["instructions"] = (
+                        instructions
+                        + "\nREADONLY_PRIOR_SUMMARY:\n"
+                        + summary
+                    )
+                try:
+                    return llm.complete_structured(**kwargs)  # type: ignore[attr-defined]
+                except Exception as exc:
+                    self.last_exc = exc
+                    raise
+
+        capture = _Capture()
+        service = ExtractionService(capture, max_attempts=1, timeout_seconds=timeout)
+        extract.long_unit = long_unit  # type: ignore[attr-defined]
         try:
             return service.extract(segment).result
         except ExtractionError as exc:
@@ -393,6 +487,8 @@ def service_extractor(llm: object) -> Callable[[ConversationSegment], Extraction
                 ) from None
             raise
 
+    extract.carry_forward = ""  # type: ignore[attr-defined]
+    extract.long_unit = False  # type: ignore[attr-defined]
     return extract
 
 
@@ -417,6 +513,54 @@ def _match_prior(token: str, records: list[dict[str, Any]]) -> dict[str, Any] | 
     return None
 
 
+def _claim_duplicate(statement: str, records: list[dict[str, Any]]) -> bool:
+    folded = normalize_text(statement).casefold()
+    if not folded:
+        return False
+    for record in records:
+        if record.get("status") != "active":
+            continue
+        other = normalize_text(str(record.get("statement") or "")).casefold()
+        if not other:
+            continue
+        if other == folded:
+            return True
+        if SequenceMatcher(None, folded, other).ratio() >= CLAIM_SIMILARITY_THRESHOLD:
+            return True
+    return False
+
+
+def _collapse_supersede_chains(records: list[dict[str, Any]]) -> None:
+    by_id = {str(record["id"]): record for record in records if record.get("id")}
+
+    def tip_id(start: str) -> str:
+        seen: set[str] = set()
+        current = start
+        while current in by_id and current not in seen:
+            seen.add(current)
+            nxt = by_id[current].get("superseded_by")
+            if not nxt:
+                return current
+            current = str(nxt)
+        return current
+
+    for record in records:
+        successor = record.get("superseded_by")
+        if not successor:
+            continue
+        resolved = tip_id(str(successor))
+        record["status"] = "superseded"
+        record["superseded_by"] = resolved
+    for record in records:
+        if record.get("status") != "active":
+            continue
+        record["supersedes"] = [
+            str(item["id"])
+            for item in records
+            if item.get("superseded_by") == record.get("id")
+        ]
+
+
 def _consider_candidate(
     candidate: ExtractionCandidate,
     *,
@@ -429,28 +573,20 @@ def _consider_candidate(
         return "policy_reject", None
     if memory_type is None:
         return "policy_reject", None
-    decision = evaluate_policy(
-        PolicyInput(
-            kind=candidate.kind,
-            statement=candidate.statement,
-            confidence=candidate.confidence,
-            source_span_ids=candidate.source_span_ids,
-            impact=Impact.LOW,
-            memory_type=memory_type,
-            user_asserted=True,
-        )
-    )
-    if decision.action in {PolicyAction.QUARANTINE, PolicyAction.DISCARD}:
-        return "policy_reject", None
-    if decision.action is not PolicyAction.WOULD_PUBLISH:
-        return "policy_reject", None
     if contains_secret_value(candidate.statement):
         return "scrubber_reject", None
     statement = redact_secrets(candidate.statement).strip()
     if not statement or contains_secret_value(statement) or statement != candidate.statement.strip():
         return "scrubber_reject", None
+    gate = ingest_write_disposition(statement, candidate.confidence)
+    if gate == "reject":
+        return "rejected", None
+    if gate == "review":
+        return "review", None
     fingerprint = _memory_key(candidate)
     if any(record.get("fingerprint") == fingerprint for record in records):
+        return "duplicate", None
+    if _claim_duplicate(statement, records):
         return "duplicate", None
     supersedes: list[str] = []
     for token in candidate.possible_supersedes:
@@ -480,6 +616,7 @@ def _consider_candidate(
         "superseded_by": None,
     }
     records.append(row)
+    _collapse_supersede_chains(records)
     return "accepted", row
 
 
@@ -503,12 +640,41 @@ def _memory_record(row: dict[str, Any]) -> Memory:
     )
 
 
+def _verify_canonical(
+    config: NexusConfig,
+    memories: list[Memory],
+    repository: VaultRepository,
+) -> list[dict[str, Any]]:
+    written: list[dict[str, Any]] = []
+    assert config.vault_path is not None
+    for memory in memories:
+        relative = repository.record_path(memory)
+        posix = relative.as_posix()
+        if not posix.startswith("Nexus/"):
+            raise IngestV2Error("namespace violation", failure_class="namespace")
+        path = config.vault_path / relative
+        if path.name.endswith(".icloud") or Path(str(path) + ".icloud").exists():
+            raise IngestV2Error("icloud stub", failure_class="degraded")
+        if not path.is_file() or path.is_symlink():
+            raise IngestV2Error("verify failed", failure_class="vault_failed")
+        text = path.read_text(encoding="utf-8")
+        written.append(
+            {
+                "path": posix,
+                "sha256": repository.current_hash(memory),
+                "line_count": text.count("\n"),
+            }
+        )
+    return written
+
+
 def _write_canonical(
     config: NexusConfig,
     rows: list[dict[str, Any]],
     *,
     run_material: str,
     index_writer: Callable[[Path, Path], object] | None,
+    written_files: list[str] | None = None,
 ) -> str:
     if config.vault_path is None:
         raise IngestV2Error("vault_path is required for a canonical write", failure_class="vault_failed")
@@ -529,6 +695,9 @@ def _write_canonical(
         )
     except NexusError as exc:
         raise IngestV2Error("canonical write failed", failure_class="vault_failed") from exc
+    verified = _verify_canonical(config, memories, repository)
+    if written_files is not None:
+        written_files.extend(str(item["path"]) for item in verified)
     writer = index_writer or rebuild_index
     try:
         writer(config.vault_path, config.index_path)
@@ -555,6 +724,8 @@ def run_conversation(
     target_chars: int = 12_000,
     schema_version: str = SEGMENT_ID_SCHEMA_VERSION,
     index_writer: Callable[[Path, Path], object] | None = None,
+    sleeper: Callable[[float], None] | None = None,
+    carry_cell: list[str] | None = None,
 ) -> IngestRunReport:
     """Resume a conversation from the first incomplete segment."""
     if not config.ingest_pipeline_v2:
@@ -563,6 +734,9 @@ def run_conversation(
         raise IngestV2Error("auto_publish_enabled must stay false")
     if write_canonical and config.vault_path is None:
         raise IngestV2Error("vault_path is required for a canonical write")
+    if is_paused(config.data_path):
+        write_canonical = False
+    carry_cell = carry_cell if carry_cell is not None else [""]
 
     segments = segment_conversation_v2(
         conversation, target_chars=target_chars, schema_version=schema_version
@@ -585,6 +759,7 @@ def run_conversation(
     all_completed = bool(segments) and all(
         isinstance(segment_state.get(segment.segment_id), dict)
         and segment_state[segment.segment_id].get("status") == "completed"
+        and segment_state[segment.segment_id].get("content_hash") == segment.content_hash
         for segment in segments
     )
     if all_completed:
@@ -606,8 +781,10 @@ def run_conversation(
                 started_at=started,
                 finished_at=_utc_now(),
                 schema_version=schema_version,
+                status="COMPLETED",
                 segment_count=len(segments),
                 duplicate_prevented_count=prevented,
+                duplicates_prevented=prevented,
                 writes="none",
                 final_status="already_processed",
             ),
@@ -615,8 +792,24 @@ def run_conversation(
         return report
 
     for segment in segments:
+        if is_paused(config.data_path):
+            write_canonical = False
         state = segment_state.get(segment.segment_id)
         if isinstance(state, dict) and state.get("status") == "completed":
+            if state.get("content_hash") != segment.content_hash:
+                _queue_review(
+                    config.data_path,
+                    {
+                        "ingest_id": ingest_id,
+                        "conversation_id": conversation.external_conversation_id,
+                        "segment_id": segment.segment_id,
+                        "reason": "content_hash_mismatch",
+                        "failure_class": "content_hash_mismatch",
+                    },
+                )
+                report.segment_statuses[segment.segment_id] = "review"
+                report.why = "content_hash_mismatch"
+                continue
             report.segment_statuses[segment.segment_id] = "completed"
             continue
         if isinstance(state, dict) and state.get("status") == FAILED_SEGMENT:
@@ -696,11 +889,27 @@ def run_conversation(
                     _save_checkpoint(config.data_path, checkpoint)
                     outcome = None
                     break
+                if sleeper is not None:
+                    delay = RETRY_BACKOFF_SECONDS[
+                        min(attempts - 1, len(RETRY_BACKOFF_SECONDS) - 1)
+                    ]
+                    sleeper(delay)
         duration_ms = int((time.monotonic() - segment_started) * 1000)
         if outcome is None:
             report.segment_statuses[segment.segment_id] = FAILED_SEGMENT
             report.final_status = FAILED_SEGMENT
             report.error_class = failure_class
+            report.why = failure_class
+            _queue_review(
+                config.data_path,
+                {
+                    "ingest_id": ingest_id,
+                    "conversation_id": conversation.external_conversation_id,
+                    "segment_id": segment.segment_id,
+                    "reason": "FAILED_SEGMENT",
+                    "failure_class": failure_class,
+                },
+            )
             append_observation(
                 config.data_path,
                 _observation(
@@ -709,14 +918,19 @@ def run_conversation(
                     started_at=started,
                     finished_at=_utc_now(),
                     schema_version=schema_version,
+                    status="FAILED",
                     segment_count=len(segments),
                     segment_id=segment.segment_id,
                     segment_range=[segment.start_message_index, segment.end_message_index],
+                    latency_ms=duration_ms,
+                    retries=max(0, attempts - 1),
+                    segment_status=FAILED_SEGMENT,
                     segment_duration_ms=duration_ms,
                     attempt_count=attempts,
                     retry_count=max(0, attempts - 1),
                     timeout_count=timeouts,
                     error_class=failure_class,
+                    errors=[{"segment_id": segment.segment_id, "failure_class": failure_class}],
                     writes="none",
                     final_status=FAILED_SEGMENT,
                 ),
@@ -741,9 +955,27 @@ def run_conversation(
                 accepted += 1
                 report.memories_created += 1
                 dirty_ids.add(str(row["id"]))
+                carry_cell[0] = redact_secrets(str(row["statement"]))[:CARRY_FORWARD_CHARS]
             elif disposition == "duplicate":
                 duplicates += 1
                 report.duplicate_prevented_count += 1
+            elif disposition == "review":
+                rejected += 1
+                report.rejected += 1
+                _queue_review(
+                    config.data_path,
+                    {
+                        "ingest_id": ingest_id,
+                        "conversation_id": conversation.external_conversation_id,
+                        "segment_id": segment.segment_id,
+                        "reason": "review_gate",
+                        "failure_class": "review",
+                    },
+                )
+            elif disposition == "scrubber_reject":
+                rejected += 1
+                report.rejected += 1
+                report.scrubbed_count += 1
             else:
                 rejected += 1
                 report.rejected += 1
@@ -795,9 +1027,13 @@ def run_conversation(
                 started_at=started,
                 finished_at=_utc_now(),
                 schema_version=schema_version,
+                status="RUNNING",
                 segment_count=len(segments),
                 segment_id=segment.segment_id,
                 segment_range=[segment.start_message_index, segment.end_message_index],
+                latency_ms=duration_ms,
+                retries=max(0, attempts - 1),
+                segment_status="completed",
                 segment_duration_ms=duration_ms,
                 attempt_count=attempts,
                 retry_count=max(0, attempts - 1),
@@ -806,6 +1042,8 @@ def run_conversation(
                 accepted_count=accepted,
                 rejected_count=rejected,
                 duplicate_prevented_count=duplicates,
+                duplicates_prevented=duplicates,
+                scrubbed=report.scrubbed_count,
                 superseded_count=superseded,
                 writes="none",
                 final_status="completed",
@@ -821,15 +1059,23 @@ def run_conversation(
                 changed,
                 run_material=ingest_id + ":" + ",".join(sorted(record["id"] for record in changed)),
                 index_writer=index_writer,
+                written_files=report.written_files,
             )
             report.vault_written = True
             report.mirror_status = "current"
         except IngestV2Error as exc:
             report.error_class = exc.failure_class
+            report.why = exc.failure_class
             if exc.failure_class == "mirror_retry":
                 report.vault_written = True
                 report.mirror_status = "retry"
+                report.final_status = "DEGRADED"
                 writes = "obsidian_sqlite_retry"
+            elif exc.failure_class == "degraded":
+                report.vault_written = True
+                report.mirror_status = "retry"
+                report.final_status = "DEGRADED"
+                writes = "icloud_degraded"
             else:
                 report.mirror_status = "not_written"
                 report.final_status = FAILED_SEGMENT
@@ -842,12 +1088,22 @@ def run_conversation(
                 started_at=started,
                 finished_at=_utc_now(),
                 schema_version=schema_version,
+                status=(
+                    "DEGRADED"
+                    if report.final_status == "DEGRADED"
+                    else "COMPLETED"
+                    if report.final_status == "completed"
+                    else "FAILED"
+                ),
                 segment_count=len(segments),
                 writes=writes,
+                written_files=list(report.written_files),
                 error_class=report.error_class,
                 final_status=report.final_status if report.mirror_status != "retry" else "completed",
                 accepted_count=report.accepted,
                 duplicate_prevented_count=report.duplicate_prevented_count,
+                duplicates_prevented=report.duplicate_prevented_count,
+                scrubbed=report.scrubbed_count,
                 superseded_count=report.superseded_count,
             ),
         )
@@ -863,6 +1119,7 @@ def run_inbox(
     conversation_id: str | None = None,
     max_segments: int = 20,
     max_segment_chars: int = 12_000,
+    long_unit_budget: int | None = None,
 ) -> IngestRunReport:
     """Run one exact Inbox source through v2. Never publishes and never writes Vault."""
     from .errors import SourceError
@@ -882,13 +1139,41 @@ def run_inbox(
     planned = segment_conversation_v2(conversation, target_chars=max_segment_chars)
     if len(planned) > max_segments:
         raise SourceError("selected conversation exceeds max-segments before model execution")
-    return run_conversation(
+    carry_cell = [""]
+    uses: list[dict[str, Any]] = []
+
+    def _log_long_unit(payload: dict[str, Any]) -> None:
+        uses.append(payload)
+        append_observation(
+            config.data_path,
+            _observation(
+                ingest_id=None,
+                conversation_id=conversation.external_conversation_id,
+                long_unit=payload,
+                status="RUNNING",
+                writes="none",
+            ),
+        )
+
+    report = run_conversation(
         config,
         conversation,
-        service_extractor(llm),
+        service_extractor(
+            llm,
+            long_unit_budget=long_unit_budget,
+            carry_cell=carry_cell,
+            long_unit_log=_log_long_unit if long_unit_budget else None,
+        ),
         write_canonical=False,
         target_chars=max_segment_chars,
+        sleeper=time.sleep,
+        carry_cell=carry_cell,
     )
+    if uses:
+        payload = report.to_dict()
+        payload["long_unit"] = uses
+        return report
+    return report
 
 
 def status_payload(config: NexusConfig, ingest_id: str | None = None) -> dict[str, Any]:
@@ -912,6 +1197,7 @@ def status_payload(config: NexusConfig, ingest_id: str | None = None) -> dict[st
     elif directory.exists():
         paths = sorted(path for path in directory.glob("*.json") if path.is_file() and not path.is_symlink())
     ingests: list[dict[str, Any]] = []
+    why: str | None = None
     for path in paths:
         payload = load_json(path, kind="checkpoint")
         segments = payload.get("segments")
@@ -922,6 +1208,9 @@ def status_payload(config: NexusConfig, ingest_id: str | None = None) -> dict[st
             if not isinstance(item, dict):
                 continue
             extraction = item.get("extraction") if isinstance(item.get("extraction"), dict) else {}
+            failure = item.get("failure_class")
+            if failure and why is None:
+                why = f"segment {item.get('segment_id')} failed: {failure}"
             rendered.append(
                 {
                     "segment_id": item.get("segment_id"),
@@ -934,7 +1223,7 @@ def status_payload(config: NexusConfig, ingest_id: str | None = None) -> dict[st
                     "started_at": item.get("started_at"),
                     "completed_at": item.get("completed_at"),
                     "content_hash": item.get("content_hash"),
-                    "failure_class": item.get("failure_class"),
+                    "failure_class": failure,
                     "candidate_count": extraction.get("candidate_count", 0),
                 }
             )
@@ -950,6 +1239,8 @@ def status_payload(config: NexusConfig, ingest_id: str | None = None) -> dict[st
         "ok": True,
         "ingest_pipeline_v2": True,
         "mode": "v2",
+        "paused": is_paused(config.data_path),
         "extraction_called": False,
+        "why": why,
         "ingests": ingests,
     }

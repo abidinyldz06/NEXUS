@@ -6,6 +6,9 @@ import inspect
 import io
 import json
 import os
+import signal
+import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -28,7 +31,11 @@ from nexus.ingest_v2 import (
     load_checkpoint,
     load_json,
     load_ledger,
+    pause_ingest,
+    review_queue_path,
     run_conversation,
+    set_paused,
+    status_payload,
 )
 from nexus.normalize import NormalizedConversation, NormalizedMessage
 from nexus.segmenter import (
@@ -42,10 +49,14 @@ from nexus.segmenter import (
 FAKE_SECRETS = (
     "sk-test-123456789",
     "ghp_FAKE_TOKEN_123456",
+    "gho_FAKESECRETTOKEN12",
+    "AIzaSyFakeTestKey1234567890abcd",
+    "xoxb-1234567890-faketoken",
     "Bearer fake-secret-token",
     "api_key=FAKESECRET123",
     "OPENAI_API_KEY=sk-fake-key",
     "AWS_SECRET_ACCESS_KEY=fake-secret",
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 )
 
 
@@ -121,8 +132,8 @@ def result_for(segment: object, statement: str, *, supersedes: tuple[str, ...] =
 def config_for(root: Path, *, enabled: bool = True) -> NexusConfig:
     vault = root / "vault"
     data = root / "data"
-    vault.mkdir()
-    data.mkdir()
+    vault.mkdir(parents=True, exist_ok=True)
+    data.mkdir(parents=True, exist_ok=True)
     return NexusConfig.from_mapping(
         {
             "vault_path": str(vault),
@@ -187,6 +198,14 @@ class SegmenterV2Tests(unittest.TestCase):
         self.assertEqual(left_id, segment_conversation_v2(left)[0].segment_id)
         changed = segment_conversation_v2(left, schema_version="other-schema")[0].segment_id
         self.assertNotEqual(left_id, changed)
+
+    def test_segment_id_stays_stable_when_content_hash_changes(self) -> None:
+        left = conversation((message("u1", "user", "alpha"),))
+        right = conversation((message("u1", "user", "omega"),))
+        first = segment_conversation_v2(left)[0]
+        second = segment_conversation_v2(right)[0]
+        self.assertEqual(first.segment_id, second.segment_id)
+        self.assertNotEqual(first.content_hash, second.content_hash)
 
 
 class PipelineV2Tests(unittest.TestCase):
@@ -697,6 +716,311 @@ class PipelineV2Tests(unittest.TestCase):
             self.assertFalse(payload["candidates_published"])
             self.assertFalse(list(vault.rglob("mem_*.md")))
             self.assertTrue((root / "data" / "ingest" / "v2" / "checkpoints").is_dir())
+
+    def test_timeout_regression_four_conversations_complete_or_failed_segment(self) -> None:
+        delays: list[float] = []
+
+        class Flaky:
+            def __init__(self, *, succeed_on: int) -> None:
+                self.calls = 0
+                self.succeed_on = succeed_on
+
+            def __call__(self, segment: object) -> ExtractionResult:
+                self.calls += 1
+                if self.calls < self.succeed_on:
+                    raise ExtractionError(
+                        "structured extraction failed after 1 bounded attempt(s)",
+                        failure_class="timeout",
+                    )
+                return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            outcomes: list[str] = []
+            for index in range(4):
+                source = conversation(
+                    (message("u1", "user", f"timeout-{index}"),),
+                    external_id=f"timeout-conv-{index}",
+                )
+                succeed_on = 2 if index < 3 else 99
+                report = self._run(
+                    root / f"case-{index}",
+                    source,
+                    Flaky(succeed_on=succeed_on),
+                    sleeper=delays.append,
+                )
+                outcomes.append(report.final_status)
+                self.assertIn(report.final_status, {"completed", FAILED_SEGMENT})
+                self.assertNotEqual("hang", report.final_status)
+                if report.final_status == FAILED_SEGMENT:
+                    self.assertEqual("timeout", report.error_class)
+                    self.assertIn("timeout", str(report.why))
+                    log = ingest_log_path(root / f"case-{index}" / "data").read_text(encoding="utf-8")
+                    self.assertIn("timeout", log)
+                    self.assertIn(FAILED_SEGMENT, log)
+            self.assertEqual(3, outcomes.count("completed"))
+            self.assertEqual(1, outcomes.count(FAILED_SEGMENT))
+            self.assertTrue(delays)
+
+    def test_sigkill_resume_keeps_checkpoint(self) -> None:
+        source = conversation(
+            (
+                message("u1", "user", "aaaa"),
+                message("a1", "assistant", "bbbb"),
+                message("u2", "user", "cccc"),
+            )
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            vault = root / "vault"
+            data = root / "data"
+            vault.mkdir()
+            data.mkdir()
+            sentinel = root / "started"
+            env = dict(os.environ)
+            env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+            env["NEXUS_VAULT"] = str(vault)
+            env["NEXUS_DATA"] = str(data)
+            env["NEXUS_SENTINEL"] = str(sentinel)
+            child = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    "\n".join(
+                        [
+                            "import os, time",
+                            "from pathlib import Path",
+                            "from nexus.config import NexusConfig",
+                            "from nexus.contracts import MemoryType",
+                            "from nexus.ingest_v2 import run_conversation",
+                            "from tests.test_ingest_v2 import conversation, message, result_for",
+                            "source = conversation((message('u1','user','aaaa'), message('a1','assistant','bbbb'), message('u2','user','cccc')))",
+                            "class Extractor:",
+                            "    def __init__(self):",
+                            "        self.calls = 0",
+                            "    def __call__(self, segment):",
+                            "        self.calls += 1",
+                            "        Path(os.environ['NEXUS_SENTINEL']).write_text(str(self.calls), encoding='utf-8')",
+                            "        if self.calls == 2:",
+                            "            time.sleep(30)",
+                            "        return result_for(segment, 'Kullanıcı kısa yanıtları tercih ediyor.')",
+                            "run_conversation(NexusConfig.from_mapping({'vault_path': os.environ['NEXUS_VAULT'], 'inbox_path': '/tmp', 'data_path': os.environ['NEXUS_DATA'], 'ingest_pipeline_v2': True}), source, Extractor(), canonical_memory_type=MemoryType.PREFERENCE, write_canonical=True, target_chars=4)",
+                        ]
+                    ),
+                ],
+                env=env,
+            )
+            deadline = time.time() + 10
+            while time.time() < deadline and not sentinel.exists():
+                time.sleep(0.05)
+            self.assertTrue(sentinel.exists())
+            while time.time() < deadline and sentinel.read_text(encoding="utf-8").strip() != "2":
+                time.sleep(0.05)
+            os.kill(child.pid, signal.SIGKILL)
+            child.wait(timeout=5)
+            checkpoint_dir = data / "ingest" / "v2" / "checkpoints"
+            files = list(checkpoint_dir.glob("*.json"))
+            self.assertEqual(1, len(files))
+            payload = json.loads(files[0].read_text(encoding="utf-8"))
+            self.assertTrue(payload.get("complete"))
+            statuses = [item["status"] for item in payload["segments"].values()]
+            self.assertIn("completed", statuses)
+            self.assertIn("incomplete", statuses)
+
+            class Resume:
+                def __init__(self) -> None:
+                    self.calls = 0
+
+                def __call__(self, segment: object) -> ExtractionResult:
+                    self.calls += 1
+                    statements = {
+                        1: "Kullanıcı kısa yanıtları tercih ediyor.",
+                        2: "Kullanıcı sade kahveyi tercih ediyor.",
+                        3: "Kullanıcı erken saati tercih ediyor.",
+                    }
+                    return result_for(segment, statements[segment.index])  # type: ignore[attr-defined]
+
+            extractor = Resume()
+            report = run_conversation(
+                NexusConfig.from_mapping(
+                    {
+                        "vault_path": str(vault),
+                        "inbox_path": str(root / "inbox"),
+                        "data_path": str(data),
+                        "ingest_pipeline_v2": True,
+                    }
+                ),
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=True,
+                target_chars=4,
+            )
+            self.assertEqual("completed", report.final_status)
+            self.assertEqual(2, extractor.calls)
+            self.assertEqual(3, len(current_memories(load_ledger(data))))
+
+    def test_idempotent_second_run_accepted_zero(self) -> None:
+        source = conversation((message("u1", "user", "tekrar"),))
+
+        def extractor(segment: object) -> ExtractionResult:
+            return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = self._run(root, source, extractor)
+            second = self._run(root, source, extractor)
+            self.assertEqual(1, first.accepted)
+            self.assertEqual(0, second.accepted)
+            self.assertEqual(0, second.to_dict()["duplicates_created"])
+            self.assertEqual("already_processed", second.final_status)
+
+    def test_similar_claims_merge_to_one_memory(self) -> None:
+        source = conversation(
+            (
+                message("u1", "user", "aaaa"),
+                message("a1", "assistant", "bbbb"),
+            )
+        )
+
+        class Extractor:
+            def __call__(self, segment: object) -> ExtractionResult:
+                if segment.index == 1:  # type: ignore[attr-defined]
+                    return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+                return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor!")
+
+        with tempfile.TemporaryDirectory() as directory:
+            report = self._run(Path(directory), source, Extractor(), target_chars=4)
+            self.assertEqual(1, report.memories_created)
+            self.assertGreaterEqual(report.duplicate_prevented_count, 1)
+
+    def test_supersede_chain_collapses_to_one_current(self) -> None:
+        statements = [
+            "Kullanıcı kısa yanıtları tercih ediyor.",
+            "Kullanıcı sade kahveyi tercih ediyor.",
+            "Kullanıcı erken saati tercih ediyor.",
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data = root / "data"
+            prior: str | None = None
+            for index, statement in enumerate(statements):
+                source = conversation(
+                    (message("u1", "user", f"pref-{index}"),),
+                    external_id=f"pref-{index}",
+                )
+
+                def extractor(segment: object, text: str = statement, marker: str | None = prior) -> ExtractionResult:
+                    return result_for(segment, text, supersedes=() if marker is None else (marker,))
+
+                self._run(root, source, extractor)
+                prior = current_memories(load_ledger(data))[0]["id"]
+            rows = load_ledger(data)
+            current = current_memories(rows)
+            self.assertEqual(1, len(current))
+            historical = [row for row in rows if row["status"] == "superseded"]
+            self.assertEqual(2, len(historical))
+            self.assertTrue(all(row["superseded_by"] == current[0]["id"] for row in historical))
+            self.assertEqual(2, len(current[0]["supersedes"]))
+
+    def test_namespace_writes_stay_under_nexus(self) -> None:
+        source = conversation((message("u1", "user", "klasor"),))
+
+        def extractor(segment: object) -> ExtractionResult:
+            return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._run(root, source, extractor)
+            files = [path.relative_to(root / "vault") for path in (root / "vault").rglob("*.md") if path.is_file()]
+            self.assertTrue(files)
+            self.assertTrue(all(path.parts[0] == "Nexus" for path in files))
+
+    def test_pause_blocks_vault_writes(self) -> None:
+        source = conversation((message("u1", "user", "dur"),))
+
+        def extractor(segment: object) -> ExtractionResult:
+            return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = config_for(root)
+            pause_ingest(config)
+            report = run_conversation(
+                config,
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=True,
+            )
+            self.assertEqual("completed", report.final_status)
+            self.assertFalse(report.vault_written)
+            self.assertFalse(list((root / "vault").rglob("mem_*.md")))
+            self.assertTrue((root / "data" / "ingest" / "v2" / "PAUSED").is_file())
+
+    def test_finance_and_low_confidence_never_auto_write(self) -> None:
+        source = conversation((message("u1", "user", "risk"),))
+
+        def finance(segment: object) -> ExtractionResult:
+            from nexus.extraction.schema import CandidateKind
+
+            span = segment.messages[0].message_id  # type: ignore[attr-defined]
+            return ExtractionResult(
+                candidates=(
+                    ExtractionCandidate(
+                        kind=CandidateKind.MEMORY,
+                        statement="Kredi kartı borcum 5000 lira.",
+                        entity_mentions=(),
+                        temporal_expression=None,
+                        source_span_ids=(span,),
+                        confidence=0.99,
+                        ambiguity_flags=(),
+                        possible_supersedes=(),
+                    ),
+                ),
+                ignored_span_ids=(),
+                warnings=(),
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            report = self._run(root, source, finance)
+            self.assertEqual(0, report.memories_created)
+            self.assertFalse(list((root / "vault").rglob("mem_*.md")))
+            queue = review_queue_path(root / "data").read_text(encoding="utf-8")
+            self.assertIn("review_gate", queue)
+
+    def test_content_hash_mismatch_goes_to_review(self) -> None:
+        first = conversation((message("u1", "user", "alpha"),))
+        second = conversation((message("u1", "user", "omega"),))
+
+        def extractor(segment: object) -> ExtractionResult:
+            return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._run(root, first, extractor)
+            later = self._run(root, second, extractor)
+            self.assertEqual("review", next(iter(later.segment_statuses.values())))
+            self.assertEqual("content_hash_mismatch", later.why)
+            queue = review_queue_path(root / "data").read_text(encoding="utf-8")
+            self.assertIn("content_hash_mismatch", queue)
+
+    def test_status_cli_explains_failure(self) -> None:
+        source = conversation((message("u1", "user", "neden"),))
+
+        def extractor(segment: object) -> ExtractionResult:
+            raise ExtractionError(
+                "structured extraction failed after 1 bounded attempt(s)",
+                failure_class="timeout",
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            report = self._run(root, source, extractor)
+            payload = status_payload(config_for(root, enabled=True), report.ingest_id)
+            self.assertIn("timeout", str(payload.get("why")))
+            self.assertFalse(payload["extraction_called"])
 
 
 if __name__ == "__main__":
