@@ -103,7 +103,7 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
     ingest.add_argument(
         "--canary-write",
         action="store_true",
-        help="Write accepted memories under Nexus/. Requires --confirm canary.",
+        help="Write accepted memories under Nexus/. Requires --confirm canary. Max 25/day.",
     )
     ingest.add_argument(
         "--confirm",
