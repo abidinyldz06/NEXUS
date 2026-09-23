@@ -135,7 +135,7 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
         "--apply",
         action="store_true",
         dest="rollback_apply",
-        help="Retract matching ledger rows; requires --confirm",
+        help="Retract matching ledger rows and tombstone Vault files; requires --confirm",
     )
     ingest_rollback.add_argument(
         "--confirm",

@@ -205,6 +205,64 @@ def unpause_ingest(config: NexusConfig) -> dict[str, Any]:
     }
 
 
+def _canonical_paths(
+    config: NexusConfig, records: list[dict[str, Any]]
+) -> list[str]:
+    if config.vault_path is None:
+        return []
+    repository = VaultRepository(config.vault_path)
+    paths: list[str] = []
+    for record in records:
+        try:
+            memory = _memory_record(record)
+        except (NexusError, KeyError, TypeError, ValueError):
+            continue
+        relative = repository.record_path(memory)
+        path = config.vault_path / relative
+        if path.is_file() and not path.is_symlink():
+            paths.append(relative.as_posix())
+    return paths
+
+
+def _tombstone_canonical(
+    config: NexusConfig, records: list[dict[str, Any]], *, ingest_id: str
+) -> dict[str, Any]:
+    """Rewrite matching Vault files as retracted, then rebuild the derived index."""
+    result: dict[str, Any] = {"wrote": False, "file_count": 0, "paths": []}
+    if config.vault_path is None:
+        return result
+    repository = VaultRepository(config.vault_path)
+    retracted: list[Memory] = []
+    expected: dict[str, str] = {}
+    for record in records:
+        row = dict(record)
+        row["status"] = "retracted"
+        try:
+            memory = _memory_record(row)
+        except (NexusError, KeyError, TypeError, ValueError):
+            continue
+        path = config.vault_path / repository.record_path(memory)
+        if not path.is_file() or path.is_symlink():
+            continue
+        expected[memory.id] = repository.current_hash(memory)
+        retracted.append(memory)
+        result["paths"].append(repository.record_path(memory).as_posix())
+    if not retracted:
+        return result
+    try:
+        repository.commit_records(
+            retracted,
+            run_id=_digest_id("run", f"rollback:{ingest_id}"),
+            expected_hashes=expected,
+        )
+        rebuild_index(config.vault_path, config.index_path)
+    except (NexusError, OSError) as exc:
+        raise IngestV2Error("canonical rollback failed", failure_class="vault_failed") from exc
+    result["wrote"] = True
+    result["file_count"] = len(retracted)
+    return result
+
+
 def rollback_batch(
     config: NexusConfig,
     ingest_id: str,
@@ -223,6 +281,7 @@ def rollback_batch(
         for record in records
         if record.get("ingest_id") == ingest_id or record.get("batch_id") == ingest_id
     ]
+    paths = _canonical_paths(config, matched)
     payload: dict[str, Any] = {
         "ok": True,
         "ingest_id": ingest_id,
@@ -231,6 +290,7 @@ def rollback_batch(
         "record_ids": [str(record["id"]) for record in matched if record.get("id")],
         "active_count": sum(1 for record in matched if record.get("status") == "active"),
         "tombstoned": 0,
+        "canonical_file_count": len(paths),
         "writes_performed": False,
         "vault_writes": False,
         "canonical_untouched": True,
@@ -238,9 +298,10 @@ def rollback_batch(
     }
     if not apply:
         return payload
+    vaulted = _tombstone_canonical(config, matched, ingest_id=ingest_id)
     changed = 0
     for record in matched:
-        if record.get("status") == "active":
+        if record.get("status") in {"active", "superseded"}:
             record["status"] = "retracted"
             record["tombstoned"] = True
             changed += 1
@@ -249,6 +310,10 @@ def rollback_batch(
     payload["tombstoned"] = changed
     payload["active_count"] = 0
     payload["dry_run"] = False
+    payload["canonical_file_count"] = int(vaulted["file_count"])
+    payload["vault_writes"] = bool(vaulted["wrote"])
+    payload["canonical_untouched"] = not vaulted["wrote"]
+    payload["writes_performed"] = changed > 0 or bool(vaulted["wrote"])
     return payload
 
 
@@ -806,7 +871,13 @@ def _consider_candidate(
 
 
 def _memory_record(row: dict[str, Any]) -> Memory:
-    status = RecordStatus.SUPERSEDED if row["status"] == "superseded" else RecordStatus.ACTIVE
+    raw_status = str(row["status"])
+    if raw_status == "retracted":
+        status = RecordStatus.RETRACTED
+    elif raw_status == "superseded":
+        status = RecordStatus.SUPERSEDED
+    else:
+        status = RecordStatus.ACTIVE
     superseded_by = row.get("superseded_by")
     return Memory(
         id=str(row["id"]),

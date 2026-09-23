@@ -1267,6 +1267,9 @@ class PipelineV2Tests(unittest.TestCase):
             self.assertTrue(planned["dry_run"])
             self.assertEqual(1, planned["active_count"])
             self.assertFalse(planned["writes_performed"])
+            self.assertFalse(planned["vault_writes"])
+            self.assertTrue(planned["canonical_untouched"])
+            self.assertEqual(1, planned["canonical_file_count"])
             self.assertEqual(1, len(current_memories(load_ledger(root / "data"))))
             applied = rollback_batch(
                 config_for(root),
@@ -1275,7 +1278,11 @@ class PipelineV2Tests(unittest.TestCase):
                 confirm=report.ingest_id,
             )
             self.assertEqual(1, applied["tombstoned"])
+            self.assertTrue(applied["vault_writes"])
+            self.assertFalse(applied["canonical_untouched"])
             self.assertEqual([], current_memories(load_ledger(root / "data")))
+            vault_text = next((root / "vault").rglob("mem_*.md")).read_text(encoding="utf-8")
+            self.assertIn("status: retracted", vault_text)
             context = FakeContext(
                 {
                     "vault_path": str(root / "vault"),
@@ -1298,6 +1305,43 @@ class PipelineV2Tests(unittest.TestCase):
             self.assertEqual(0, code)
             self.assertTrue(payload["dry_run"])
             self.assertEqual(0, payload["active_count"])
+
+    def test_rollback_apply_tombstones_only_that_batch_in_vault(self) -> None:
+        first = conversation((message("u1", "user", "aaaa"),), external_id="conv-a")
+        second = conversation((message("u2", "user", "bbbb"),), external_id="conv-b")
+
+        def first_extract(segment: object) -> ExtractionResult:
+            return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+
+        def second_extract(segment: object) -> ExtractionResult:
+            return result_for(segment, "Kullanıcı sade kahveyi tercih ediyor.")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            left = self._run(root, first, first_extract)
+            self._run(root, second, second_extract)
+            planned = rollback_batch(config_for(root), left.ingest_id)
+            self.assertTrue(planned["canonical_untouched"])
+            self.assertEqual(2, len(list((root / "vault").rglob("mem_*.md"))))
+            applied = rollback_batch(
+                config_for(root),
+                left.ingest_id,
+                apply=True,
+                confirm=left.ingest_id,
+            )
+            self.assertTrue(applied["vault_writes"])
+            self.assertFalse(applied["canonical_untouched"])
+            texts = [
+                path.read_text(encoding="utf-8")
+                for path in (root / "vault").rglob("mem_*.md")
+            ]
+            retracted = [text for text in texts if "status: retracted" in text]
+            active = [text for text in texts if "status: active" in text]
+            self.assertEqual(1, len(retracted))
+            self.assertEqual(1, len(active))
+            self.assertIn("kısa yanıtları", retracted[0])
+            self.assertIn("sade kahveyi", active[0])
+            self.assertEqual(1, len(current_memories(load_ledger(root / "data"))))
 
     def test_logged_tokens_prefer_model_usage(self) -> None:
         source = conversation((message("u1", "user", "aaaa"),))

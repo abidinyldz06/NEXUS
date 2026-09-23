@@ -253,7 +253,8 @@ checkpoint, ledger veya canonical kayıt silmez.
 `hermes nexus ingest pause` canlı yazımı durdurur; gölge JSONL kalır.
 `hermes nexus ingest unpause` pause bayrağını kaldırır; model çağırmaz.
 `hermes nexus ingest rollback <ingest_id>` varsayılanı dry-run'dır; `--apply --confirm <id>`
-eşleşen ledger satırlarını retracted yapar, Vault'a dokunmaz.
+eşleşen ledger satırlarını retracted yapar, varsa aynı id'li `Nexus/Memory` dosyalarını
+tombstone eder ve derived index'i rebuild eder. Dry-run Vault'a dokunmaz.
 `hermes nexus ingest status <ingest_id>` tek sorguda başarısızlık nedenini verir.
 `hermes nexus ingest reprocess <ingest_id>` FAILED_SEGMENT satırlarını sonraki koşu için
 hazırlar; model çağırmaz. `hermes nexus ingest queue` review kuyruğunu okur.
