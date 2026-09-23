@@ -190,6 +190,53 @@ def pause_ingest(config: NexusConfig) -> dict[str, Any]:
     }
 
 
+def rollback_batch(
+    config: NexusConfig,
+    ingest_id: str,
+    *,
+    apply: bool = False,
+    confirm: str | None = None,
+) -> dict[str, Any]:
+    """Tombstone one ingest batch. Default is dry-run; apply needs exact confirm."""
+    if not ingest_id.strip():
+        raise IngestV2Error("ingest_id is required")
+    if apply and confirm != ingest_id:
+        raise IngestV2Error("rollback apply requires --confirm matching ingest_id")
+    records = load_ledger(config.data_path)
+    matched = [
+        record
+        for record in records
+        if record.get("ingest_id") == ingest_id or record.get("batch_id") == ingest_id
+    ]
+    payload: dict[str, Any] = {
+        "ok": True,
+        "ingest_id": ingest_id,
+        "dry_run": not apply,
+        "record_count": len(matched),
+        "record_ids": [str(record["id"]) for record in matched if record.get("id")],
+        "active_count": sum(1 for record in matched if record.get("status") == "active"),
+        "tombstoned": 0,
+        "writes_performed": False,
+        "vault_writes": False,
+        "canonical_untouched": True,
+        "extraction_called": False,
+    }
+    if not apply:
+        return payload
+    changed = 0
+    for record in matched:
+        if record.get("status") == "active":
+            record["status"] = "retracted"
+            record["tombstoned"] = True
+            changed += 1
+    if changed:
+        _save_ledger(config.data_path, records)
+    payload["tombstoned"] = changed
+    payload["active_count"] = 0
+    payload["dry_run"] = False
+    return payload
+
+
 def _queue_review(data_path: Path, payload: dict[str, Any]) -> None:
     path = review_queue_path(data_path)
     if path.is_symlink():
@@ -440,6 +487,7 @@ def service_extractor(
     carry_cell = carry_cell if carry_cell is not None else [""]
 
     def extract(segment: ConversationSegment) -> ExtractionResult:
+        extract.last_audit = None  # type: ignore[attr-defined]
         timeout = V2_TARGET_TIMEOUT_SECONDS
         hard_cap = V2_HARD_TIMEOUT_SECONDS
         long_unit = False
@@ -484,7 +532,9 @@ def service_extractor(
         service = ExtractionService(capture, max_attempts=1, timeout_seconds=timeout)
         extract.long_unit = long_unit  # type: ignore[attr-defined]
         try:
-            return service.extract(segment).result
+            outcome = service.extract(segment)
+            extract.last_audit = outcome.audit  # type: ignore[attr-defined]
+            return outcome.result
         except ExtractionError as exc:
             raw = capture.last_exc
             label = exc.failure_class
@@ -510,6 +560,7 @@ def service_extractor(
             raise
 
     extract.long_unit = False  # type: ignore[attr-defined]
+    extract.last_audit = None  # type: ignore[attr-defined]
     return extract
 
 
@@ -586,6 +637,7 @@ def _consider_candidate(
     candidate: ExtractionCandidate,
     *,
     conversation_id: str,
+    ingest_id: str,
     memory_type: MemoryType | None,
     records: list[dict[str, Any]],
 ) -> tuple[str, dict[str, Any] | None]:
@@ -599,7 +651,11 @@ def _consider_candidate(
     statement = redact_secrets(candidate.statement).strip()
     if not statement or contains_secret_value(statement) or statement != candidate.statement.strip():
         return "scrubber_reject", None
-    gate = ingest_write_disposition(statement, candidate.confidence)
+    gate = ingest_write_disposition(
+        statement,
+        candidate.confidence,
+        ambiguity_flags=candidate.ambiguity_flags,
+    )
     if gate == "reject":
         return "rejected", None
     if gate == "review":
@@ -635,6 +691,8 @@ def _consider_candidate(
         "span_ids": list(candidate.source_span_ids),
         "supersedes": supersedes,
         "superseded_by": None,
+        "ingest_id": ingest_id,
+        "batch_id": ingest_id,
     }
     records.append(row)
     _collapse_supersede_chains(records)
@@ -729,6 +787,14 @@ def _write_canonical(
 
 def _token_estimate(segment: ConversationSegment) -> int:
     return max(1, segment.character_count // 4)
+
+
+def _logged_tokens(segment: ConversationSegment, extractor: object) -> int:
+    audit = getattr(extractor, "last_audit", None)
+    total = int(getattr(audit, "total_tokens", 0) or 0) if audit is not None else 0
+    if total > 0:
+        return total
+    return _token_estimate(segment)
 
 
 def _observation(**values: Any) -> dict[str, Any]:
@@ -962,7 +1028,7 @@ def run_conversation(
                     segment_id=segment.segment_id,
                     segment_range=[segment.start_message_index, segment.end_message_index],
                     latency_ms=duration_ms,
-                    token_estimate=_token_estimate(segment),
+                    token_estimate=_logged_tokens(segment, extractor),
                     retries=max(0, attempts - 1),
                     segment_status=FAILED_SEGMENT,
                     segment_duration_ms=duration_ms,
@@ -988,6 +1054,7 @@ def run_conversation(
             disposition, row = _consider_candidate(
                 candidate,
                 conversation_id=conversation.external_conversation_id,
+                ingest_id=ingest_id,
                 memory_type=canonical_memory_type,
                 records=records,
             )
@@ -1074,7 +1141,7 @@ def run_conversation(
                 segment_id=segment.segment_id,
                 segment_range=[segment.start_message_index, segment.end_message_index],
                 latency_ms=duration_ms,
-                token_estimate=_token_estimate(segment),
+                token_estimate=_logged_tokens(segment, extractor),
                 retries=max(0, attempts - 1),
                 segment_status="completed",
                 segment_duration_ms=duration_ms,

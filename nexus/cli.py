@@ -29,7 +29,7 @@ from .forget import apply_forget, plan_forget
 from .git_rollback_drill import run_synthetic_git_rollback_drill
 from .index import rebuild_index, search_index
 from .ingest import plan_inbox, shadow_inbox_source, stage_inbox_source
-from .ingest_v2 import pause_ingest, run_inbox, status_payload
+from .ingest_v2 import pause_ingest, rollback_batch, run_inbox, status_payload
 from .permission_audit import audit_permissions
 from .publication import apply_publication, plan_publication
 from .pulse import emit_due_reminders
@@ -106,6 +106,30 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
     )
     ingest_pause.add_argument(
         "--json", action="store_true", dest="pause_json", help="Emit JSON"
+    )
+    ingest_rollback = ingest_commands.add_parser(
+        "rollback", help="Tombstone one ingest batch; default dry-run"
+    )
+    ingest_rollback.add_argument("ingest_id", help="Batch ingest id to retract")
+    ingest_rollback.add_argument(
+        "--dry-run",
+        action="store_true",
+        dest="rollback_dry_run",
+        help="List matching ledger ids without writing (default)",
+    )
+    ingest_rollback.add_argument(
+        "--apply",
+        action="store_true",
+        dest="rollback_apply",
+        help="Retract matching ledger rows; requires --confirm",
+    )
+    ingest_rollback.add_argument(
+        "--confirm",
+        dest="rollback_confirm",
+        help="Must equal ingest_id when --apply is set",
+    )
+    ingest_rollback.add_argument(
+        "--json", action="store_true", dest="rollback_json", help="Emit JSON"
     )
 
     eval_command = subcommands.add_parser(
@@ -334,6 +358,30 @@ def run_command(args: Namespace, ctx: Any) -> int:
                 payload,
                 as_json=bool(
                     getattr(args, "status_json", False) or getattr(args, "as_json", False)
+                ),
+            )
+            return 0 if payload.get("ok") else 2
+        if getattr(args, "ingest_command", None) == "rollback":
+            try:
+                config = from_plugin_context(ctx)
+                payload = rollback_batch(
+                    config,
+                    str(getattr(args, "ingest_id", "") or ""),
+                    apply=bool(getattr(args, "rollback_apply", False)),
+                    confirm=getattr(args, "rollback_confirm", None),
+                )
+            except (NexusError, OSError, ValueError) as exc:
+                payload = {
+                    "ok": False,
+                    "writes_performed": False,
+                    "vault_writes": False,
+                    "extraction_called": False,
+                    "errors": [type(exc).__name__],
+                }
+            _print_payload(
+                payload,
+                as_json=bool(
+                    getattr(args, "rollback_json", False) or getattr(args, "as_json", False)
                 ),
             )
             return 0 if payload.get("ok") else 2

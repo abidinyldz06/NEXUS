@@ -251,6 +251,8 @@ clean-worktree eşliğini doğrular ve tüm geçici alanı siler.
 en fazla 3 deneme, checkpoint yazılmaz, Vault'a yazılmaz. Bayrağı kapatmak
 checkpoint, ledger veya canonical kayıt silmez.
 `hermes nexus ingest pause` canlı yazımı durdurur; gölge JSONL kalır.
+`hermes nexus ingest rollback <ingest_id>` varsayılanı dry-run'dır; `--apply --confirm <id>`
+eşleşen ledger satırlarını retracted yapar, Vault'a dokunmaz.
 `hermes nexus ingest status <ingest_id>` tek sorguda başarısızlık nedenini verir.
 `--long-unit-budget` yalnız insan tetiklemelidir (default 300s, her kullanım loglanır).
 v2 segmenter mesaj sınırında böler; karakter bütçesi 12.000 ve en fazla 12 mesaj,

@@ -98,6 +98,16 @@ _STATEMENT_HEX_SECRET = re.compile(r"\b[0-9a-fA-F]{40,}\b")
 _HIGH_ENTROPY_TOKEN = re.compile(r"\b[A-Za-z0-9_\-+/=]{24,}\b")
 _AUTO_ACCEPT_MIN = 0.7
 _REJECT_MAX = 0.4
+_INSTRUCTION_LIKE_PATTERNS = (
+    re.compile(r"ignore (?:all )?(?:previous|prior|above) instructions", re.IGNORECASE),
+    re.compile(r"disregard (?:the )?(?:previous|prior|above)", re.IGNORECASE),
+    re.compile(r"\byou are now\b", re.IGNORECASE),
+    re.compile(r"\bsystem prompt\b", re.IGNORECASE),
+    re.compile(r"\bdeveloper mode\b", re.IGNORECASE),
+    re.compile(r"önceki (?:talimat|yönerge)", re.IGNORECASE),
+    re.compile(r"yönergeleri yok say", re.IGNORECASE),
+    re.compile(r"sistem prompt", re.IGNORECASE),
+)
 
 
 def _shannon_entropy(text: str) -> float:
@@ -140,11 +150,23 @@ def contains_secret_value(statement: str) -> bool:
     return _high_entropy_secret(statement)
 
 
-def ingest_write_disposition(statement: str, confidence: float) -> str:
-    """Pilot write gate. Finance/health never auto-write."""
+def looks_instruction_like(statement: str) -> bool:
+    """True when a candidate reads as an instruction, not a memory fact."""
+    return any(pattern.search(statement) is not None for pattern in _INSTRUCTION_LIKE_PATTERNS)
+
+
+def ingest_write_disposition(
+    statement: str,
+    confidence: float,
+    *,
+    ambiguity_flags: tuple[str, ...] = (),
+) -> str:
+    """Pilot write gate. Finance/health/instruction-like never auto-write."""
     sensitivity = classify_sensitivity(statement)
     if contains_secret_value(statement):
         return "reject"
+    if looks_instruction_like(statement) or ambiguity_flags:
+        return "review"
     if sensitivity in {Sensitivity.FINANCIAL, Sensitivity.HEALTH}:
         return "review"
     if (
