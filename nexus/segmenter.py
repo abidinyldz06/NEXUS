@@ -11,6 +11,8 @@ from .normalize import NormalizedConversation, NormalizedMessage, normalize_text
 
 SEGMENTER_VERSION = "nexus-segmenter-v1"
 SEGMENT_ID_SCHEMA_VERSION = "nexus-segment-schema-v2"
+DEFAULT_TARGET_CHARS = 12_000
+DEFAULT_MAX_MESSAGES = 12
 _FIELD_SEPARATOR = "\x1f"
 _PART_SEPARATOR = "\x1e"
 
@@ -221,18 +223,23 @@ def _segment_from_messages(
 def segment_conversation_v2(
     conversation: NormalizedConversation,
     *,
-    target_chars: int = 12_000,
+    target_chars: int = DEFAULT_TARGET_CHARS,
+    max_messages: int = DEFAULT_MAX_MESSAGES,
     schema_version: str = SEGMENT_ID_SCHEMA_VERSION,
 ) -> tuple[ConversationSegment, ...]:
     """Pack extractable messages on message boundaries.
 
-    ``target_chars`` is a character budget, not a token count. A turn stays
-    together while the next message still fits. A single message that exceeds
-    the budget uses :func:`_fallback_parts`. Flag-off callers keep using
+    ``target_chars`` is a character budget, not a token count. ``max_messages``
+    caps packed turns so a 54-message blob cannot stay one 90s helper call.
+    A turn stays together while the next message still fits both budgets. A
+    single message that exceeds the character budget uses
+    :func:`_fallback_parts`. Flag-off callers keep using
     :func:`segment_conversation` and v1 fingerprints.
     """
     if target_chars <= 0:
         raise ValueError("target_chars must be positive")
+    if max_messages <= 0:
+        raise ValueError("max_messages must be positive")
     indexed = [
         (index, message)
         for index, message in enumerate(conversation.messages)
@@ -278,7 +285,9 @@ def segment_conversation_v2(
                 )
             continue
         message_size = len(normalize_for_segment_id(message.content_text))
-        if current and size + message_size > target_chars:
+        if current and (
+            size + message_size > target_chars or len(current) >= max_messages
+        ):
             add_group(current, fallback=False)
             current = []
             size = 0

@@ -24,6 +24,7 @@ from nexus.fingerprints import segment_fingerprint
 from nexus.ingest import shadow_inbox_source
 from nexus.ingest_v2 import (
     FAILED_SEGMENT,
+    LONG_UNIT_DEFAULT_SECONDS,
     IngestPaused,
     atomic_json,
     current_memories,
@@ -34,6 +35,7 @@ from nexus.ingest_v2 import (
     pause_ingest,
     review_queue_path,
     run_conversation,
+    service_extractor,
     set_paused,
     status_payload,
 )
@@ -198,6 +200,15 @@ class SegmenterV2Tests(unittest.TestCase):
         self.assertEqual(left_id, segment_conversation_v2(left)[0].segment_id)
         changed = segment_conversation_v2(left, schema_version="other-schema")[0].segment_id
         self.assertNotEqual(left_id, changed)
+
+    def test_fifty_four_short_messages_split_below_v1_timeout_blob(self) -> None:
+        source = conversation(
+            tuple(message(f"u{i}", "user", f"msg-{i:02d}") for i in range(54))
+        )
+        packed = segment_conversation_v2(source)
+        self.assertGreaterEqual(len(packed), 5)
+        self.assertTrue(all(len(item.messages) <= 12 for item in packed))
+        self.assertEqual(54, sum(len(item.messages) for item in packed))
 
     def test_segment_id_stays_stable_when_content_hash_changes(self) -> None:
         left = conversation((message("u1", "user", "alpha"),))
@@ -1021,6 +1032,90 @@ class PipelineV2Tests(unittest.TestCase):
             payload = status_payload(config_for(root, enabled=True), report.ingest_id)
             self.assertIn("timeout", str(payload.get("why")))
             self.assertFalse(payload["extraction_called"])
+            rows = [
+                json.loads(line)
+                for line in ingest_log_path(root / "data").read_text(encoding="utf-8").splitlines()
+                if line
+            ]
+            failed = next(row for row in rows if row.get("final_status") == FAILED_SEGMENT)
+            self.assertIsInstance(failed.get("token_estimate"), int)
+            self.assertGreaterEqual(failed["token_estimate"], 1)
+
+    def test_pause_cli_stops_writes_without_extraction(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            context = FakeContext(
+                {
+                    "vault_path": str(root / "vault"),
+                    "data_path": str(root / "data"),
+                    "inbox_path": str(root / "inbox"),
+                    "ingest_pipeline_v2": True,
+                }
+            )
+            (root / "data").mkdir()
+            arg_parser = __import__("argparse").ArgumentParser()
+            configure_parser(arg_parser, lambda args: run_command(args, context))
+            args = arg_parser.parse_args(["ingest", "pause", "--json"])
+            stream = io.StringIO()
+            import contextlib
+
+            with contextlib.redirect_stdout(stream):
+                code = args.func(args)
+            payload = json.loads(stream.getvalue())
+            self.assertEqual(0, code)
+            self.assertTrue(payload["paused"])
+            self.assertFalse(payload["vault_writes"])
+            self.assertTrue((root / "data" / "ingest" / "v2" / "PAUSED").is_file())
+
+    def test_long_unit_budget_is_logged_and_not_silent(self) -> None:
+        source = conversation((message("u1", "user", "abcdefghijKLMNO"),))
+
+        class Capture:
+            def __init__(self) -> None:
+                self.timeouts: list[float] = []
+                self.uses: list[dict] = []
+
+            def complete_structured(self, **kwargs: object) -> object:
+                self.timeouts.append(float(kwargs["timeout"]))  # type: ignore[arg-type]
+                span_ids = [
+                    item["span_id"]
+                    for item in json.loads(str(kwargs["input"][0]["text"]).split("\n", 1)[1])["spans"]  # type: ignore[index]
+                ]
+                from types import SimpleNamespace
+
+                return SimpleNamespace(
+                    parsed={
+                        "schema_version": 1,
+                        "candidates": [],
+                        "ignored_span_ids": span_ids,
+                        "warnings": [],
+                    },
+                    text="{}",
+                    provider="fixture",
+                    model="fixture",
+                    agent_id="fixture",
+                    usage=None,
+                )
+
+        llm = Capture()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            extractor = service_extractor(
+                llm,
+                long_unit_budget=LONG_UNIT_DEFAULT_SECONDS,
+                long_unit_log=llm.uses.append,
+            )
+            run_conversation(
+                config_for(root),
+                source,
+                extractor,
+                write_canonical=False,
+                target_chars=5,
+            )
+            self.assertTrue(llm.timeouts)
+            self.assertTrue(all(value == float(LONG_UNIT_DEFAULT_SECONDS) for value in llm.timeouts))
+            self.assertEqual(len(llm.timeouts), len(llm.uses))
+            self.assertTrue(all(item["human_triggered"] for item in llm.uses))
 
 
 if __name__ == "__main__":

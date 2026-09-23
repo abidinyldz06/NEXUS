@@ -31,6 +31,8 @@ from .index.rebuild import rebuild_index
 from .normalize import NormalizedConversation, normalize_text
 from .policy import contains_secret_value, ingest_write_disposition, redact_secrets
 from .segmenter import (
+    DEFAULT_MAX_MESSAGES,
+    DEFAULT_TARGET_CHARS,
     SEGMENT_ID_SCHEMA_VERSION,
     ConversationSegment,
     segment_conversation_v2,
@@ -706,6 +708,10 @@ def _write_canonical(
     return "obsidian+sqlite"
 
 
+def _token_estimate(segment: ConversationSegment) -> int:
+    return max(1, segment.character_count // 4)
+
+
 def _observation(**values: Any) -> dict[str, Any]:
     base: dict[str, Any] = {key: None for key in _OBSERVATION_KEYS}
     base.update(values)
@@ -721,7 +727,8 @@ def run_conversation(
     *,
     write_canonical: bool = False,
     canonical_memory_type: MemoryType | None = None,
-    target_chars: int = 12_000,
+    target_chars: int = DEFAULT_TARGET_CHARS,
+    max_messages: int = DEFAULT_MAX_MESSAGES,
     schema_version: str = SEGMENT_ID_SCHEMA_VERSION,
     index_writer: Callable[[Path, Path], object] | None = None,
     sleeper: Callable[[float], None] | None = None,
@@ -739,7 +746,10 @@ def run_conversation(
     carry_cell = carry_cell if carry_cell is not None else [""]
 
     segments = segment_conversation_v2(
-        conversation, target_chars=target_chars, schema_version=schema_version
+        conversation,
+        target_chars=target_chars,
+        max_messages=max_messages,
+        schema_version=schema_version,
     )
     ingest_id = make_ingest_id(conversation, schema_version)
     started = _utc_now()
@@ -923,6 +933,7 @@ def run_conversation(
                     segment_id=segment.segment_id,
                     segment_range=[segment.start_message_index, segment.end_message_index],
                     latency_ms=duration_ms,
+                    token_estimate=_token_estimate(segment),
                     retries=max(0, attempts - 1),
                     segment_status=FAILED_SEGMENT,
                     segment_duration_ms=duration_ms,
@@ -1032,6 +1043,7 @@ def run_conversation(
                 segment_id=segment.segment_id,
                 segment_range=[segment.start_message_index, segment.end_message_index],
                 latency_ms=duration_ms,
+                token_estimate=_token_estimate(segment),
                 retries=max(0, attempts - 1),
                 segment_status="completed",
                 segment_duration_ms=duration_ms,
@@ -1118,7 +1130,8 @@ def run_inbox(
     confirmed_sha256: str,
     conversation_id: str | None = None,
     max_segments: int = 20,
-    max_segment_chars: int = 12_000,
+    max_segment_chars: int = DEFAULT_TARGET_CHARS,
+    max_messages: int = DEFAULT_MAX_MESSAGES,
     long_unit_budget: int | None = None,
 ) -> IngestRunReport:
     """Run one exact Inbox source through v2. Never publishes and never writes Vault."""
@@ -1136,7 +1149,11 @@ def run_inbox(
         max_segment_chars=max_segment_chars,
     )
     conversation = prepared.parsed.conversations[prepared.conversation_index]
-    planned = segment_conversation_v2(conversation, target_chars=max_segment_chars)
+    planned = segment_conversation_v2(
+        conversation,
+        target_chars=max_segment_chars,
+        max_messages=max_messages,
+    )
     if len(planned) > max_segments:
         raise SourceError("selected conversation exceeds max-segments before model execution")
     carry_cell = [""]
@@ -1166,6 +1183,7 @@ def run_inbox(
         ),
         write_canonical=False,
         target_chars=max_segment_chars,
+        max_messages=max_messages,
         sleeper=time.sleep,
         carry_cell=carry_cell,
     )
