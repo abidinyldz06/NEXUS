@@ -1,0 +1,38 @@
+{
+  "acceptance": {
+    "human_labeled_quality": false,
+    "operational": false,
+    "parser": true,
+    "safety": true
+  },
+  "candidates_published": false,
+  "dataset": {
+    "selected_conversations": 10,
+    "source_digest_committed": false,
+    "source_format": "chatgpt-html-export"
+  },
+  "date": "2026-09-23",
+  "elapsed_seconds": 1987.9,
+  "failed_runs": 1,
+  "failure_classes": {
+    "timeout": 1
+  },
+  "ingest_pipeline_v2": true,
+  "max_attempts": 3,
+  "observed_root_cause": "one_short_conversation_still_hit_90s_timeout; 54-message class completed as 5 segments",
+  "plugin_sha": "13d6f89",
+  "successful_runs": 9,
+  "successful_totals": {
+    "accepted_count": 1,
+    "extractor_calls": 25,
+    "memories_created": 1,
+    "rejected_count": 29,
+    "segments": 21
+  },
+  "v1_leftover_timeout_class": {
+    "completed": true,
+    "segments": 5
+  },
+  "vault_writes": false,
+  "writes_performed": false
+}
