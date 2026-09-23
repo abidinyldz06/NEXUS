@@ -1571,6 +1571,46 @@ class PipelineV2Tests(unittest.TestCase):
             self.assertEqual("already_processed", same.final_status)
             self.assertEqual(frozen + [(2, 3)], extractor.calls)
 
+    def test_growing_conversation_with_frozen_hash_mismatch_goes_to_review(self) -> None:
+        first = conversation(
+            (message("u1", "user", "aaaa"), message("a1", "assistant", "bbbb")),
+            external_id="live-edit",
+        )
+        grown = conversation(
+            (
+                message("u1", "user", "zzzz"),
+                message("a1", "assistant", "bbbb"),
+                message("u2", "user", "cccc"),
+                message("a2", "assistant", "dddd"),
+            ),
+            external_id="live-edit",
+        )
+
+        class Extractor:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def __call__(self, segment: object) -> ExtractionResult:
+                self.calls += 1
+                return result_for(
+                    segment,
+                    "Kullanıcı canlı sohbette kısa yanıtları tercih ediyor.",
+                )
+
+        extractor = Extractor()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first_run = self._run(root, first, extractor)
+            self.assertEqual("completed", first_run.final_status)
+            self.assertEqual(1, extractor.calls)
+            later = self._run(root, grown, extractor)
+            self.assertEqual("review", later.final_status)
+            self.assertEqual("content_hash_mismatch", later.why)
+            self.assertEqual(1, extractor.calls)
+            self.assertEqual(0, later.memories_created)
+            queue = review_queue_path(root / "data").read_text(encoding="utf-8")
+            self.assertIn("content_hash_mismatch", queue)
+
 
 class PilotMatrixTests(unittest.TestCase):
     def test_a6_ten_conversation_shapes_complete_without_live_export(self) -> None:

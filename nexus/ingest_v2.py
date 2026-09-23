@@ -1088,6 +1088,39 @@ def run_conversation(
         )
         report.segment_statuses[str(item.get("segment_id"))] = "review"
         report.why = "content_hash_mismatch"
+        report.final_status = "review"
+    if report.why == "content_hash_mismatch":
+        prevented = 0
+        for item in segment_state.values():
+            if not isinstance(item, dict) or item.get("status") != "completed":
+                continue
+            meta = item.get("extraction") or {}
+            prevented += int(meta.get("accepted_count") or 0)
+            prevented += int(meta.get("duplicate_prevented_count") or 0)
+        report.duplicate_prevented_count = prevented
+        report.segment_count = sum(
+            1
+            for item in segment_state.values()
+            if isinstance(item, dict) and item.get("status") == "completed"
+        )
+        append_observation(
+            config.data_path,
+            _observation(
+                ingest_id=ingest_id,
+                conversation_id=conversation.external_conversation_id,
+                started_at=started,
+                finished_at=_utc_now(),
+                schema_version=schema_version,
+                status="COMPLETED",
+                segment_count=report.segment_count,
+                duplicate_prevented_count=prevented,
+                duplicates_prevented=prevented,
+                writes="none",
+                final_status="review",
+                error_class="content_hash_mismatch",
+            ),
+        )
+        return report
     if not segments and any(
         isinstance(item, dict) and item.get("status") == "completed"
         for item in segment_state.values()
