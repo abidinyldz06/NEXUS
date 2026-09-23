@@ -23,7 +23,6 @@ from nexus.extraction.schema import ExtractionCandidate, ExtractionResult
 from nexus.fingerprints import segment_fingerprint
 from nexus.ingest import shadow_inbox_source
 from nexus.ingest_v2 import (
-    CANARY_DAILY_LIMIT,
     CARRY_FORWARD_MARKER,
     FAILED_SEGMENT,
     LONG_UNIT_DEFAULT_SECONDS,
@@ -1616,7 +1615,7 @@ class PipelineV2Tests(unittest.TestCase):
             queue = review_queue_path(root / "data").read_text(encoding="utf-8")
             self.assertIn("content_hash_mismatch", queue)
 
-    def test_canary_requires_confirm_and_caps_daily_writes(self) -> None:
+    def test_canary_requires_confirm_and_does_not_cap_daily_writes(self) -> None:
         source = conversation((message("u1", "user", "aaaa"),))
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1625,11 +1624,10 @@ class PipelineV2Tests(unittest.TestCase):
                 prepare_canary_write(config, confirm="nope")
             first = prepare_canary_write(config, confirm="canary")
             self.assertEqual(0, first["used_today"])
-            self.assertEqual(CANARY_DAILY_LIMIT, first["limit"])
-            for index in range(CANARY_DAILY_LIMIT):
+            for index in range(6):
                 record_canary_write(config.data_path, f"ingest-{index}")
-            with self.assertRaises(IngestV2Error):
-                prepare_canary_write(config, confirm="canary")
+            later = prepare_canary_write(config, confirm="canary")
+            self.assertEqual(6, later["used_today"])
             snapshot = snapshot_canonical(config)
             self.assertIn("file_count", snapshot)
             run_conversation(

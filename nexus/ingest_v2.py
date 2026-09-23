@@ -51,7 +51,6 @@ FAILED_SEGMENT = "FAILED_SEGMENT"
 CARRY_FORWARD_CHARS = 240
 CARRY_FORWARD_MARKER = "READONLY_PRIOR_SUMMARY"
 CANARY_CONFIRM = "canary"
-CANARY_DAILY_LIMIT = 5
 
 _RETRYABLE = frozenset(
     {"timeout", "http_5xx", "transient_provider", "transient_transport"}
@@ -295,7 +294,7 @@ def snapshot_canonical(config: NexusConfig) -> dict[str, Any]:
 
 
 def prepare_canary_write(config: NexusConfig, *, confirm: str | None) -> dict[str, Any]:
-    """Arm one labeled canary write. Does not extract. Max 5 ingest/day."""
+    """Arm one labeled canary write. Does not extract. No daily ingest cap."""
     if confirm != CANARY_CONFIRM:
         raise IngestV2Error("canary-write requires --confirm canary")
     if not config.ingest_pipeline_v2:
@@ -306,14 +305,10 @@ def prepare_canary_write(config: NexusConfig, *, confirm: str | None) -> dict[st
         raise IngestV2Error("vault_path is required for canary write")
     if is_paused(config.data_path):
         raise IngestV2Error("ingest is paused")
-    used = canary_writes_today(config.data_path)
-    if used >= CANARY_DAILY_LIMIT:
-        raise IngestV2Error("canary daily limit reached")
     snapshot = snapshot_canonical(config)
     return {
         "ok": True,
-        "used_today": used,
-        "limit": CANARY_DAILY_LIMIT,
+        "used_today": canary_writes_today(config.data_path),
         "snapshot_files": snapshot["file_count"],
         "extraction_called": False,
         "auto_publish_enabled": False,

@@ -259,7 +259,7 @@ tombstone eder ve derived index'i rebuild eder. Dry-run Vault'a dokunmaz.
 `hermes nexus ingest reprocess <ingest_id>` FAILED_SEGMENT satırlarını sonraki koşu için
 hazırlar; model çağırmaz. `hermes nexus ingest queue` review kuyruğunu okur.
 `--long-unit-budget` yalnız insan tetiklemelidir (default 300s, her kullanım loglanır).
-`--canary-write --confirm canary` kabul edilen kayıtları `Nexus/` altına yazar; günde en fazla 5 ingest.
+`--canary-write --confirm canary` kabul edilen kayıtları `Nexus/` altına yazar.
 Auto-publish kapalı kalır. Dry-run ve `--shadow` (canary'siz) Vault'a dokunmaz.
 v2 segmenter mesaj sınırında böler; karakter bütçesi 12.000 ve en fazla 12 mesaj,
 böylece 54 mesajlık v1 tek-segment timeout sınıfı tek 90s çağrıda kalmaz.
