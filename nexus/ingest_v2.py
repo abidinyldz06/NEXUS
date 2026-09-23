@@ -190,6 +190,20 @@ def pause_ingest(config: NexusConfig) -> dict[str, Any]:
     }
 
 
+def unpause_ingest(config: NexusConfig) -> dict[str, Any]:
+    """Clear the pause flag. Does not extract or write."""
+    set_paused(config.data_path, False)
+    return {
+        "ok": True,
+        "paused": False,
+        "writes_performed": False,
+        "vault_writes": False,
+        "extraction_called": False,
+        "mode": "writes-armed",
+        "message": "pause flag cleared; live writes follow the next explicit run",
+    }
+
+
 def rollback_batch(
     config: NexusConfig,
     ingest_id: str,

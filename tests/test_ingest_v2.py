@@ -42,6 +42,7 @@ from nexus.ingest_v2 import (
     service_extractor,
     set_paused,
     status_payload,
+    unpause_ingest,
 )
 from nexus.normalize import NormalizedConversation, NormalizedMessage
 from nexus.segmenter import (
@@ -1413,6 +1414,166 @@ class PipelineV2Tests(unittest.TestCase):
             self.assertEqual(0, code)
             self.assertFalse(listed["extraction_called"])
             self.assertIn("review_gate", str(listed["items"]))
+
+    def test_unpause_cli_clears_flag_and_allows_later_writes(self) -> None:
+        source = conversation((message("u1", "user", "aaaa"),), external_id="paused-conv")
+        later = conversation((message("u2", "user", "bbbb"),), external_id="armed-conv")
+
+        def extractor(segment: object) -> ExtractionResult:
+            if segment.conversation_id == "paused-conv":  # type: ignore[attr-defined]
+                return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+            return result_for(segment, "Kullanıcı sade kahveyi tercih ediyor.")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = config_for(root)
+            pause_ingest(config)
+            blocked = run_conversation(
+                config,
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=True,
+            )
+            self.assertFalse(blocked.vault_written)
+            context = FakeContext(
+                {
+                    "vault_path": str(root / "vault"),
+                    "data_path": str(root / "data"),
+                    "inbox_path": str(root / "inbox"),
+                    "ingest_pipeline_v2": True,
+                }
+            )
+            arg_parser = __import__("argparse").ArgumentParser()
+            configure_parser(arg_parser, lambda args: run_command(args, context))
+            args = arg_parser.parse_args(["ingest", "unpause", "--json"])
+            stream = io.StringIO()
+            import contextlib
+
+            with contextlib.redirect_stdout(stream):
+                code = args.func(args)
+            payload = json.loads(stream.getvalue())
+            self.assertEqual(0, code)
+            self.assertFalse(payload["paused"])
+            self.assertFalse(payload["extraction_called"])
+            self.assertFalse((root / "data" / "ingest" / "v2" / "PAUSED").exists())
+            armed = run_conversation(
+                config_for(root),
+                later,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=True,
+            )
+            self.assertTrue(armed.vault_written)
+            self.assertTrue(list((root / "vault").rglob("mem_*.md")))
+
+
+class PilotMatrixTests(unittest.TestCase):
+    def test_a6_ten_conversation_shapes_complete_without_live_export(self) -> None:
+        from nexus.segmenter import segment_conversation_v2
+
+        def pack(identifier: str, count: int) -> NormalizedConversation:
+            body = tuple(
+                message(f"{identifier}-{i}", "user", f"{identifier}-{i:02d}-xxxx")
+                for i in range(count)
+            )
+            return conversation(body, external_id=identifier)
+
+        tool_heavy = conversation(
+            (
+                message("sys", "system", "hidden system"),
+                message("u-tool", "user", "tool-user-xxxx"),
+                message("tool-1", "tool", "synthetic tool payload"),
+                message("a-tool", "assistant", "tool-assistant-xxxx"),
+            ),
+            external_id="tool-heavy",
+        )
+        split_pair = conversation(
+            (message("cx", "user", "aaaa"), message("cy", "user", "bbbb")),
+            external_id="correction-xy",
+        )
+        jump = conversation(
+            (message("j1", "user", "aaaa"), message("j2", "user", "bbbb")),
+            external_id="topic-jump",
+        )
+        clash = conversation(
+            (message("k1", "user", "aaaa"), message("k2", "user", "bbbb")),
+            external_id="contradictory",
+        )
+        cases = (
+            pack("short-a", 2),
+            pack("short-b", 3),
+            pack("medium-a", 16),
+            pack("medium-b", 18),
+            pack("long", 40),
+            pack("very-long", 54),
+            tool_heavy,
+            jump,
+            split_pair,
+            clash,
+        )
+        self.assertEqual(10, len(cases))
+        packed_tool = segment_conversation_v2(tool_heavy)
+        self.assertTrue(packed_tool)
+        self.assertTrue(
+            all(
+                item.role in {"user", "assistant"}
+                for segment in packed_tool
+                for item in segment.messages
+            )
+        )
+
+        class MatrixExtractor:
+            def __init__(self, data: Path) -> None:
+                self.data = data
+
+            def __call__(self, segment: object) -> ExtractionResult:
+                conv = segment.conversation_id  # type: ignore[attr-defined]
+                index = segment.index  # type: ignore[attr-defined]
+                records = load_ledger(self.data) if self.data.exists() else []
+                if conv == "correction-xy" and index == 2:
+                    current = current_memories(records)
+                    prior = str(current[0]["id"]) if current else "missing"
+                    return result_for(
+                        segment,
+                        "Kullanıcı artık sade kahveyi tercih ediyor.",
+                        supersedes=(prior,),
+                    )
+                if conv == "topic-jump" and index == 2:
+                    return result_for(segment, "Kullanıcı erken saati tercih ediyor.")
+                if conv == "contradictory" and index == 2:
+                    return result_for(segment, "Kullanıcı yeşil çayı tercih ediyor.")
+                if conv == "correction-xy":
+                    return result_for(segment, "Kullanıcı eskitayı tercih ediyor.")
+                return result_for(segment, f"Kullanıcı {conv} tercih ediyor.")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            extractor = MatrixExtractor(root / "data")
+            outcomes: list[str] = []
+            split_ids = {"topic-jump", "correction-xy", "contradictory"}
+            for source in cases:
+                report = run_conversation(
+                    config_for(root),
+                    source,
+                    extractor,
+                    canonical_memory_type=MemoryType.PREFERENCE,
+                    write_canonical=False,
+                    target_chars=4 if source.external_conversation_id in split_ids else 12_000,
+                    max_messages=12,
+                )
+                outcomes.append(report.final_status)
+                self.assertIn(report.final_status, {"completed", FAILED_SEGMENT})
+            self.assertEqual(["completed"] * 10, outcomes)
+            ledger = load_ledger(root / "data")
+            memories = current_memories(ledger)
+            self.assertGreaterEqual(len(memories), 4)
+            self.assertTrue(any("çay" in str(row.get("statement")) for row in memories))
+            self.assertTrue(
+                any(row.get("status") == "superseded" for row in ledger)
+                or any(row.get("supersedes") for row in memories)
+            )
+            self.assertFalse(list((root / "vault").rglob("mem_*.md")))
 
 
 if __name__ == "__main__":

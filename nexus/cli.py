@@ -36,6 +36,7 @@ from .ingest_v2 import (
     rollback_batch,
     run_inbox,
     status_payload,
+    unpause_ingest,
 )
 from .permission_audit import audit_permissions
 from .publication import apply_publication, plan_publication
@@ -113,6 +114,12 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
     )
     ingest_pause.add_argument(
         "--json", action="store_true", dest="pause_json", help="Emit JSON"
+    )
+    ingest_unpause = ingest_commands.add_parser(
+        "unpause", help="Clear the pause flag without extracting or writing"
+    )
+    ingest_unpause.add_argument(
+        "--json", action="store_true", dest="unpause_json", help="Emit JSON"
     )
     ingest_rollback = ingest_commands.add_parser(
         "rollback", help="Tombstone one ingest batch; default dry-run"
@@ -359,6 +366,26 @@ def run_command(args: Namespace, ctx: Any) -> int:
                 payload,
                 as_json=bool(
                     getattr(args, "pause_json", False) or getattr(args, "as_json", False)
+                ),
+            )
+            return 0 if payload.get("ok") else 2
+        if getattr(args, "ingest_command", None) == "unpause":
+            try:
+                config = from_plugin_context(ctx)
+                payload = unpause_ingest(config)
+            except (NexusError, OSError, ValueError) as exc:
+                payload = {
+                    "ok": False,
+                    "paused": True,
+                    "writes_performed": False,
+                    "vault_writes": False,
+                    "extraction_called": False,
+                    "errors": [type(exc).__name__],
+                }
+            _print_payload(
+                payload,
+                as_json=bool(
+                    getattr(args, "unpause_json", False) or getattr(args, "as_json", False)
                 ),
             )
             return 0 if payload.get("ok") else 2

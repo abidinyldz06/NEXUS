@@ -251,6 +251,7 @@ clean-worktree eşliğini doğrular ve tüm geçici alanı siler.
 en fazla 3 deneme, checkpoint yazılmaz, Vault'a yazılmaz. Bayrağı kapatmak
 checkpoint, ledger veya canonical kayıt silmez.
 `hermes nexus ingest pause` canlı yazımı durdurur; gölge JSONL kalır.
+`hermes nexus ingest unpause` pause bayrağını kaldırır; model çağırmaz.
 `hermes nexus ingest rollback <ingest_id>` varsayılanı dry-run'dır; `--apply --confirm <id>`
 eşleşen ledger satırlarını retracted yapar, Vault'a dokunmaz.
 `hermes nexus ingest status <ingest_id>` tek sorguda başarısızlık nedenini verir.

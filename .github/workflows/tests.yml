@@ -1,0 +1,21 @@
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - feature/ingest-pipeline-v2
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run unit tests
+        run: scripts/run_tests.sh
+      - name: Compile bytecode
+        run: python3 -m compileall -q nexus tests
