@@ -94,16 +94,24 @@ installed plugin commit.
   types are not `TimeoutError`). Successful runs produced 13 candidates across
   memory/entity/relation/commitment, 9 segments, 64,601 total tokens, and no
   writes. Aggregate evidence:
-  `eval/baseline-phase3-real-export-shadow-2026-09-21.json`. Operational
-  acceptance remains open.
+  `eval/baseline-phase3-real-export-shadow-2026-09-21.json`.
+- A 2026-09-23 rerun of the same ten-conversation class on installed plugin
+  `1424c7f` completed **9/10** in 2001s. The single failure is classified
+  `timeout` (v1 one-segment / 54-message conversation vs the 90s auxiliary cap).
+  Successful runs produced 33 candidates, 14 segments, 170,015 total tokens, and
+  no Vault writes. Aggregate evidence:
+  `eval/baseline-phase3-real-export-shadow-2026-09-23.json`. That one timeout is
+  not a wait-gate: ingest pipeline v2 splits the work unit instead of rerunning
+  the monolith. Operational acceptance remains open until v2 is QA'd.
 
 ## Remaining acceptance gates
 
-- Extraction now classifies SDK timeouts as `timeout` and HTTP status errors as
-  `http_4xx` / `http_5xx` without echoing provider payloads. The 6/10 result is
-  still not operational acceptance: long segments hit the Hermes auxiliary 90s
-  cap. Raising that cap or shrinking segments is a separate operator decision;
-  this class was not rerun after the label mapping change.
+- Extraction classifies SDK timeouts as `timeout` and HTTP status errors as
+  `http_4xx` / `http_5xx` without echoing provider payloads. Live v1 is 9/10;
+  the remaining miss is the known 90s helper timeout on an oversized v1
+  segment. Do not raise the 90s cap. Do not rerun that one conversation on v1.
+  Segment + checkpoint + `FAILED_SEGMENT` is the v2 path (PR on
+  `feature/ingest-pipeline-v2`).
 - The expanded synthetic set remains smaller than the planned private golden
   dataset and is not by itself full real-world model-quality acceptance. The
   runner is merged and installed, but human-labeled real cases are not yet
