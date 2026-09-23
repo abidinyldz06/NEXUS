@@ -254,6 +254,8 @@ checkpoint, ledger veya canonical kayıt silmez.
 `hermes nexus ingest rollback <ingest_id>` varsayılanı dry-run'dır; `--apply --confirm <id>`
 eşleşen ledger satırlarını retracted yapar, Vault'a dokunmaz.
 `hermes nexus ingest status <ingest_id>` tek sorguda başarısızlık nedenini verir.
+`hermes nexus ingest reprocess <ingest_id>` FAILED_SEGMENT satırlarını sonraki koşu için
+hazırlar; model çağırmaz. `hermes nexus ingest queue` review kuyruğunu okur.
 `--long-unit-budget` yalnız insan tetiklemelidir (default 300s, her kullanım loglanır).
 v2 segmenter mesaj sınırında böler; karakter bütçesi 12.000 ve en fazla 12 mesaj,
 böylece 54 mesajlık v1 tek-segment timeout sınıfı tek 90s çağrıda kalmaz.

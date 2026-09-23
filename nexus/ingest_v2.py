@@ -237,6 +237,97 @@ def rollback_batch(
     return payload
 
 
+def reprocess_failed(config: NexusConfig, ingest_id: str) -> dict[str, Any]:
+    """Arm FAILED_SEGMENT rows for the next run. Does not call a model."""
+    if not config.ingest_pipeline_v2:
+        raise IngestV2Error("ingest_pipeline_v2 is off")
+    if not ingest_id.strip():
+        raise IngestV2Error("ingest_id is required")
+    checkpoint = load_checkpoint(config.data_path, ingest_id)
+    if checkpoint is None:
+        raise IngestV2Error("checkpoint not found")
+    segments = checkpoint.get("segments")
+    if not isinstance(segments, dict):
+        raise IngestV2Error("checkpoint is invalid")
+    reset: list[str] = []
+    for item in segments.values():
+        if not isinstance(item, dict) or item.get("status") != FAILED_SEGMENT:
+            continue
+        item["status"] = "incomplete"
+        item["attempt_count"] = 0
+        item["failure_class"] = None
+        item["completed_at"] = None
+        extraction = item.get("extraction") if isinstance(item.get("extraction"), dict) else {}
+        item["extraction"] = {
+            "timeout_count": int(extraction.get("timeout_count") or 0),
+            "reprocess": True,
+        }
+        if item.get("segment_id"):
+            reset.append(str(item["segment_id"]))
+    if reset:
+        _save_checkpoint(config.data_path, checkpoint)
+        append_observation(
+            config.data_path,
+            _observation(
+                ingest_id=ingest_id,
+                conversation_id=checkpoint.get("conversation_id"),
+                status="RUNNING",
+                writes="none",
+                final_status="reprocess_armed",
+                segment_count=len(reset),
+            ),
+        )
+    return {
+        "ok": True,
+        "ingest_id": ingest_id,
+        "reprocess_count": len(reset),
+        "segment_ids": reset,
+        "extraction_called": False,
+        "writes_performed": False,
+        "vault_writes": False,
+    }
+
+
+def review_queue_payload(config: NexusConfig) -> dict[str, Any]:
+    """Read-only review/reprocess queue. No statements, no model call."""
+    if not config.ingest_pipeline_v2:
+        return {
+            "ok": True,
+            "ingest_pipeline_v2": False,
+            "count": 0,
+            "items": [],
+            "extraction_called": False,
+        }
+    path = review_queue_path(config.data_path)
+    items: list[dict[str, Any]] = []
+    if path.is_file() and not path.is_symlink():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(row, dict):
+                items.append(
+                    {
+                        "ingest_id": row.get("ingest_id"),
+                        "conversation_id": row.get("conversation_id"),
+                        "segment_id": row.get("segment_id"),
+                        "reason": row.get("reason"),
+                        "failure_class": row.get("failure_class"),
+                    }
+                )
+    return {
+        "ok": True,
+        "ingest_pipeline_v2": True,
+        "count": len(items),
+        "items": items[-100:],
+        "extraction_called": False,
+        "writes_performed": False,
+    }
+
+
 def _queue_review(data_path: Path, payload: dict[str, Any]) -> None:
     path = review_queue_path(data_path)
     if path.is_symlink():
