@@ -130,6 +130,7 @@ class NexusConfig:
     source_stable_seconds: int = 5
     auto_publish_enabled: bool = False
     sensitive_auto_publish: bool = False
+    ingest_pipeline_v2: bool = False
     decision_classifier_enabled: bool = False
     decision_llm_fallback_enabled: bool = False
     decision_classifier_executable: str = "classify"
@@ -180,6 +181,9 @@ class NexusConfig:
             sensitive_auto_publish=_boolean(
                 values.get("sensitive_auto_publish", False),
                 field_name="sensitive_auto_publish",
+            ),
+            ingest_pipeline_v2=_boolean(
+                values.get("ingest_pipeline_v2", False), field_name="ingest_pipeline_v2"
             ),
             decision_classifier_enabled=_boolean(
                 values.get("decision_classifier_enabled", False),
@@ -269,6 +273,7 @@ PLUGIN_CONFIG_KEYS = (
     "source_stable_seconds",
     "auto_publish_enabled",
     "sensitive_auto_publish",
+    "ingest_pipeline_v2",
     "decision_classifier_enabled",
     "decision_llm_fallback_enabled",
     "decision_classifier_executable",
@@ -293,6 +298,7 @@ def from_plugin_context(ctx: Any) -> NexusConfig:
         "source_stable_seconds": 5,
         "auto_publish_enabled": False,
         "sensitive_auto_publish": False,
+        "ingest_pipeline_v2": False,
         "decision_classifier_enabled": False,
         "decision_llm_fallback_enabled": False,
         "decision_classifier_executable": "classify",

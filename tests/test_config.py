@@ -15,6 +15,7 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(config.write_ready)
         self.assertFalse(config.auto_publish_enabled)
         self.assertFalse(config.sensitive_auto_publish)
+        self.assertFalse(config.ingest_pipeline_v2)
         self.assertFalse(config.decision_classifier_enabled)
         self.assertFalse(config.decision_llm_fallback_enabled)
         self.assertEqual("classify", config.decision_classifier_executable)

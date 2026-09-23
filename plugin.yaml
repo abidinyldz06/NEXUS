@@ -45,6 +45,10 @@ config_schema:
   sensitive_auto_publish:
     type: bool
     default: false
+  ingest_pipeline_v2:
+    type: bool
+    default: false
+    description: "Resumable segmented ingest. Default off keeps shadow-only extraction."
   decision_classifier_enabled:
     type: bool
     default: false

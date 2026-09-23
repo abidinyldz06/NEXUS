@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import math
 import re
+from collections import Counter
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -80,9 +82,56 @@ _SENSITIVITY_TERMS: dict[Sensitivity, tuple[str, ...]] = {
 
 _SECRET_VALUE_PATTERNS = (
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", re.IGNORECASE),
-    re.compile(r"\b(?:sk|ghp|github_pat)_[A-Za-z0-9_-]{16,}\b"),
+    re.compile(r"\b(?:sk|ghp|gho|github_pat)_[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\bAIza[0-9A-Za-z\-_]{20,}\b"),
+    re.compile(r"\bxoxb-[A-Za-z0-9-]{10,}\b"),
+    re.compile(r"\bBearer\s+\S+", re.IGNORECASE),
     re.compile(r"\b(?:password|parola|şifre|token|api[_ -]?key)\s*[:=]\s*\S+", re.IGNORECASE),
+    re.compile(
+        r"\b[A-Z][A-Z0-9_]*(?:SECRET|TOKEN|API_KEY|ACCESS_KEY)[A-Z0-9_]*\s*=\s*\S+"
+    ),
 )
+
+_STATEMENT_HEX_SECRET = re.compile(r"\b[0-9a-fA-F]{40,}\b")
+
+_HIGH_ENTROPY_TOKEN = re.compile(r"\b[A-Za-z0-9_\-+/=]{24,}\b")
+_AUTO_ACCEPT_MIN = 0.7
+_REJECT_MAX = 0.4
+_INSTRUCTION_LIKE_PATTERNS = (
+    re.compile(r"ignore (?:all )?(?:previous|prior|above) instructions", re.IGNORECASE),
+    re.compile(r"disregard (?:the )?(?:previous|prior|above)", re.IGNORECASE),
+    re.compile(r"\byou are now\b", re.IGNORECASE),
+    re.compile(r"\bsystem prompt\b", re.IGNORECASE),
+    re.compile(r"\bdeveloper mode\b", re.IGNORECASE),
+    re.compile(r"önceki (?:talimat|yönerge)", re.IGNORECASE),
+    re.compile(r"yönergeleri yok say", re.IGNORECASE),
+    re.compile(r"sistem prompt", re.IGNORECASE),
+)
+
+
+def _shannon_entropy(text: str) -> float:
+    if not text:
+        return 0.0
+    counts = Counter(text)
+    length = len(text)
+    return -sum((count / length) * math.log2(count / length) for count in counts.values())
+
+
+def _high_entropy_secret(text: str) -> bool:
+    for match in _HIGH_ENTROPY_TOKEN.finditer(text):
+        token = match.group(0)
+        if _shannon_entropy(token) >= 4.0:
+            return True
+    return False
+
+
+def redact_secrets(text: str) -> str:
+    """Replace secret-shaped substrings. Derived stores must not keep them."""
+    redacted = text
+    for pattern in _SECRET_VALUE_PATTERNS:
+        redacted = pattern.sub("[redacted]", redacted)
+    return redacted
 
 
 def classify_sensitivity(statement: str) -> Sensitivity:
@@ -94,7 +143,42 @@ def classify_sensitivity(statement: str) -> Sensitivity:
 
 
 def contains_secret_value(statement: str) -> bool:
-    return any(pattern.search(statement) is not None for pattern in _SECRET_VALUE_PATTERNS)
+    if any(pattern.search(statement) is not None for pattern in _SECRET_VALUE_PATTERNS):
+        return True
+    if _STATEMENT_HEX_SECRET.search(statement) is not None:
+        return True
+    return _high_entropy_secret(statement)
+
+
+def looks_instruction_like(statement: str) -> bool:
+    """True when a candidate reads as an instruction, not a memory fact."""
+    return any(pattern.search(statement) is not None for pattern in _INSTRUCTION_LIKE_PATTERNS)
+
+
+def ingest_write_disposition(
+    statement: str,
+    confidence: float,
+    *,
+    ambiguity_flags: tuple[str, ...] = (),
+) -> str:
+    """Pilot write gate. Finance/health/instruction-like never auto-write."""
+    sensitivity = classify_sensitivity(statement)
+    if contains_secret_value(statement):
+        return "reject"
+    if looks_instruction_like(statement) or ambiguity_flags:
+        return "review"
+    if sensitivity in {Sensitivity.FINANCIAL, Sensitivity.HEALTH}:
+        return "review"
+    if (
+        isinstance(confidence, bool)
+        or not isinstance(confidence, (int, float))
+        or not 0 <= confidence <= 1
+        or confidence < _REJECT_MAX
+    ):
+        return "reject"
+    if confidence < _AUTO_ACCEPT_MIN:
+        return "review"
+    return "accept"
 
 
 @dataclass(frozen=True, slots=True)

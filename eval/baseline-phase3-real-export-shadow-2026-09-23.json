@@ -1,0 +1,53 @@
+{
+  "acceptance": {
+    "human_labeled_quality": false,
+    "operational": false,
+    "parser": true,
+    "safety": true
+  },
+  "candidate_kinds": {
+    "commitment": 10,
+    "correction": 1,
+    "entity": 3,
+    "memory": 17,
+    "relation": 2
+  },
+  "candidates_published": false,
+  "dataset": {
+    "conversations": 208,
+    "messages": 8065,
+    "selected_conversations": 10,
+    "selection": {
+      "one_segment": 6,
+      "three_segments": 1,
+      "two_segments": 3
+    },
+    "source_digest_committed": false,
+    "source_format": "chatgpt-html-export"
+  },
+  "date": "2026-09-23",
+  "elapsed_seconds": 2001.2,
+  "failed_runs": 1,
+  "failure_classes": {
+    "timeout": 1
+  },
+  "ingest_pipeline_v2": false,
+  "max_attempts": 3,
+  "model": "glm-5.3",
+  "observed_root_cause": "hermes_auxiliary_timeout_90s",
+  "plugin_sha": "1424c7f",
+  "provider": "ollama-cloud",
+  "successful_runs": 9,
+  "successful_totals": {
+    "candidates": 33,
+    "input_tokens": 56924,
+    "messages": 124,
+    "output_tokens": 113091,
+    "segments": 14,
+    "successful_calls": 14,
+    "total_tokens": 170015,
+    "warnings": 37
+  },
+  "vault_writes": false,
+  "writes_performed": false
+}

@@ -1,0 +1,41 @@
+{
+  "acceptance": {
+    "human_labeled_quality": false,
+    "operational": false,
+    "parser": true,
+    "safety": true
+  },
+  "auto_publish_enabled": false,
+  "candidates_published": false,
+  "checkpoint_complete": true,
+  "completed_segments": 2,
+  "dataset": {
+    "selected_conversations": 1,
+    "source_digest_committed": false,
+    "source_format": "hermes-jsonl-redacted"
+  },
+  "date": "2026-09-23",
+  "elapsed_seconds": 367.6,
+  "extractable_messages": 22,
+  "failed_runs": 0,
+  "frozen_range_then_tail": true,
+  "grown": {
+    "elapsed_seconds": 69.8,
+    "final_status": "completed",
+    "memories_created": 0,
+    "segment_count": 1
+  },
+  "ingest_pipeline_v2_after_run": false,
+  "overlap": false,
+  "plugin_sha": "41644abf14f0ec53f20ed001ee965f31cf395b3e",
+  "prefix": {
+    "elapsed_seconds": 297.8,
+    "extractable_messages": 11,
+    "final_status": "completed",
+    "memories_created": 1,
+    "segment_count": 1
+  },
+  "successful_runs": 2,
+  "vault_writes": false,
+  "writes_performed": false
+}

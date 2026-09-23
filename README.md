@@ -244,6 +244,28 @@ doğrular ve geçici alanı komut bitmeden siler.
 metadata ile commit eder, kontrollü mutation'ı exact commit'e geri alır, hash ve
 clean-worktree eşliğini doğrular ve tüm geçici alanı siler.
 
+## Ingest Pipeline v2 geri alma
+
+`ingest_pipeline_v2` varsayılanı kapalıdır (pilot). Bayrak kapatılınca komut
+`1424c7f` shadow-only davranışa döner: 90 saniyelik `nexus_extract` hard timeout,
+en fazla 3 deneme, checkpoint yazılmaz, Vault'a yazılmaz. Bayrağı kapatmak
+checkpoint, ledger veya canonical kayıt silmez.
+`hermes nexus ingest pause` canlı yazımı durdurur; gölge JSONL kalır.
+`hermes nexus ingest unpause` pause bayrağını kaldırır; model çağırmaz.
+`hermes nexus ingest rollback <ingest_id>` varsayılanı dry-run'dır; `--apply --confirm <id>`
+eşleşen ledger satırlarını retracted yapar, varsa aynı id'li `Nexus/Memory` dosyalarını
+tombstone eder ve derived index'i rebuild eder. Dry-run Vault'a dokunmaz.
+`hermes nexus ingest status <ingest_id>` tek sorguda başarısızlık nedenini verir.
+`hermes nexus ingest reprocess <ingest_id>` FAILED_SEGMENT satırlarını sonraki koşu için
+hazırlar; model çağırmaz. `hermes nexus ingest queue` review kuyruğunu okur.
+`--long-unit-budget` yalnız insan tetiklemelidir (default 300s, her kullanım loglanır).
+`--canary-write --confirm canary` kabul edilen kayıtları `Nexus/` altına yazar; günde en fazla 5 ingest.
+Auto-publish kapalı kalır. Dry-run ve `--shadow` (canary'siz) Vault'a dokunmaz.
+v2 segmenter mesaj sınırında böler; karakter bütçesi 12.000 ve en fazla 12 mesaj,
+böylece 54 mesajlık v1 tek-segment timeout sınıfı tek 90s çağrıda kalmaz.
+Overlap varsayılanı kapalıdır; süreklilik önceki kabulün salt-okunur özetidir
+(checkpoint'te tutulur, resume sonrası yeniden verilir).
+
 Backup sınıflandırması ve restore güvenlik sınırı:
 [`docs/backup-policy.md`](docs/backup-policy.md).
 Canonical kayıt unutma güvenlik akışı:

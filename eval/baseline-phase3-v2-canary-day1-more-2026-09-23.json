@@ -1,0 +1,66 @@
+{
+  "acceptance": {
+    "human_labeled_quality": false,
+    "operational": false,
+    "parser": true,
+    "safety": true
+  },
+  "auto_publish_enabled": false,
+  "candidates_published": false,
+  "canary": {
+    "daily_limit": 5,
+    "day": "2026-09-23",
+    "ingests_today": 5,
+    "outside_namespace": 0,
+    "review_gate_rows": 16,
+    "vault_files": {
+      "Nexus/Audit/Runs": 1,
+      "Nexus/Memory/Preferences": 1
+    }
+  },
+  "date": "2026-09-23",
+  "ingest_pipeline_v2_after_run": true,
+  "main_merged": false,
+  "plugin_sha": "5ff06cd70e43c977c8b38a5b598071eb83be0d85",
+  "runs": [
+    {
+      "accepted_count": 0,
+      "elapsed_seconds": 24.9,
+      "extractable": 4,
+      "final_status": "completed",
+      "memories_created": 0,
+      "rejected_count": 1,
+      "vault_writes": false
+    },
+    {
+      "accepted_count": 0,
+      "elapsed_seconds": 171.2,
+      "extractable": 4,
+      "final_status": "completed",
+      "memories_created": 0,
+      "rejected_count": 2,
+      "vault_writes": false
+    },
+    {
+      "accepted_count": 0,
+      "elapsed_seconds": 24.9,
+      "extractable": 7,
+      "final_status": "completed",
+      "memories_created": 0,
+      "rejected_count": 2,
+      "vault_writes": false
+    },
+    {
+      "accepted_count": 0,
+      "elapsed_seconds": 29.7,
+      "extractable": 8,
+      "final_status": "completed",
+      "memories_created": 0,
+      "rejected_count": 0,
+      "vault_writes": false
+    }
+  ],
+  "successful_runs": 4,
+  "vault_writes": false,
+  "writes_performed": false
+}

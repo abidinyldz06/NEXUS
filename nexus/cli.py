@@ -29,6 +29,15 @@ from .forget import apply_forget, plan_forget
 from .git_rollback_drill import run_synthetic_git_rollback_drill
 from .index import rebuild_index, search_index
 from .ingest import plan_inbox, shadow_inbox_source, stage_inbox_source
+from .ingest_v2 import (
+    pause_ingest,
+    reprocess_failed,
+    review_queue_payload,
+    rollback_batch,
+    run_inbox,
+    status_payload,
+    unpause_ingest,
+)
 from .permission_audit import audit_permissions
 from .publication import apply_publication, plan_publication
 from .pulse import emit_due_reminders
@@ -82,7 +91,83 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
         default=20,
         help="Maximum model calls for one shadow/stage run (1-100; default: 20)",
     )
+    ingest.add_argument(
+        "--long-unit-budget",
+        nargs="?",
+        const=300,
+        type=int,
+        default=None,
+        metavar="SECONDS",
+        help="Human-triggered long-unit lane for oversized turns (default 300s). Logged.",
+    )
+    ingest.add_argument(
+        "--canary-write",
+        action="store_true",
+        help="Write accepted memories under Nexus/. Requires --confirm canary. Max 5/day.",
+    )
+    ingest.add_argument(
+        "--confirm",
+        dest="ingest_confirm",
+        help="Exact confirm token; --canary-write requires canary",
+    )
     ingest.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
+    ingest_commands = ingest.add_subparsers(dest="ingest_command", required=False)
+    ingest_status = ingest_commands.add_parser(
+        "status", help="Show resumable ingest metadata without calling a model"
+    )
+    ingest_status.add_argument("ingest_id", nargs="?", help="Optional ingest id")
+    ingest_status.add_argument(
+        "--json", action="store_true", dest="status_json", help="Emit JSON"
+    )
+    ingest_pause = ingest_commands.add_parser(
+        "pause", help="Stop live vault writes; shadow log remains"
+    )
+    ingest_pause.add_argument(
+        "--json", action="store_true", dest="pause_json", help="Emit JSON"
+    )
+    ingest_unpause = ingest_commands.add_parser(
+        "unpause", help="Clear the pause flag without extracting or writing"
+    )
+    ingest_unpause.add_argument(
+        "--json", action="store_true", dest="unpause_json", help="Emit JSON"
+    )
+    ingest_rollback = ingest_commands.add_parser(
+        "rollback", help="Tombstone one ingest batch; default dry-run"
+    )
+    ingest_rollback.add_argument("ingest_id", help="Batch ingest id to retract")
+    ingest_rollback.add_argument(
+        "--dry-run",
+        action="store_true",
+        dest="rollback_dry_run",
+        help="List matching ledger ids without writing (default)",
+    )
+    ingest_rollback.add_argument(
+        "--apply",
+        action="store_true",
+        dest="rollback_apply",
+        help="Retract matching ledger rows and tombstone Vault files; requires --confirm",
+    )
+    ingest_rollback.add_argument(
+        "--confirm",
+        dest="rollback_confirm",
+        help="Must equal ingest_id when --apply is set",
+    )
+    ingest_rollback.add_argument(
+        "--json", action="store_true", dest="rollback_json", help="Emit JSON"
+    )
+    ingest_reprocess = ingest_commands.add_parser(
+        "reprocess", help="Arm FAILED_SEGMENT rows for the next run without extracting"
+    )
+    ingest_reprocess.add_argument("ingest_id", help="Ingest id whose failed segments should retry")
+    ingest_reprocess.add_argument(
+        "--json", action="store_true", dest="reprocess_json", help="Emit JSON"
+    )
+    ingest_queue = ingest_commands.add_parser(
+        "queue", help="List the review/reprocess queue without calling a model"
+    )
+    ingest_queue.add_argument(
+        "--json", action="store_true", dest="queue_json", help="Emit JSON"
+    )
 
     eval_command = subcommands.add_parser(
         "eval", help="Run the packaged frozen holdout without publishing"
@@ -275,6 +360,126 @@ def run_command(args: Namespace, ctx: Any) -> int:
         _print_payload(payload, as_json=bool(getattr(args, "as_json", False)))
         return 0 if payload["ok"] else 2
     if command == "ingest":
+        if getattr(args, "ingest_command", None) == "pause":
+            try:
+                config = from_plugin_context(ctx)
+                payload = pause_ingest(config)
+            except (NexusError, OSError, ValueError) as exc:
+                payload = {
+                    "ok": False,
+                    "paused": False,
+                    "writes_performed": False,
+                    "vault_writes": False,
+                    "errors": [type(exc).__name__],
+                }
+            _print_payload(
+                payload,
+                as_json=bool(
+                    getattr(args, "pause_json", False) or getattr(args, "as_json", False)
+                ),
+            )
+            return 0 if payload.get("ok") else 2
+        if getattr(args, "ingest_command", None) == "unpause":
+            try:
+                config = from_plugin_context(ctx)
+                payload = unpause_ingest(config)
+            except (NexusError, OSError, ValueError) as exc:
+                payload = {
+                    "ok": False,
+                    "paused": True,
+                    "writes_performed": False,
+                    "vault_writes": False,
+                    "extraction_called": False,
+                    "errors": [type(exc).__name__],
+                }
+            _print_payload(
+                payload,
+                as_json=bool(
+                    getattr(args, "unpause_json", False) or getattr(args, "as_json", False)
+                ),
+            )
+            return 0 if payload.get("ok") else 2
+        if getattr(args, "ingest_command", None) == "status":
+            try:
+                config = from_plugin_context(ctx)
+                payload = status_payload(config, getattr(args, "ingest_id", None))
+            except (NexusError, OSError, ValueError) as exc:
+                payload = {
+                    "ok": False,
+                    "ingest_pipeline_v2": False,
+                    "mode": "shadow-only",
+                    "extraction_called": False,
+                    "errors": [type(exc).__name__],
+                }
+            _print_payload(
+                payload,
+                as_json=bool(
+                    getattr(args, "status_json", False) or getattr(args, "as_json", False)
+                ),
+            )
+            return 0 if payload.get("ok") else 2
+        if getattr(args, "ingest_command", None) == "rollback":
+            try:
+                config = from_plugin_context(ctx)
+                payload = rollback_batch(
+                    config,
+                    str(getattr(args, "ingest_id", "") or ""),
+                    apply=bool(getattr(args, "rollback_apply", False)),
+                    confirm=getattr(args, "rollback_confirm", None),
+                )
+            except (NexusError, OSError, ValueError) as exc:
+                payload = {
+                    "ok": False,
+                    "writes_performed": False,
+                    "vault_writes": False,
+                    "extraction_called": False,
+                    "errors": [type(exc).__name__],
+                }
+            _print_payload(
+                payload,
+                as_json=bool(
+                    getattr(args, "rollback_json", False) or getattr(args, "as_json", False)
+                ),
+            )
+            return 0 if payload.get("ok") else 2
+        if getattr(args, "ingest_command", None) == "reprocess":
+            try:
+                config = from_plugin_context(ctx)
+                payload = reprocess_failed(config, str(getattr(args, "ingest_id", "") or ""))
+            except (NexusError, OSError, ValueError) as exc:
+                payload = {
+                    "ok": False,
+                    "writes_performed": False,
+                    "vault_writes": False,
+                    "extraction_called": False,
+                    "errors": [type(exc).__name__],
+                }
+            _print_payload(
+                payload,
+                as_json=bool(
+                    getattr(args, "reprocess_json", False) or getattr(args, "as_json", False)
+                ),
+            )
+            return 0 if payload.get("ok") else 2
+        if getattr(args, "ingest_command", None) == "queue":
+            try:
+                config = from_plugin_context(ctx)
+                payload = review_queue_payload(config)
+            except (NexusError, OSError, ValueError) as exc:
+                payload = {
+                    "ok": False,
+                    "count": 0,
+                    "items": [],
+                    "extraction_called": False,
+                    "errors": [type(exc).__name__],
+                }
+            _print_payload(
+                payload,
+                as_json=bool(
+                    getattr(args, "queue_json", False) or getattr(args, "as_json", False)
+                ),
+            )
+            return 0 if payload.get("ok") else 2
         dry_run = bool(getattr(args, "dry_run", False))
         shadow = bool(getattr(args, "shadow", False))
         stage = bool(getattr(args, "stage", False))
@@ -299,15 +504,33 @@ def run_command(args: Namespace, ctx: Any) -> int:
                     raise ValueError(
                         f"--{'stage' if stage else 'shadow'} requires --source and --confirm-sha"
                     )
-                runner = stage_inbox_source if stage else shadow_inbox_source
-                payload = runner(
-                    config,
-                    ctx.llm,
-                    relative_path=args.source,
-                    confirmed_sha256=args.confirm_sha,
-                    conversation_id=getattr(args, "conversation", None),
-                    max_segments=args.max_segments,
-                ).to_dict()
+                if config.ingest_pipeline_v2:
+                    payload = run_inbox(
+                        config,
+                        ctx.llm,
+                        relative_path=args.source,
+                        confirmed_sha256=args.confirm_sha,
+                        conversation_id=getattr(args, "conversation", None),
+                        max_segments=args.max_segments,
+                        long_unit_budget=getattr(args, "long_unit_budget", None),
+                        canary_write=bool(getattr(args, "canary_write", False)),
+                        confirm=getattr(args, "ingest_confirm", None),
+                    ).to_dict()
+                    wrote = bool(payload.get("vault_written"))
+                    payload["writes_performed"] = wrote
+                    payload["vault_writes"] = wrote
+                    payload["candidates_published"] = False
+                    payload["mode"] = "v2-canary" if getattr(args, "canary_write", False) else "v2"
+                else:
+                    runner = stage_inbox_source if stage else shadow_inbox_source
+                    payload = runner(
+                        config,
+                        ctx.llm,
+                        relative_path=args.source,
+                        confirmed_sha256=args.confirm_sha,
+                        conversation_id=getattr(args, "conversation", None),
+                        max_segments=args.max_segments,
+                    ).to_dict()
         except (NexusError, OSError, ValueError) as exc:
             payload = {
                 "ok": False,
@@ -512,7 +735,7 @@ def run_command(args: Namespace, ctx: Any) -> int:
         return 0 if payload["ok"] else 2
     print(
         "Usage: hermes nexus "
-        "{status|config validate|ingest {--dry-run|--shadow|--stage}|eval --shadow|review ...|"
+        "{status|config validate|ingest {--dry-run|--shadow|--stage|status|pause}|eval --shadow|review ...|"
         "rebuild|route --shadow|search|reminders --emit-local|retention --dry-run|forget ...|"
         "audit permissions|drill restore --synthetic|drill git-rollback --synthetic}"
     )
