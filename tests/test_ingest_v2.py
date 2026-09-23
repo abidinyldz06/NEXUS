@@ -233,6 +233,17 @@ class SegmenterV2Tests(unittest.TestCase):
         for left, right in zip(packed, packed[1:]):
             self.assertFalse(set(left.span_ids) & set(right.span_ids))
 
+    def test_start_after_index_packs_only_newer_messages(self) -> None:
+        source = conversation(tuple(message(f"u{i}", "user", f"msg-{i:02d}") for i in range(6)))
+        first = segment_conversation_v2(source, max_messages=4)
+        self.assertEqual(2, len(first))
+        tail = segment_conversation_v2(
+            source, max_messages=4, start_after_index=first[0].end_message_index
+        )
+        self.assertEqual(1, len(tail))
+        self.assertEqual(first[0].end_message_index + 1, tail[0].start_message_index)
+        self.assertNotEqual(first[0].segment_id, tail[0].segment_id)
+
 
 class PipelineV2Tests(unittest.TestCase):
     def _run(self, root: Path, source: NormalizedConversation, extractor: object, **kwargs: object):
@@ -1466,6 +1477,55 @@ class PipelineV2Tests(unittest.TestCase):
             )
             self.assertTrue(armed.vault_written)
             self.assertTrue(list((root / "vault").rglob("mem_*.md")))
+
+    def test_growing_conversation_does_not_repack_completed_range(self) -> None:
+        first = conversation(
+            (message("u1", "user", "aaaa"), message("a1", "assistant", "bbbb")),
+            external_id="live-mirror",
+        )
+        grown = conversation(
+            (
+                message("u1", "user", "aaaa"),
+                message("a1", "assistant", "bbbb"),
+                message("u2", "user", "cccc"),
+                message("a2", "assistant", "dddd"),
+            ),
+            external_id="live-mirror",
+        )
+
+        class Extractor:
+            def __init__(self) -> None:
+                self.calls: list[tuple[int, int]] = []
+
+            def __call__(self, segment: object) -> ExtractionResult:
+                self.calls.append(
+                    (segment.start_message_index, segment.end_message_index)  # type: ignore[attr-defined]
+                )
+                return result_for(
+                    segment,
+                    "Kullanıcı canlı sohbette kısa yanıtları tercih ediyor.",
+                )
+
+        extractor = Extractor()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first_run = self._run(root, first, extractor)
+            self.assertEqual("completed", first_run.final_status)
+            self.assertEqual(1, len(extractor.calls))
+            frozen = list(extractor.calls)
+            checkpoint = load_checkpoint(root / "data", first_run.ingest_id)
+            assert checkpoint is not None
+            first_id = next(iter(checkpoint["segments"]))
+            second = self._run(root, grown, extractor)
+            self.assertEqual("completed", second.final_status)
+            self.assertEqual(frozen + [(2, 3)], extractor.calls)
+            later = load_checkpoint(root / "data", first_run.ingest_id)
+            assert later is not None
+            self.assertEqual("completed", later["segments"][first_id]["status"])
+            self.assertNotIn("content_hash_mismatch", str(second.why))
+            same = self._run(root, grown, extractor)
+            self.assertEqual("already_processed", same.final_status)
+            self.assertEqual(frozen + [(2, 3)], extractor.calls)
 
 
 class PilotMatrixTests(unittest.TestCase):

@@ -226,24 +226,31 @@ def segment_conversation_v2(
     target_chars: int = DEFAULT_TARGET_CHARS,
     max_messages: int = DEFAULT_MAX_MESSAGES,
     schema_version: str = SEGMENT_ID_SCHEMA_VERSION,
+    start_after_index: int = -1,
+    start_ordinal: int = 1,
 ) -> tuple[ConversationSegment, ...]:
     """Pack extractable messages on message boundaries.
 
     ``target_chars`` is a character budget, not a token count. ``max_messages``
     caps packed turns so a 54-message blob cannot stay one 90s helper call.
-    A turn stays together while the next message still fits both budgets. A
-    single message that exceeds the character budget uses
-    :func:`_fallback_parts`. Flag-off callers keep using
-    :func:`segment_conversation` and v1 fingerprints.
+    ``start_after_index`` freezes completed ranges so a growing conversation
+    only packs newer messages. ``start_ordinal`` continues extractor-facing
+    indexes after frozen completed segments. A single message that exceeds
+    the character budget uses :func:`_fallback_parts`. Flag-off callers keep
+    using :func:`segment_conversation` and v1 fingerprints.
     """
     if target_chars <= 0:
         raise ValueError("target_chars must be positive")
     if max_messages <= 0:
         raise ValueError("max_messages must be positive")
+    if start_ordinal <= 0:
+        raise ValueError("start_ordinal must be positive")
     indexed = [
         (index, message)
         for index, message in enumerate(conversation.messages)
-        if message.include_for_extraction and message.content_text
+        if message.include_for_extraction
+        and message.content_text
+        and index > start_after_index
     ]
     if not indexed:
         return ()
@@ -255,7 +262,7 @@ def segment_conversation_v2(
         built.append(
             _segment_from_messages(
                 conversation,
-                ordinal=len(built) + 1,
+                ordinal=len(built) + start_ordinal,
                 indexed=tuple(group),
                 texts=texts,
                 schema_version=schema_version,
@@ -275,7 +282,7 @@ def segment_conversation_v2(
                 built.append(
                     _segment_from_messages(
                         conversation,
-                        ordinal=len(built) + 1,
+                        ordinal=len(built) + start_ordinal,
                         indexed=((index, message),),
                         texts=(part,),
                         schema_version=schema_version,

@@ -35,6 +35,7 @@ from .segmenter import (
     DEFAULT_TARGET_CHARS,
     SEGMENT_ID_SCHEMA_VERSION,
     ConversationSegment,
+    normalized_content_hash,
     segment_conversation_v2,
 )
 from .vault import VaultRepository
@@ -910,6 +911,39 @@ def _observation(**values: Any) -> dict[str, Any]:
     return base
 
 
+def _completed_end(segment_state: dict[str, Any]) -> int:
+    """Highest frozen message index. Growing conversations pack only after this."""
+    end = -1
+    for item in segment_state.values():
+        if not isinstance(item, dict) or item.get("status") != "completed":
+            continue
+        value = item.get("end_message_index")
+        if isinstance(value, int):
+            end = max(end, value)
+    return end
+
+
+def _completed_count(segment_state: dict[str, Any]) -> int:
+    return sum(
+        1
+        for item in segment_state.values()
+        if isinstance(item, dict) and item.get("status") == "completed"
+    )
+
+
+def _range_content_hash(
+    conversation: NormalizedConversation, start: int, end: int
+) -> str:
+    texts = tuple(
+        message.content_text
+        for index, message in enumerate(conversation.messages)
+        if start <= index <= end
+        and message.include_for_extraction
+        and message.content_text
+    )
+    return normalized_content_hash(texts)
+
+
 def run_conversation(
     config: NexusConfig,
     conversation: NormalizedConversation,
@@ -935,12 +969,6 @@ def run_conversation(
         write_canonical = False
     carry_cell = carry_cell if carry_cell is not None else [""]
 
-    segments = segment_conversation_v2(
-        conversation,
-        target_chars=target_chars,
-        max_messages=max_messages,
-        schema_version=schema_version,
-    )
     ingest_id = make_ingest_id(conversation, schema_version)
     started = _utc_now()
     stored = load_checkpoint(config.data_path, ingest_id)
@@ -948,6 +976,14 @@ def run_conversation(
         ingest_id, conversation.external_conversation_id, schema_version
     )
     segment_state: dict[str, Any] = checkpoint.setdefault("segments", {})
+    segments = segment_conversation_v2(
+        conversation,
+        target_chars=target_chars,
+        max_messages=max_messages,
+        schema_version=schema_version,
+        start_after_index=_completed_end(segment_state),
+        start_ordinal=_completed_count(segment_state) + 1,
+    )
     if not carry_cell[0]:
         prior = checkpoint.get("carry_forward")
         if isinstance(prior, str) and prior.strip():
@@ -960,6 +996,69 @@ def run_conversation(
         final_status="completed",
         segment_count=len(segments),
     )
+    for item in segment_state.values():
+        if not isinstance(item, dict) or item.get("status") != "completed":
+            continue
+        start = item.get("start_message_index")
+        end = item.get("end_message_index")
+        if not isinstance(start, int) or not isinstance(end, int):
+            continue
+        if _range_content_hash(conversation, start, end) == item.get("content_hash"):
+            continue
+        _queue_review(
+            config.data_path,
+            {
+                "ingest_id": ingest_id,
+                "conversation_id": conversation.external_conversation_id,
+                "segment_id": item.get("segment_id"),
+                "reason": "content_hash_mismatch",
+                "failure_class": "content_hash_mismatch",
+            },
+        )
+        report.segment_statuses[str(item.get("segment_id"))] = "review"
+        report.why = "content_hash_mismatch"
+    if not segments and any(
+        isinstance(item, dict) and item.get("status") == "completed"
+        for item in segment_state.values()
+    ):
+        prevented = 0
+        for item in segment_state.values():
+            if not isinstance(item, dict) or item.get("status") != "completed":
+                continue
+            meta = item.get("extraction") or {}
+            prevented += int(meta.get("accepted_count") or 0)
+            prevented += int(meta.get("duplicate_prevented_count") or 0)
+        if report.why != "content_hash_mismatch":
+            report.final_status = "already_processed"
+        report.duplicate_prevented_count = prevented
+        report.segment_count = sum(
+            1
+            for item in segment_state.values()
+            if isinstance(item, dict) and item.get("status") == "completed"
+        )
+        if not report.segment_statuses:
+            report.segment_statuses = {
+                str(item.get("segment_id")): "completed"
+                for item in segment_state.values()
+                if isinstance(item, dict) and item.get("status") == "completed"
+            }
+        append_observation(
+            config.data_path,
+            _observation(
+                ingest_id=ingest_id,
+                conversation_id=conversation.external_conversation_id,
+                started_at=started,
+                finished_at=_utc_now(),
+                schema_version=schema_version,
+                status="COMPLETED",
+                segment_count=report.segment_count,
+                duplicate_prevented_count=prevented,
+                duplicates_prevented=prevented,
+                writes="none",
+                final_status=report.final_status,
+            ),
+        )
+        return report
     all_completed = bool(segments) and all(
         isinstance(segment_state.get(segment.segment_id), dict)
         and segment_state[segment.segment_id].get("status") == "completed"
@@ -1352,10 +1451,15 @@ def run_inbox(
         max_segment_chars=max_segment_chars,
     )
     conversation = prepared.parsed.conversations[prepared.conversation_index]
+    ingest_id = make_ingest_id(conversation, SEGMENT_ID_SCHEMA_VERSION)
+    stored = load_checkpoint(config.data_path, ingest_id)
+    stored_segments = stored.get("segments", {}) if isinstance(stored, dict) else {}
     planned = segment_conversation_v2(
         conversation,
         target_chars=max_segment_chars,
         max_messages=max_messages,
+        start_after_index=_completed_end(stored_segments),
+        start_ordinal=_completed_count(stored_segments) + 1,
     )
     if len(planned) > max_segments:
         raise SourceError("selected conversation exceeds max-segments before model execution")
