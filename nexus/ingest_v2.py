@@ -50,6 +50,8 @@ CLAIM_SIMILARITY_THRESHOLD = 0.92
 FAILED_SEGMENT = "FAILED_SEGMENT"
 CARRY_FORWARD_CHARS = 240
 CARRY_FORWARD_MARKER = "READONLY_PRIOR_SUMMARY"
+CANARY_CONFIRM = "canary"
+CANARY_DAILY_LIMIT = 5
 
 _RETRYABLE = frozenset(
     {"timeout", "http_5xx", "transient_provider", "transient_transport"}
@@ -162,6 +164,18 @@ def review_queue_path(data_path: Path) -> Path:
     return data_path / "ingest" / "v2" / "review_queue.jsonl"
 
 
+def canary_dir(data_path: Path) -> Path:
+    return data_path / "ingest" / "v2" / "canary"
+
+
+def canary_log_path(data_path: Path) -> Path:
+    return canary_dir(data_path) / "writes.jsonl"
+
+
+def canary_snapshot_path(data_path: Path, day: str) -> Path:
+    return canary_dir(data_path) / "snapshots" / f"{day}.json"
+
+
 def is_paused(data_path: Path) -> bool:
     flag = pause_flag_path(data_path)
     return flag.is_file() and not flag.is_symlink()
@@ -202,6 +216,107 @@ def unpause_ingest(config: NexusConfig) -> dict[str, Any]:
         "extraction_called": False,
         "mode": "writes-armed",
         "message": "pause flag cleared; live writes follow the next explicit run",
+    }
+
+
+def canary_writes_today(data_path: Path) -> int:
+    path = canary_log_path(data_path)
+    if not path.is_file() or path.is_symlink():
+        return 0
+    today = _utc_now()[:10]
+    count = 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if str(row.get("at") or "")[:10] == today:
+            count += 1
+    return count
+
+
+def record_canary_write(data_path: Path, ingest_id: str) -> None:
+    path = canary_log_path(data_path)
+    _prepare_dir(path.parent)
+    line = json.dumps(
+        {"at": _utc_now(), "ingest_id": ingest_id, "writes": "canary"},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    encoded = (line + "\n").encode("utf-8")
+    descriptor = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+    try:
+        if os.path.islink(path):
+            raise IngestV2Error("refusing to append through a symlink")
+        os.fchmod(descriptor, 0o600)
+        os.write(descriptor, encoded)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def snapshot_canonical(config: NexusConfig) -> dict[str, Any]:
+    """Hash Nexus/ files and the derived index. Does not copy Vault contents."""
+    if config.vault_path is None:
+        raise IngestV2Error("vault_path is required for canary snapshot")
+    files: list[dict[str, Any]] = []
+    root = config.vault_path / "Nexus"
+    if root.is_dir() and not root.is_symlink():
+        for path in sorted(root.rglob("*")):
+            if path.is_symlink() or not path.is_file():
+                continue
+            relative = path.relative_to(config.vault_path).as_posix()
+            if not relative.startswith("Nexus/"):
+                continue
+            files.append(
+                {
+                    "path": relative,
+                    "sha256": sha256(path.read_bytes()).hexdigest(),
+                    "bytes": path.stat().st_size,
+                }
+            )
+    index_sha = None
+    if config.index_path.is_file() and not config.index_path.is_symlink():
+        index_sha = sha256(config.index_path.read_bytes()).hexdigest()
+    day = _utc_now()[:10]
+    payload = {
+        "captured_at": _utc_now(),
+        "file_count": len(files),
+        "index_sha256": index_sha,
+        "files": files,
+    }
+    target = canary_snapshot_path(config.data_path, day)
+    if not target.exists():
+        atomic_json(target, payload)
+    return payload
+
+
+def prepare_canary_write(config: NexusConfig, *, confirm: str | None) -> dict[str, Any]:
+    """Arm one labeled canary write. Does not extract. Max 5 ingest/day."""
+    if confirm != CANARY_CONFIRM:
+        raise IngestV2Error("canary-write requires --confirm canary")
+    if not config.ingest_pipeline_v2:
+        raise IngestV2Error("ingest_pipeline_v2 is off")
+    if config.auto_publish_enabled:
+        raise IngestV2Error("auto_publish_enabled must stay false")
+    if config.vault_path is None:
+        raise IngestV2Error("vault_path is required for canary write")
+    if is_paused(config.data_path):
+        raise IngestV2Error("ingest is paused")
+    used = canary_writes_today(config.data_path)
+    if used >= CANARY_DAILY_LIMIT:
+        raise IngestV2Error("canary daily limit reached")
+    snapshot = snapshot_canonical(config)
+    return {
+        "ok": True,
+        "used_today": used,
+        "limit": CANARY_DAILY_LIMIT,
+        "snapshot_files": snapshot["file_count"],
+        "extraction_called": False,
+        "auto_publish_enabled": False,
     }
 
 
@@ -962,6 +1077,120 @@ def _write_canonical(
     return "obsidian+sqlite"
 
 
+def _missing_canonical_rows(
+    config: NexusConfig, rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    if config.vault_path is None:
+        return list(rows)
+    repository = VaultRepository(config.vault_path)
+    missing: list[dict[str, Any]] = []
+    for record in rows:
+        try:
+            memory = _memory_record(record)
+        except (NexusError, KeyError, TypeError, ValueError):
+            continue
+        path = config.vault_path / repository.record_path(memory)
+        if not path.is_file():
+            missing.append(record)
+    return missing
+
+
+def _missing_canonical_rows(
+    config: NexusConfig, rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    if config.vault_path is None:
+        return list(rows)
+    repository = VaultRepository(config.vault_path)
+    missing: list[dict[str, Any]] = []
+    for record in rows:
+        try:
+            memory = _memory_record(record)
+        except (NexusError, KeyError, TypeError, ValueError):
+            continue
+        path = config.vault_path / repository.record_path(memory)
+        if not path.is_file():
+            missing.append(record)
+    return missing
+
+
+def _commit_canonical(
+    config: NexusConfig,
+    rows: list[dict[str, Any]],
+    *,
+    ingest_id: str,
+    report: IngestRunReport,
+    index_writer: Callable[[Path, Path], object] | None,
+) -> str:
+    if not rows:
+        return "none"
+    try:
+        writes = _write_canonical(
+            config,
+            rows,
+            run_material=ingest_id + ":" + ",".join(sorted(str(row["id"]) for row in rows)),
+            index_writer=index_writer,
+            written_files=report.written_files,
+        )
+        report.vault_written = True
+        report.mirror_status = "current"
+        return writes
+    except IngestV2Error as exc:
+        report.error_class = exc.failure_class
+        report.why = exc.failure_class
+        if exc.failure_class == "mirror_retry":
+            report.vault_written = True
+            report.mirror_status = "retry"
+            report.final_status = "DEGRADED"
+            return "obsidian_sqlite_retry"
+        if exc.failure_class == "degraded":
+            report.vault_written = True
+            report.mirror_status = "retry"
+            report.final_status = "DEGRADED"
+            return "icloud_degraded"
+        report.mirror_status = "not_written"
+        report.final_status = FAILED_SEGMENT
+        return "none"
+
+
+def _commit_canonical(
+    config: NexusConfig,
+    rows: list[dict[str, Any]],
+    *,
+    ingest_id: str,
+    report: IngestRunReport,
+    index_writer: Callable[[Path, Path], object] | None,
+) -> str:
+    if not rows:
+        return "none"
+    try:
+        writes = _write_canonical(
+            config,
+            rows,
+            run_material=ingest_id + ":" + ",".join(sorted(str(row["id"]) for row in rows)),
+            index_writer=index_writer,
+            written_files=report.written_files,
+        )
+        report.vault_written = True
+        report.mirror_status = "current"
+        return writes
+    except IngestV2Error as exc:
+        report.error_class = exc.failure_class
+        report.why = exc.failure_class
+        if exc.failure_class == "mirror_retry":
+            report.vault_written = True
+            report.mirror_status = "retry"
+            report.final_status = "DEGRADED"
+            return "obsidian_sqlite_retry"
+        if exc.failure_class == "degraded":
+            report.vault_written = True
+            report.mirror_status = "retry"
+            report.final_status = "DEGRADED"
+            return "icloud_degraded"
+        report.mirror_status = "not_written"
+        report.final_status = FAILED_SEGMENT
+        return "none"
+
+
 def _token_estimate(segment: ConversationSegment) -> int:
     return max(1, segment.character_count // 4)
 
@@ -1146,6 +1375,21 @@ def run_conversation(
                 for item in segment_state.values()
                 if isinstance(item, dict) and item.get("status") == "completed"
             }
+        writes = "none"
+        if write_canonical and report.final_status != "review":
+            rows = [
+                record
+                for record in records
+                if record.get("ingest_id") == ingest_id
+                and record.get("status") in {"active", "superseded"}
+            ]
+            writes = _commit_canonical(
+                config,
+                _missing_canonical_rows(config, rows),
+                ingest_id=ingest_id,
+                report=report,
+                index_writer=index_writer,
+            )
         append_observation(
             config.data_path,
             _observation(
@@ -1158,7 +1402,8 @@ def run_conversation(
                 segment_count=report.segment_count,
                 duplicate_prevented_count=prevented,
                 duplicates_prevented=prevented,
-                writes="none",
+                writes=writes,
+                written_files=list(report.written_files),
                 final_status=report.final_status,
             ),
         )
@@ -1180,6 +1425,21 @@ def run_conversation(
         report.segment_statuses = {
             segment.segment_id: "completed" for segment in segments
         }
+        writes = "none"
+        if write_canonical:
+            rows = [
+                record
+                for record in records
+                if record.get("ingest_id") == ingest_id
+                and record.get("status") in {"active", "superseded"}
+            ]
+            writes = _commit_canonical(
+                config,
+                _missing_canonical_rows(config, rows),
+                ingest_id=ingest_id,
+                report=report,
+                index_writer=index_writer,
+            )
         append_observation(
             config.data_path,
             _observation(
@@ -1192,7 +1452,8 @@ def run_conversation(
                 segment_count=len(segments),
                 duplicate_prevented_count=prevented,
                 duplicates_prevented=prevented,
-                writes="none",
+                writes=writes,
+                written_files=list(report.written_files),
                 final_status="already_processed",
             ),
         )
@@ -1471,33 +1732,13 @@ def run_conversation(
     writes = "none"
     if write_canonical and report.final_status == "completed" and dirty_ids:
         changed = [record for record in records if record["id"] in dirty_ids]
-        try:
-            writes = _write_canonical(
-                config,
-                changed,
-                run_material=ingest_id + ":" + ",".join(sorted(record["id"] for record in changed)),
-                index_writer=index_writer,
-                written_files=report.written_files,
-            )
-            report.vault_written = True
-            report.mirror_status = "current"
-        except IngestV2Error as exc:
-            report.error_class = exc.failure_class
-            report.why = exc.failure_class
-            if exc.failure_class == "mirror_retry":
-                report.vault_written = True
-                report.mirror_status = "retry"
-                report.final_status = "DEGRADED"
-                writes = "obsidian_sqlite_retry"
-            elif exc.failure_class == "degraded":
-                report.vault_written = True
-                report.mirror_status = "retry"
-                report.final_status = "DEGRADED"
-                writes = "icloud_degraded"
-            else:
-                report.mirror_status = "not_written"
-                report.final_status = FAILED_SEGMENT
-                writes = "none"
+        writes = _commit_canonical(
+            config,
+            _missing_canonical_rows(config, changed),
+            ingest_id=ingest_id,
+            report=report,
+            index_writer=index_writer,
+        )
         append_observation(
             config.data_path,
             _observation(
@@ -1539,8 +1780,10 @@ def run_inbox(
     max_segment_chars: int = DEFAULT_TARGET_CHARS,
     max_messages: int = DEFAULT_MAX_MESSAGES,
     long_unit_budget: int | None = None,
+    canary_write: bool = False,
+    confirm: str | None = None,
 ) -> IngestRunReport:
-    """Run one exact Inbox source through v2. Never publishes and never writes Vault."""
+    """Run one exact Inbox source through v2. Vault write only with canary confirm."""
     from .errors import SourceError
     from .ingest import _prepare_exact_source
 
@@ -1556,6 +1799,11 @@ def run_inbox(
     )
     conversation = prepared.parsed.conversations[prepared.conversation_index]
     ingest_id = make_ingest_id(conversation, SEGMENT_ID_SCHEMA_VERSION)
+    write_canonical = False
+    if canary_write:
+        prepare_canary_write(config, confirm=confirm)
+        record_canary_write(config.data_path, ingest_id)
+        write_canonical = True
     stored = load_checkpoint(config.data_path, ingest_id)
     stored_segments = stored.get("segments", {}) if isinstance(stored, dict) else {}
     planned = segment_conversation_v2(
@@ -1592,7 +1840,7 @@ def run_inbox(
             carry_cell=carry_cell,
             long_unit_log=_log_long_unit if long_unit_budget else None,
         ),
-        write_canonical=False,
+        write_canonical=write_canonical,
         canonical_memory_type=MemoryType.PREFERENCE,
         target_chars=max_segment_chars,
         max_messages=max_messages,

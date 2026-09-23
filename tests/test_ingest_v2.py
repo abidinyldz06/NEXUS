@@ -23,10 +23,12 @@ from nexus.extraction.schema import ExtractionCandidate, ExtractionResult
 from nexus.fingerprints import segment_fingerprint
 from nexus.ingest import shadow_inbox_source
 from nexus.ingest_v2 import (
+    CANARY_DAILY_LIMIT,
     CARRY_FORWARD_MARKER,
     FAILED_SEGMENT,
     LONG_UNIT_DEFAULT_SECONDS,
     IngestPaused,
+    IngestV2Error,
     atomic_json,
     current_memories,
     ingest_log_path,
@@ -34,6 +36,8 @@ from nexus.ingest_v2 import (
     load_json,
     load_ledger,
     pause_ingest,
+    prepare_canary_write,
+    record_canary_write,
     reprocess_failed,
     review_queue_payload,
     review_queue_path,
@@ -41,6 +45,7 @@ from nexus.ingest_v2 import (
     run_conversation,
     service_extractor,
     set_paused,
+    snapshot_canonical,
     status_payload,
     unpause_ingest,
 )
@@ -1610,6 +1615,69 @@ class PipelineV2Tests(unittest.TestCase):
             self.assertEqual(0, later.memories_created)
             queue = review_queue_path(root / "data").read_text(encoding="utf-8")
             self.assertIn("content_hash_mismatch", queue)
+
+    def test_canary_requires_confirm_and_caps_daily_writes(self) -> None:
+        source = conversation((message("u1", "user", "aaaa"),))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = config_for(root)
+            with self.assertRaises(IngestV2Error):
+                prepare_canary_write(config, confirm="nope")
+            first = prepare_canary_write(config, confirm="canary")
+            self.assertEqual(0, first["used_today"])
+            self.assertEqual(CANARY_DAILY_LIMIT, first["limit"])
+            for index in range(CANARY_DAILY_LIMIT):
+                record_canary_write(config.data_path, f"ingest-{index}")
+            with self.assertRaises(IngestV2Error):
+                prepare_canary_write(config, confirm="canary")
+            snapshot = snapshot_canonical(config)
+            self.assertIn("file_count", snapshot)
+            run_conversation(
+                config,
+                source,
+                lambda segment: result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor."),
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=False,
+            )
+            self.assertFalse(list((root / "vault").rglob("mem_*.md")))
+
+    def test_already_processed_canary_write_promotes_ledger_without_reextract(self) -> None:
+        source = conversation((message("u1", "user", "aaaa"),))
+
+        class Extractor:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def __call__(self, segment: object) -> ExtractionResult:
+                self.calls += 1
+                return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+
+        extractor = Extractor()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = config_for(root)
+            first = run_conversation(
+                config,
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=False,
+            )
+            self.assertEqual("completed", first.final_status)
+            self.assertFalse(list((root / "vault").rglob("mem_*.md")))
+            second = run_conversation(
+                config,
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=True,
+            )
+            self.assertEqual("already_processed", second.final_status)
+            self.assertEqual(1, extractor.calls)
+            files = list((root / "vault").rglob("mem_*.md"))
+            self.assertEqual(1, len(files))
+            self.assertTrue(files[0].as_posix().startswith(str(root / "vault" / "Nexus")))
+            self.assertTrue(second.vault_written)
 
 
 class PilotMatrixTests(unittest.TestCase):

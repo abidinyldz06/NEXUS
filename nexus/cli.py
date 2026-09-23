@@ -100,6 +100,16 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
         metavar="SECONDS",
         help="Human-triggered long-unit lane for oversized turns (default 300s). Logged.",
     )
+    ingest.add_argument(
+        "--canary-write",
+        action="store_true",
+        help="Write accepted memories under Nexus/. Requires --confirm canary. Max 5/day.",
+    )
+    ingest.add_argument(
+        "--confirm",
+        dest="ingest_confirm",
+        help="Exact confirm token; --canary-write requires canary",
+    )
     ingest.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON")
     ingest_commands = ingest.add_subparsers(dest="ingest_command", required=False)
     ingest_status = ingest_commands.add_parser(
@@ -503,11 +513,14 @@ def run_command(args: Namespace, ctx: Any) -> int:
                         conversation_id=getattr(args, "conversation", None),
                         max_segments=args.max_segments,
                         long_unit_budget=getattr(args, "long_unit_budget", None),
+                        canary_write=bool(getattr(args, "canary_write", False)),
+                        confirm=getattr(args, "ingest_confirm", None),
                     ).to_dict()
-                    payload["writes_performed"] = False
-                    payload["vault_writes"] = False
+                    wrote = bool(payload.get("vault_written"))
+                    payload["writes_performed"] = wrote
+                    payload["vault_writes"] = wrote
                     payload["candidates_published"] = False
-                    payload["mode"] = "v2"
+                    payload["mode"] = "v2-canary" if getattr(args, "canary_write", False) else "v2"
                 else:
                     runner = stage_inbox_source if stage else shadow_inbox_source
                     payload = runner(
