@@ -255,6 +255,8 @@ checkpoint, ledger veya canonical kayıt silmez.
 `--long-unit-budget` yalnız insan tetiklemelidir (default 300s, her kullanım loglanır).
 v2 segmenter mesaj sınırında böler; karakter bütçesi 12.000 ve en fazla 12 mesaj,
 böylece 54 mesajlık v1 tek-segment timeout sınıfı tek 90s çağrıda kalmaz.
+Overlap varsayılanı kapalıdır; süreklilik önceki kabulün salt-okunur özetidir
+(checkpoint'te tutulur, resume sonrası yeniden verilir).
 
 Backup sınıflandırması ve restore güvenlik sınırı:
 [`docs/backup-policy.md`](docs/backup-policy.md).

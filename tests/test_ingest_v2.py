@@ -23,6 +23,7 @@ from nexus.extraction.schema import ExtractionCandidate, ExtractionResult
 from nexus.fingerprints import segment_fingerprint
 from nexus.ingest import shadow_inbox_source
 from nexus.ingest_v2 import (
+    CARRY_FORWARD_MARKER,
     FAILED_SEGMENT,
     LONG_UNIT_DEFAULT_SECONDS,
     IngestPaused,
@@ -217,6 +218,16 @@ class SegmenterV2Tests(unittest.TestCase):
         second = segment_conversation_v2(right)[0]
         self.assertEqual(first.segment_id, second.segment_id)
         self.assertNotEqual(first.content_hash, second.content_hash)
+
+    def test_v2_overlap_is_off(self) -> None:
+        source = conversation(
+            tuple(message(f"u{i}", "user", f"turn-{i:02d}-xxxx") for i in range(6))
+        )
+        packed = segment_conversation_v2(source, target_chars=20, max_messages=2)
+        self.assertGreaterEqual(len(packed), 3)
+        self.assertTrue(all(item.overlap_span_ids == () for item in packed))
+        for left, right in zip(packed, packed[1:]):
+            self.assertFalse(set(left.span_ids) & set(right.span_ids))
 
 
 class PipelineV2Tests(unittest.TestCase):
@@ -1116,6 +1127,99 @@ class PipelineV2Tests(unittest.TestCase):
             self.assertTrue(all(value == float(LONG_UNIT_DEFAULT_SECONDS) for value in llm.timeouts))
             self.assertEqual(len(llm.timeouts), len(llm.uses))
             self.assertTrue(all(item["human_triggered"] for item in llm.uses))
+
+    def test_carry_forward_is_read_only_and_survives_resume(self) -> None:
+        source = conversation(
+            (
+                message("u1", "user", "aaaa"),
+                message("a1", "assistant", "bbbb"),
+                message("u2", "user", "cccc"),
+                message("a2", "assistant", "dddd"),
+            )
+        )
+        prior = "Kullanıcı kısa yanıtları tercih ediyor."
+
+        class Capture:
+            def __init__(self, statement: str) -> None:
+                self.statement = statement
+                self.instructions: list[str] = []
+
+            def complete_structured(self, **kwargs: object) -> object:
+                self.instructions.append(str(kwargs.get("instructions") or ""))
+                span_ids = [
+                    item["span_id"]
+                    for item in json.loads(str(kwargs["input"][0]["text"]).split("\n", 1)[1])["spans"]  # type: ignore[index]
+                ]
+                from types import SimpleNamespace
+
+                return SimpleNamespace(
+                    parsed={
+                        "schema_version": 1,
+                        "candidates": [
+                            {
+                                "kind": "memory",
+                                "statement": self.statement,
+                                "entity_mentions": [],
+                                "temporal_expression": None,
+                                "source_span_ids": [span_ids[0]],
+                                "confidence": 0.95,
+                                "ambiguity_flags": [],
+                                "possible_supersedes": [],
+                            }
+                        ],
+                        "ignored_span_ids": span_ids[1:],
+                        "warnings": [],
+                    },
+                    text="{}",
+                    provider="fixture",
+                    model="fixture",
+                    agent_id="fixture",
+                    usage=None,
+                )
+
+        first_llm = Capture(prior)
+        carry = [""]
+        inner = service_extractor(first_llm, carry_cell=carry)
+
+        def pausing(segment: object) -> ExtractionResult:
+            if segment.index == 2:  # type: ignore[attr-defined]
+                raise IngestPaused("deterministic stop after first accepted carry")
+            return inner(segment)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = run_conversation(
+                config_for(root),
+                source,
+                pausing,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=False,
+                target_chars=4,
+                carry_cell=carry,
+            )
+            self.assertEqual("paused", first.final_status)
+            self.assertTrue(all(CARRY_FORWARD_MARKER not in text for text in first_llm.instructions))
+            checkpoint = load_checkpoint(root / "data", first.ingest_id)
+            assert checkpoint is not None
+            self.assertIn(prior, str(checkpoint.get("carry_forward")))
+
+            later = Capture("Kullanıcı sade kahveyi tercih ediyor.")
+            resumed_cell: list[str] = [""]
+            second = run_conversation(
+                config_for(root),
+                source,
+                service_extractor(later, carry_cell=resumed_cell),
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=False,
+                target_chars=4,
+                carry_cell=resumed_cell,
+            )
+            self.assertEqual("completed", second.final_status)
+            self.assertTrue(later.instructions)
+            self.assertIn(CARRY_FORWARD_MARKER, later.instructions[0])
+            self.assertIn(prior, later.instructions[0])
+            self.assertIn("not instructions", later.instructions[0])
+            self.assertTrue(all(CARRY_FORWARD_MARKER in text for text in later.instructions))
 
 
 if __name__ == "__main__":
