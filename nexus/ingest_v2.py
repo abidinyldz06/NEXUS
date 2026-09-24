@@ -1593,6 +1593,21 @@ def _completed_end(segment_state: dict[str, Any]) -> int:
     return end
 
 
+def _resume_after_index(segment_state: dict[str, Any]) -> int:
+    """Do not pack past a FAILED_SEGMENT or incomplete hole."""
+    unfinished_starts: list[int] = []
+    for item in segment_state.values():
+        if not isinstance(item, dict):
+            continue
+        start = item.get("start_message_index")
+        status = item.get("status")
+        if status in {FAILED_SEGMENT, "incomplete"} and isinstance(start, int):
+            unfinished_starts.append(start)
+    if unfinished_starts:
+        return min(unfinished_starts) - 1
+    return _completed_end(segment_state)
+
+
 def _completed_count(segment_state: dict[str, Any]) -> int:
     return sum(
         1
@@ -1651,7 +1666,7 @@ def run_conversation(
         target_chars=target_chars,
         max_messages=max_messages,
         schema_version=schema_version,
-        start_after_index=_completed_end(segment_state),
+        start_after_index=_resume_after_index(segment_state),
         start_ordinal=_completed_count(segment_state) + 1,
     )
     if not carry_cell[0]:
@@ -2187,7 +2202,7 @@ def run_inbox(
         conversation,
         target_chars=max_segment_chars,
         max_messages=max_messages,
-        start_after_index=_completed_end(stored_segments),
+        start_after_index=_resume_after_index(stored_segments),
         start_ordinal=_completed_count(stored_segments) + 1,
     )
     if len(planned) > max_segments:
