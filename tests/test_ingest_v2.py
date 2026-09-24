@@ -27,8 +27,10 @@ from nexus.ingest_v2 import (
     CARRY_FORWARD_MARKER,
     FAILED_SEGMENT,
     LONG_UNIT_DEFAULT_SECONDS,
+    V2_HARD_TIMEOUT_SECONDS,
     IngestPaused,
     IngestV2Error,
+    acceptance_report,
     atomic_json,
     current_memories,
     ingest_log_path,
@@ -38,6 +40,7 @@ from nexus.ingest_v2 import (
     pause_ingest,
     prepare_canary_write,
     record_canary_write,
+    repair_missing_canonical,
     reprocess_failed,
     review_queue_payload,
     review_queue_path,
@@ -48,6 +51,7 @@ from nexus.ingest_v2 import (
     snapshot_canonical,
     status_payload,
     unpause_ingest,
+    write_human_review_pack,
 )
 from nexus.normalize import NormalizedConversation, NormalizedMessage
 from nexus.segmenter import (
@@ -1710,6 +1714,184 @@ class PipelineV2Tests(unittest.TestCase):
             self.assertEqual(1, len(files))
             self.assertTrue(files[0].as_posix().startswith(str(root / "vault" / "Nexus")))
             self.assertTrue(second.vault_written)
+
+    def test_already_processed_promotes_same_conversation_with_other_ingest_id(self) -> None:
+        source = conversation((message("u1", "user", "aaaa"),))
+
+        class Extractor:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def __call__(self, segment: object) -> ExtractionResult:
+                self.calls += 1
+                return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+
+        extractor = Extractor()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = config_for(root)
+            first = run_conversation(
+                config,
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=False,
+            )
+            self.assertEqual("completed", first.final_status)
+            from nexus.ingest_v2 import _save_ledger
+
+            records = load_ledger(config.data_path)
+            records[0]["ingest_id"] = "ingest_other_prefix"
+            _save_ledger(config.data_path, records)
+            second = run_conversation(
+                config,
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=True,
+            )
+            self.assertEqual("already_processed", second.final_status)
+            self.assertEqual(1, extractor.calls)
+            self.assertEqual(1, len(list((root / "vault").rglob("mem_*.md"))))
+
+    def test_repair_missing_canonical_writes_without_extracting(self) -> None:
+        source = conversation((message("u1", "user", "aaaa"),))
+
+        class Extractor:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def __call__(self, segment: object) -> ExtractionResult:
+                self.calls += 1
+                return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+
+        extractor = Extractor()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = config_for(root)
+            run_conversation(
+                config,
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=False,
+            )
+            self.assertEqual(1, extractor.calls)
+            dry = repair_missing_canonical(config, confirm=None, apply=False)
+            self.assertEqual(1, dry["missing_count"])
+            self.assertFalse(dry["vault_writes"])
+            self.assertFalse(dry["extraction_called"])
+            with self.assertRaises(IngestV2Error):
+                repair_missing_canonical(config, confirm="nope", apply=True)
+            applied = repair_missing_canonical(config, confirm="repair", apply=True)
+            self.assertTrue(applied["vault_writes"])
+            self.assertGreaterEqual(applied["written_file_count"], 1)
+            self.assertTrue(all(item.startswith("Nexus/") for item in applied["written_prefixes"]))
+            self.assertEqual(1, extractor.calls)
+            self.assertEqual(1, len(list((root / "vault").rglob("mem_*.md"))))
+            again = repair_missing_canonical(config, confirm="repair", apply=True)
+            self.assertEqual(0, again["missing_count"])
+            self.assertFalse(again["vault_writes"])
+
+    def test_acceptance_report_is_pii_free_and_does_not_pass_unmeasured(self) -> None:
+        source = conversation((message("u1", "user", "aaaa"),), external_id="conv-report")
+
+        def extractor(segment: object) -> ExtractionResult:
+            return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = config_for(root)
+            run_conversation(
+                config,
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=True,
+            )
+            payload = acceptance_report(config)
+            self.assertEqual(90, payload["timeout_cap_seconds"])
+            self.assertEqual(90, V2_HARD_TIMEOUT_SECONDS)
+            self.assertEqual(1, payload["unique_conversations"])
+            self.assertEqual(100.0, payload["completion_pct"])
+            self.assertFalse(payload["a8_all_required"])
+            self.assertFalse(payload["unmeasured_counted_as_pass"])
+            self.assertIn("human_quality_30", payload["unmeasured"])
+            self.assertNotIn("conversation_id", payload)
+            self.assertNotIn("statement", payload)
+            self.assertFalse(payload["extraction_called"])
+            self.assertEqual(0, payload["ledger_ids_not_in_vault"])
+
+    def test_human_review_pack_stays_private_and_does_not_declare_quality(self) -> None:
+        source = conversation((message("u1", "user", "aaaa"),))
+
+        def extractor(segment: object) -> ExtractionResult:
+            return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = config_for(root)
+            run_conversation(
+                config,
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=True,
+            )
+            dest = config.data_path / "a8-human-review"
+            payload = write_human_review_pack(config, dest)
+            self.assertEqual(1, payload["copied"])
+            self.assertTrue(payload["sample_lt_30"])
+            self.assertFalse(payload["quality_declared"])
+            self.assertTrue((dest / "scoresheet.csv").is_file())
+            sheet = (dest / "scoresheet.csv").read_text(encoding="utf-8")
+            self.assertNotIn("Kullanıcı kısa yanıtları tercih ediyor.", sheet)
+            with self.assertRaises(IngestV2Error):
+                write_human_review_pack(config, Path("/tmp/nexus-review-outside"))
+
+    def test_ingest_report_and_repair_cli_do_not_extract(self) -> None:
+        source = conversation((message("u1", "user", "aaaa"),))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = config_for(root)
+            run_conversation(
+                config,
+                source,
+                lambda segment: result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor."),
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=False,
+            )
+            context = FakeContext(
+                {
+                    "vault_path": str(root / "vault"),
+                    "data_path": str(root / "data"),
+                    "inbox_path": str(root / "inbox"),
+                    "ingest_pipeline_v2": True,
+                    "auto_publish_enabled": False,
+                }
+            )
+            arg_parser = __import__("argparse").ArgumentParser()
+            configure_parser(arg_parser, lambda args: run_command(args, context))
+            import contextlib
+
+            report_args = arg_parser.parse_args(["ingest", "report", "--json"])
+            stream = io.StringIO()
+            with contextlib.redirect_stdout(stream):
+                code = report_args.func(report_args)
+            payload = json.loads(stream.getvalue())
+            self.assertEqual(0, code)
+            self.assertFalse(payload["extraction_called"])
+            self.assertGreaterEqual(payload["unique_conversations"], 1)
+            repair_parser = __import__("argparse").ArgumentParser()
+            configure_parser(repair_parser, lambda args: run_command(args, context))
+            dry_args = repair_parser.parse_args(["ingest", "repair-canonical", "--dry-run", "--json"])
+            dry_stream = io.StringIO()
+            with contextlib.redirect_stdout(dry_stream):
+                dry_code = dry_args.func(dry_args)
+            dry = json.loads(dry_stream.getvalue())
+            self.assertEqual(0, dry_code)
+            self.assertEqual(1, dry["missing_count"])
+            self.assertFalse(dry["vault_writes"])
 
 
 class PilotMatrixTests(unittest.TestCase):

@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
@@ -23,7 +24,7 @@ from .contracts import (
     SourceRef,
 )
 from .entity.resolver import normalize_alias
-from .errors import ExtractionError, NexusError, NexusIndexError, ReviewStoreError
+from .errors import ExtractionError, NexusError, NexusIndexError, ReviewStoreError, VaultError
 from .extraction.schema import EXTRACTION_SCHEMA_VERSION, ExtractionCandidate, ExtractionResult
 from .extraction.service import ExtractionService, classify_extraction_failure
 from .fingerprints import memory_fingerprint, stable_hash
@@ -41,7 +42,7 @@ from .segmenter import (
 )
 from .vault import VaultRepository
 from .vault.rebuild_views import current_memory_view_write
-from .vault.renderer import extract_record_payload, memory_from_payload
+from .vault.renderer import extract_record_payload, extract_written_at, memory_from_payload
 
 V2_TARGET_TIMEOUT_SECONDS = 60
 V2_HARD_TIMEOUT_SECONDS = 90
@@ -524,6 +525,293 @@ def review_queue_payload(config: NexusConfig) -> dict[str, Any]:
         "items": items[-100:],
         "extraction_called": False,
         "writes_performed": False,
+    }
+
+
+REPAIR_CONFIRM = "repair"
+
+
+def _percentile(values: list[float], percentile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return float(ordered[0])
+    rank = (len(ordered) - 1) * percentile / 100
+    lower = int(rank)
+    upper = min(lower + 1, len(ordered) - 1)
+    if lower == upper:
+        return float(ordered[lower])
+    return float(ordered[lower] + (ordered[upper] - ordered[lower]) * (rank - lower))
+
+
+def acceptance_report(config: NexusConfig) -> dict[str, Any]:
+    """PII-free A8 rollup from checkpoints, ingest log, ledger and Vault."""
+    data_path = config.data_path
+    ckpt_dir = data_path / "ingest" / "v2" / "checkpoints"
+    conv_worst: dict[str, str] = {}
+    segment_status: Counter[str] = Counter()
+    fail_class: Counter[str] = Counter()
+    if ckpt_dir.is_dir() and not ckpt_dir.is_symlink():
+        for path in ckpt_dir.glob("*.json"):
+            if path.is_symlink() or not path.is_file():
+                continue
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                continue
+            cid = str(payload.get("conversation_id") or path.stem)
+            worst = "completed"
+            for item in (payload.get("segments") or {}).values():
+                if not isinstance(item, dict):
+                    continue
+                status = str(item.get("status") or "unknown")
+                segment_status[status] += 1
+                if item.get("failure_class"):
+                    fail_class[str(item.get("failure_class"))] += 1
+                if status == FAILED_SEGMENT:
+                    worst = FAILED_SEGMENT
+                elif status == "incomplete" and worst == "completed":
+                    worst = "incomplete"
+            rank = {"completed": 0, "incomplete": 1, "review": 1, FAILED_SEGMENT: 2}
+            previous = conv_worst.get(cid)
+            if previous is None or rank.get(worst, 9) > rank.get(previous, 0):
+                conv_worst[cid] = worst
+    unique = len(conv_worst)
+    completed = sum(1 for status in conv_worst.values() if status == "completed")
+    completion_pct = round(100 * completed / unique, 1) if unique else None
+
+    completed_durations: list[float] = []
+    failed_durations: list[float] = []
+    log_dup = 0
+    log_path = ingest_log_path(data_path)
+    if log_path.is_file() and not log_path.is_symlink():
+        for line in log_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            log_dup += int(row.get("duplicate_prevented_count") or row.get("duplicates_prevented") or 0)
+            duration = row.get("segment_duration_ms")
+            if not isinstance(duration, (int, float)) or duration < 0:
+                continue
+            seconds = float(duration) / 1000
+            status = row.get("segment_status")
+            if status == "completed":
+                completed_durations.append(seconds)
+            elif status == FAILED_SEGMENT:
+                failed_durations.append(seconds)
+    all_durations = completed_durations + failed_durations
+    p95_all = _percentile(all_durations, 95)
+    p95_completed = _percentile(completed_durations, 95)
+
+    records = load_ledger(data_path) if ledger_path(data_path).is_file() else []
+    fingerprints = [str(row.get("fingerprint")) for row in records if row.get("fingerprint")]
+    statements = [
+        sha256(str(row.get("statement") or "").strip().casefold().encode()).hexdigest()
+        for row in records
+        if isinstance(row.get("statement"), str) and str(row.get("statement")).strip()
+    ]
+    ledger_missing_prov = sum(
+        1 for row in records if not (row.get("span_ids") or row.get("conversation_id"))
+    )
+    vault_ids: list[str] = []
+    vault_missing_prov = 0
+    memory_files = 0
+    if config.vault_path is not None:
+        memory_root = config.vault_path / "Nexus" / "Memory"
+        if memory_root.is_dir() and not memory_root.is_symlink():
+            for path in memory_root.rglob("*.md"):
+                if path.is_symlink() or not path.is_file():
+                    continue
+                memory_files += 1
+                try:
+                    payload = extract_record_payload(path.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, VaultError):
+                    vault_missing_prov += 1
+                    continue
+                record_id = payload.get("id")
+                if isinstance(record_id, str) and record_id:
+                    vault_ids.append(record_id)
+                refs = payload.get("source_refs") or []
+                if not refs:
+                    vault_missing_prov += 1
+                    continue
+                if any(
+                    not isinstance(ref, dict)
+                    or not ref.get("conversation_id")
+                    or not ref.get("span_ids")
+                    or not ref.get("span_sha256")
+                    for ref in refs
+                ):
+                    vault_missing_prov += 1
+    ledger_ids = [str(row.get("id")) for row in records if row.get("id")]
+    ledger_not_in_vault = len(set(ledger_ids) - set(vault_ids))
+    payload = {
+        "ok": True,
+        "extraction_called": False,
+        "auto_publish_enabled": bool(config.auto_publish_enabled),
+        "timeout_cap_seconds": V2_HARD_TIMEOUT_SECONDS,
+        "unique_conversations": unique,
+        "completed_conversations": completed,
+        "completion_pct": completion_pct,
+        "segment_status": dict(segment_status),
+        "failed_segment_class": dict(fail_class),
+        "p95_segment_seconds": None if p95_all is None else round(p95_all, 3),
+        "p95_completed_segment_seconds": None if p95_completed is None else round(p95_completed, 3),
+        "segment_duration_samples": len(all_durations),
+        "duplicate_prevented_log_sum": log_dup,
+        "ledger_records": len(records),
+        "ledger_duplicate_fingerprints": len(fingerprints) - len(set(fingerprints)),
+        "ledger_duplicate_statements": len(statements) - len(set(statements)),
+        "ledger_missing_provenance": ledger_missing_prov,
+        "vault_memory_files": memory_files,
+        "vault_duplicate_ids": len(vault_ids) - len(set(vault_ids)),
+        "vault_missing_provenance": vault_missing_prov,
+        "ledger_ids_not_in_vault": ledger_not_in_vault,
+        "thresholds": {
+            "completion_ge_95": bool(completion_pct is not None and completion_pct >= 95),
+            "p95_lt_60": bool(p95_all is not None and p95_all < 60),
+            "silent_loss_0": ledger_not_in_vault == 0,
+            "duplicate_0": (len(fingerprints) == len(set(fingerprints)))
+            and (len(statements) == len(set(statements)))
+            and (len(vault_ids) == len(set(vault_ids))),
+            "canary_conversations_30": unique >= 30,
+            "provenance_none_0": vault_missing_prov == 0 and ledger_missing_prov == 0,
+        },
+        "a8_all_required": False,
+        "unmeasured": ["human_quality_30", "live_crash_resume"],
+        "unmeasured_counted_as_pass": False,
+        "vault_writes": False,
+    }
+    forbidden = {"conversation_id", "statement", "summary", "content", "heading"}
+    if forbidden.intersection(payload):
+        raise IngestV2Error("acceptance report leaked a forbidden key")
+    return payload
+
+
+def repair_missing_canonical(
+    config: NexusConfig, *, confirm: str | None, apply: bool
+) -> dict[str, Any]:
+    """Write ledger rows that have no Vault file. Does not extract."""
+    if not config.ingest_pipeline_v2:
+        raise IngestV2Error("ingest_pipeline_v2 is off")
+    if config.auto_publish_enabled:
+        raise IngestV2Error("auto_publish_enabled must stay false")
+    if apply and confirm != REPAIR_CONFIRM:
+        raise IngestV2Error("repair apply requires --confirm repair")
+    records = [
+        row
+        for row in load_ledger(config.data_path)
+        if row.get("status") in {"active", "superseded"}
+    ]
+    missing = _missing_canonical_rows(config, records)
+    payload: dict[str, Any] = {
+        "ok": True,
+        "missing_count": len(missing),
+        "extraction_called": False,
+        "auto_publish_enabled": False,
+        "vault_writes": False,
+        "written_file_count": 0,
+        "written_prefixes": [],
+    }
+    if not apply or not missing:
+        return payload
+    written: list[str] = []
+    _write_canonical(
+        config,
+        missing,
+        run_material="repair-missing-canonical",
+        index_writer=None,
+        written_files=written,
+    )
+    prefixes = sorted({item.rsplit("/", 1)[0] if "/" in item else item for item in written})
+    if any(not item.startswith("Nexus/") for item in written):
+        raise IngestV2Error("namespace violation", failure_class="namespace")
+    payload["vault_writes"] = True
+    payload["written_file_count"] = len(written)
+    payload["written_prefixes"] = prefixes
+    return payload
+
+
+def write_human_review_pack(config: NexusConfig, dest: Path) -> dict[str, Any]:
+    """Copy canonical memories to a private scoresheet dir. Does not label quality."""
+    if config.vault_path is None:
+        raise IngestV2Error("vault_path is required")
+    dest = dest.expanduser()
+    if not dest.is_absolute():
+        raise IngestV2Error("review pack destination must be absolute")
+    if dest.is_symlink():
+        raise IngestV2Error("review pack destination cannot be a symlink")
+    data_root = config.data_path.resolve()
+    dest_resolved = dest.resolve()
+    if dest_resolved != data_root and data_root not in dest_resolved.parents:
+        raise IngestV2Error("review pack must stay under data_path")
+    _prepare_dir(dest)
+    os.chmod(dest, 0o700)
+    memory_root = config.vault_path / "Nexus" / "Memory"
+    copied = 0
+    rows: list[str] = [
+        "index,nexus_id,memory_type,date,heading_chars,body_chars,provenance_ok,quality_faithful,quality_single_claim,quality_dated,notes"
+    ]
+    if memory_root.is_dir() and not memory_root.is_symlink():
+        for index, path in enumerate(sorted(memory_root.rglob("*.md")), start=1):
+            if path.is_symlink() or not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8")
+            payload = extract_record_payload(text)
+            target = dest / f"{index:02d}_{path.stem}.md"
+            target.write_text(text, encoding="utf-8")
+            os.chmod(target, 0o600)
+            heading = next((line[2:] for line in text.splitlines() if line.startswith("# ")), "")
+            date = ""
+            try:
+                written = extract_written_at(text)
+                date = written[:10]
+            except VaultError:
+                date = ""
+            body = str(payload.get("summary") or "")
+            refs = payload.get("source_refs") or []
+            provenance_ok = "yes" if refs else "no"
+            rows.append(
+                ",".join(
+                    [
+                        str(index),
+                        str(payload.get("id") or ""),
+                        str(payload.get("type") or ""),
+                        date,
+                        str(len(heading)),
+                        str(len(body)),
+                        provenance_ok,
+                        "",
+                        "",
+                        "",
+                        "",
+                    ]
+                )
+            )
+            copied += 1
+    sheet = dest / "scoresheet.csv"
+    sheet.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    os.chmod(sheet, 0o600)
+    guide = dest / "README.txt"
+    guide.write_text(
+        "Human A8 quality pack. Fill quality_* columns only. Do not commit this directory.\n"
+        "quality_faithful: yes/no. quality_single_claim: yes/no. quality_dated: yes/no.\n"
+        "NEXUS does not declare >=90% from this file until those columns are filled by Abidin.\n",
+        encoding="utf-8",
+    )
+    os.chmod(guide, 0o600)
+    return {
+        "ok": True,
+        "copied": copied,
+        "sample_lt_30": copied < 30,
+        "quality_declared": False,
+        "extraction_called": False,
+        "vault_writes": False,
+        "dest_under_data_path": str(dest).startswith(str(config.data_path)),
     }
 
 
@@ -1192,43 +1480,21 @@ def _missing_canonical_rows(
     return missing
 
 
-def _commit_canonical(
-    config: NexusConfig,
-    rows: list[dict[str, Any]],
+def _promotable_ledger_rows(
+    records: list[dict[str, Any]],
     *,
     ingest_id: str,
-    report: IngestRunReport,
-    index_writer: Callable[[Path, Path], object] | None,
-) -> str:
-    if not rows:
-        return "none"
-    try:
-        writes = _write_canonical(
-            config,
-            rows,
-            run_material=ingest_id + ":" + ",".join(sorted(str(row["id"]) for row in rows)),
-            index_writer=index_writer,
-            written_files=report.written_files,
+    conversation_id: str,
+) -> list[dict[str, Any]]:
+    return [
+        record
+        for record in records
+        if record.get("status") in {"active", "superseded"}
+        and (
+            record.get("ingest_id") == ingest_id
+            or record.get("conversation_id") == conversation_id
         )
-        report.vault_written = True
-        report.mirror_status = "current"
-        return writes
-    except IngestV2Error as exc:
-        report.error_class = exc.failure_class
-        report.why = exc.failure_class
-        if exc.failure_class == "mirror_retry":
-            report.vault_written = True
-            report.mirror_status = "retry"
-            report.final_status = "DEGRADED"
-            return "obsidian_sqlite_retry"
-        if exc.failure_class == "degraded":
-            report.vault_written = True
-            report.mirror_status = "retry"
-            report.final_status = "DEGRADED"
-            return "icloud_degraded"
-        report.mirror_status = "not_written"
-        report.final_status = FAILED_SEGMENT
-        return "none"
+    ]
 
 
 def _commit_canonical(
@@ -1456,12 +1722,11 @@ def run_conversation(
             }
         writes = "none"
         if write_canonical and report.final_status != "review":
-            rows = [
-                record
-                for record in records
-                if record.get("ingest_id") == ingest_id
-                and record.get("status") in {"active", "superseded"}
-            ]
+            rows = _promotable_ledger_rows(
+                records,
+                ingest_id=ingest_id,
+                conversation_id=conversation.external_conversation_id,
+            )
             writes = _commit_canonical(
                 config,
                 _missing_canonical_rows(config, rows),
@@ -1506,12 +1771,11 @@ def run_conversation(
         }
         writes = "none"
         if write_canonical:
-            rows = [
-                record
-                for record in records
-                if record.get("ingest_id") == ingest_id
-                and record.get("status") in {"active", "superseded"}
-            ]
+            rows = _promotable_ledger_rows(
+                records,
+                ingest_id=ingest_id,
+                conversation_id=conversation.external_conversation_id,
+            )
             writes = _commit_canonical(
                 config,
                 _missing_canonical_rows(config, rows),
