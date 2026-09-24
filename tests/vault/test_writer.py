@@ -98,6 +98,56 @@ class VaultWriterTests(unittest.TestCase):
                     written_at="2026-09-17T00:00:00+03:00",
                 )
 
+    def test_memory_heading_is_claim_with_visible_date(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = VaultRepository(root)
+            record = memory(
+                1,
+                summary="# reminder wanted\nNo ping after 22:00.",
+            )
+            record = replace(record, type=MemoryType.PREFERENCE)
+            run_id = new_id(IdPrefix.RUN)
+
+            prepared = repository.prepare_record(
+                record,
+                run_id=run_id,
+                written_at="2026-09-24T10:00:00+03:00",
+            )
+            rendered = prepared.content.decode("utf-8")
+
+            self.assertIn("memory_type: preference", rendered)
+            self.assertIn("date: 2026-09-24", rendered)
+            self.assertIn("# reminder wanted No ping after 22:00.", rendered)
+            self.assertNotIn("# NEXUS Memory —", rendered)
+            self.assertNotIn("<script>", rendered)
+
+    def test_memory_restyle_rewrites_generic_heading_without_changing_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            repository = VaultRepository(root)
+            record = replace(memory(1, summary="No ping after 22:00."), type=MemoryType.PREFERENCE)
+            run_id = new_id(IdPrefix.RUN)
+            repository.commit_records((record,), run_id=run_id)
+            path = root / repository.record_path(record)
+            original = path.read_text(encoding="utf-8")
+            stale = original.replace("# No ping after 22:00.", "# NEXUS Memory — preference")
+            path.write_text(stale, encoding="utf-8")
+
+            restyle_run = new_id(IdPrefix.RUN)
+            result = repository.restyle_existing_memories(run_id=restyle_run)
+            restyled = path.read_text(encoding="utf-8")
+
+            self.assertEqual(1, len(result.written_paths))
+            self.assertIn("# No ping after 22:00.", restyled)
+            self.assertIn("date: 2026-09-", restyled)
+            self.assertNotIn("# NEXUS Memory —", restyled)
+            self.assertEqual(
+                extract_record_payload(original)["summary"],
+                extract_record_payload(restyled)["summary"],
+            )
+            self.assertIn(f"run_id: {restyle_run}", restyled)
+
     def test_create_update_and_stale_precondition_conflict(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

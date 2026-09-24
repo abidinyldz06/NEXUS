@@ -19,7 +19,7 @@ from ..contracts import (
 )
 from ..errors import VaultError
 from ..fingerprints import sha256_bytes
-from .renderer import render_record
+from .renderer import extract_record_payload, extract_written_at, memory_from_payload, render_record
 from .transaction import TransactionResult, VaultTransaction, VaultWrite
 
 CanonicalRecord = Source | Memory | Entity | Relation | Commitment | ReviewItem
@@ -105,6 +105,32 @@ class VaultRepository:
         ) + generated_writes
         runner = transaction or self.transaction_factory(self.vault_root)
         return runner.commit(writes, run_id=run_id)
+
+    def restyle_existing_memories(self, *, run_id: str) -> TransactionResult:
+        memory_root = self.vault_root / "Nexus" / "Memory"
+        if not memory_root.is_dir():
+            raise VaultError("Nexus/Memory is missing")
+        writes: list[VaultWrite] = []
+        for path in sorted(memory_root.rglob("*.md")):
+            if path.is_symlink() or not path.is_file():
+                raise VaultError(f"canonical record is not a regular file: {path}")
+            markdown = path.read_text(encoding="utf-8")
+            record = memory_from_payload(extract_record_payload(markdown))
+            expected = sha256_bytes(path.read_bytes())
+            relative = path.relative_to(self.vault_root)
+            if relative != self.record_path(record):
+                raise VaultError("canonical record path does not match payload")
+            writes.append(
+                self.prepare_record(
+                    record,
+                    run_id=run_id,
+                    written_at=extract_written_at(markdown),
+                    expected_sha256=expected,
+                )
+            )
+        if not writes:
+            raise VaultError("no canonical memory records to restyle")
+        return self.transaction_factory(self.vault_root).commit(tuple(writes), run_id=run_id)
 
     def current_hash(self, record: CanonicalRecord) -> str:
         path = self.vault_root / self.record_path(record)

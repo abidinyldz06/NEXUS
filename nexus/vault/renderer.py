@@ -10,12 +10,26 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from ..contracts import Commitment, Entity, Memory, Relation, ReviewItem, Source, SourceRef
-from ..errors import VaultError
+from ..contracts import (
+    Commitment,
+    Entity,
+    Impact,
+    Memory,
+    MemoryType,
+    RecordStatus,
+    Relation,
+    ReviewItem,
+    ReviewStatus,
+    Source,
+    SourceRef,
+)
+from ..errors import ContractError, VaultError
 from ..ids import IdPrefix, is_nexus_id
 from ..serialization import to_primitive
 
 _PAYLOAD_RE = re.compile(r"<!-- nexus-record-v1:([A-Za-z0-9_-]+) -->")
+_WRITTEN_AT_RE = re.compile(r"^written_at:\s*(.+)\s*$", re.MULTILINE)
+_HEADING_MAX = 120
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,7 +48,7 @@ def _descriptor(record: object) -> RecordDescriptor:
             "memory",
             record.id,
             record.status.value,
-            f"NEXUS Memory — {record.type.value}",
+            record.summary,
             record.summary,
             record.source_refs,
         )
@@ -96,7 +110,7 @@ def _encoded_payload(record: object) -> str:
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
 
-def render_safe_pre(value: str) -> str:
+def _neutralize_markup(value: str) -> str:
     escaped = html.escape(value, quote=True)
     for character, entity in (
         ("!", "&#33;"),
@@ -105,7 +119,18 @@ def render_safe_pre(value: str) -> str:
         ("`", "&#96;"),
     ):
         escaped = escaped.replace(character, entity)
-    return f"<pre>{escaped}</pre>"
+    return escaped
+
+
+def _safe_heading(value: str) -> str:
+    collapsed = " ".join(value.split()).lstrip("#").strip()
+    if len(collapsed) > _HEADING_MAX:
+        collapsed = collapsed[: _HEADING_MAX - 1].rstrip() + "…"
+    return _neutralize_markup(collapsed) or "Untitled"
+
+
+def render_safe_pre(value: str) -> str:
+    return f"<pre>{_neutralize_markup(value)}</pre>"
 
 
 def render_record(record: object, *, run_id: str, written_at: str) -> str:
@@ -119,24 +144,34 @@ def render_record(record: object, *, run_id: str, written_at: str) -> str:
         raise VaultError("written_at must include a timezone offset")
     descriptor = _descriptor(record)
     payload = _encoded_payload(record)
+    observed_date = parsed_written_at.date().isoformat()
     lines = [
         "---",
         f"nexus_id: {descriptor.record_id}",
         f"record_kind: {descriptor.kind}",
-        f"schema_version: {getattr(record, 'schema_version', 1)}",
-        f"status: {descriptor.status}",
-        f"run_id: {run_id}",
-        f"written_at: {written_at}",
-        "managed_by: nexus",
-        "---",
-        "",
-        f"# {descriptor.title}",
-        "",
-        render_safe_pre(descriptor.primary_text),
-        "",
-        "## Provenance",
-        "",
     ]
+    if isinstance(record, Memory):
+        lines.append(f"memory_type: {record.type.value}")
+    lines.extend(
+        [
+            f"schema_version: {getattr(record, 'schema_version', 1)}",
+            f"status: {descriptor.status}",
+            f"run_id: {run_id}",
+            f"written_at: {written_at}",
+            f"date: {observed_date}",
+            "managed_by: nexus",
+            "---",
+            "",
+            f"# {_safe_heading(descriptor.title)}",
+            "",
+            f"date: {observed_date}",
+            "",
+            render_safe_pre(descriptor.primary_text),
+            "",
+            "## Provenance",
+            "",
+        ]
+    )
     if not descriptor.source_refs:
         lines.append("This source record is the provenance root.")
     for ref in descriptor.source_refs:
@@ -152,6 +187,58 @@ def render_record(record: object, *, run_id: str, written_at: str) -> str:
             lines.extend(["  - Evidence:", render_safe_pre(ref.excerpt)])
     lines.extend(["", f"<!-- nexus-record-v1:{payload} -->", ""])
     return "\n".join(lines)
+
+
+def extract_written_at(markdown: str) -> str:
+    match = _WRITTEN_AT_RE.search(markdown)
+    if match is None:
+        raise VaultError("canonical record written_at is missing")
+    value = match.group(1).strip().strip("'\"")
+    if not value:
+        raise VaultError("canonical record written_at is missing")
+    return value
+
+
+def memory_from_payload(payload: dict[str, Any]) -> Memory:
+    try:
+        refs = payload["source_refs"]
+        if not isinstance(refs, list):
+            raise VaultError("canonical memory payload is invalid")
+        return Memory(
+            id=payload["id"],
+            type=MemoryType(payload["type"]),
+            summary=payload["summary"],
+            source_refs=tuple(
+                SourceRef(
+                    source_id=item["source_id"],
+                    conversation_id=item["conversation_id"],
+                    span_ids=tuple(item["span_ids"]),
+                    span_sha256=item["span_sha256"],
+                    excerpt=item.get("excerpt", ""),
+                )
+                for item in refs
+            ),
+            confidence=payload["confidence"],
+            impact=Impact(payload["impact"]),
+            review_status=ReviewStatus(payload["review_status"]),
+            status=RecordStatus(payload["status"]),
+            entity_ids=tuple(payload.get("entity_ids", [])),
+            supersedes=tuple(payload.get("supersedes", [])),
+            superseded_by=payload.get("superseded_by"),
+            extractor=dict(payload.get("extractor", {})),
+            schema_version=payload["schema_version"],
+        )
+    except (ContractError, KeyError, TypeError, ValueError, VaultError) as exc:
+        raise VaultError("canonical memory payload is invalid") from exc
+
+
+def restyle_memory_markdown(markdown: str, *, run_id: str) -> str:
+    payload = extract_record_payload(markdown)
+    return render_record(
+        memory_from_payload(payload),
+        run_id=run_id,
+        written_at=extract_written_at(markdown),
+    )
 
 
 def extract_record_payload(markdown: str) -> dict[str, Any]:
