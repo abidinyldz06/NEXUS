@@ -1526,6 +1526,25 @@ class PipelineV2Tests(unittest.TestCase):
             )
             self.assertTrue(armed.vault_written)
             self.assertTrue(list((root / "vault").rglob("mem_*.md")))
+            view = root / "vault" / "Nexus" / "Views" / "Current-Memory.md"
+            self.assertTrue(view.is_file())
+            self.assertIn("Kullanıcı sade kahveyi tercih ediyor.", view.read_text(encoding="utf-8"))
+
+    def test_canonical_write_rebuilds_current_memory_view_inside_nexus(self) -> None:
+        source = conversation((message("u1", "user", "aaaa"),), external_id="view-conv")
+
+        def extractor(segment: object) -> ExtractionResult:
+            return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            report = self._run(root, source, extractor)
+            view = root / "vault" / "Nexus" / "Views" / "Current-Memory.md"
+            self.assertTrue(report.vault_written)
+            self.assertTrue(view.is_file())
+            self.assertEqual("Nexus/Views/Current-Memory.md", view.relative_to(root / "vault").as_posix())
+            self.assertIn("Kullanıcı kısa yanıtları tercih ediyor.", view.read_text(encoding="utf-8"))
+            self.assertIn("Nexus/Views/Current-Memory.md", report.written_files)
 
     def test_growing_conversation_does_not_repack_completed_range(self) -> None:
         first = conversation(

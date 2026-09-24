@@ -39,6 +39,8 @@ from .segmenter import (
     segment_conversation_v2,
 )
 from .vault import VaultRepository
+from .vault.rebuild_views import current_memory_view_write
+from .vault.renderer import extract_record_payload, memory_from_payload
 
 V2_TARGET_TIMEOUT_SECONDS = 60
 V2_HARD_TIMEOUT_SECONDS = 90
@@ -1039,6 +1041,40 @@ def _verify_canonical(
     return written
 
 
+def _load_vault_memories(config: NexusConfig, repository: VaultRepository) -> list[Memory]:
+    assert config.vault_path is not None
+    root = config.vault_path / "Nexus" / "Memory"
+    if not root.is_dir():
+        return []
+    loaded: list[Memory] = []
+    for path in sorted(root.rglob("*.md")):
+        if path.is_symlink() or not path.is_file():
+            raise IngestV2Error("canonical record is not a regular file", failure_class="vault_failed")
+        try:
+            loaded.append(memory_from_payload(extract_record_payload(path.read_text(encoding="utf-8"))))
+        except (NexusError, OSError, UnicodeError, KeyError, TypeError, ValueError) as exc:
+            raise IngestV2Error("canonical memory payload is invalid", failure_class="vault_failed") from exc
+    return loaded
+
+
+def _current_memory_view_write(
+    config: NexusConfig,
+    repository: VaultRepository,
+    memories: list[Memory],
+) -> object:
+    assert config.vault_path is not None
+    by_id = {item.id: item for item in _load_vault_memories(config, repository)}
+    for memory in memories:
+        by_id[memory.id] = memory
+    view_path = config.vault_path / "Nexus" / "Views" / "Current-Memory.md"
+    expected = None
+    if view_path.exists():
+        if view_path.is_symlink() or not view_path.is_file():
+            raise IngestV2Error("current memory view is unsafe", failure_class="vault_failed")
+        expected = sha256(view_path.read_bytes()).hexdigest()
+    return current_memory_view_write(by_id.values(), repository, expected_sha256=expected)
+
+
 def _write_canonical(
     config: NexusConfig,
     rows: list[dict[str, Any]],
@@ -1063,10 +1099,24 @@ def _write_canonical(
             memories,
             run_id=_digest_id("run", run_material),
             expected_hashes=expected,
+            generated_writes=(_current_memory_view_write(config, repository, memories),),
         )
     except NexusError as exc:
         raise IngestV2Error("canonical write failed", failure_class="vault_failed") from exc
     verified = _verify_canonical(config, memories, repository)
+    view_relative = Path("Nexus/Views/Current-Memory.md")
+    view_path = config.vault_path / view_relative
+    if view_path.name.endswith(".icloud") or Path(str(view_path) + ".icloud").exists():
+        raise IngestV2Error("icloud stub", failure_class="degraded")
+    if not view_path.is_file() or view_path.is_symlink():
+        raise IngestV2Error("verify failed", failure_class="vault_failed")
+    verified.append(
+        {
+            "path": view_relative.as_posix(),
+            "sha256": sha256(view_path.read_bytes()).hexdigest(),
+            "line_count": view_path.read_text(encoding="utf-8").count("\n"),
+        }
+    )
     if written_files is not None:
         written_files.extend(str(item["path"]) for item in verified)
     writer = index_writer or rebuild_index
@@ -1075,24 +1125,6 @@ def _write_canonical(
     except NexusIndexError as exc:
         raise IngestV2Error("mirror rebuild pending retry", failure_class="mirror_retry") from exc
     return "obsidian+sqlite"
-
-
-def _missing_canonical_rows(
-    config: NexusConfig, rows: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    if config.vault_path is None:
-        return list(rows)
-    repository = VaultRepository(config.vault_path)
-    missing: list[dict[str, Any]] = []
-    for record in rows:
-        try:
-            memory = _memory_record(record)
-        except (NexusError, KeyError, TypeError, ValueError):
-            continue
-        path = config.vault_path / repository.record_path(memory)
-        if not path.is_file():
-            missing.append(record)
-    return missing
 
 
 def _missing_canonical_rows(
