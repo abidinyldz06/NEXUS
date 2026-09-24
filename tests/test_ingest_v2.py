@@ -1626,8 +1626,12 @@ class PipelineV2Tests(unittest.TestCase):
             first = prepare_canary_write(config, confirm="canary")
             self.assertEqual(0, first["used_today"])
             self.assertEqual(CANARY_DAILY_LIMIT, first["limit"])
-            for index in range(CANARY_DAILY_LIMIT):
+            self.assertEqual(25, CANARY_DAILY_LIMIT)
+            for index in range(CANARY_DAILY_LIMIT - 1):
                 record_canary_write(config.data_path, f"ingest-{index}")
+            later = prepare_canary_write(config, confirm="canary")
+            self.assertEqual(CANARY_DAILY_LIMIT - 1, later["used_today"])
+            record_canary_write(config.data_path, "ingest-last")
             with self.assertRaises(IngestV2Error):
                 prepare_canary_write(config, confirm="canary")
             snapshot = snapshot_canonical(config)
