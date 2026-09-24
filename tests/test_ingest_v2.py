@@ -1821,6 +1821,47 @@ class PipelineV2Tests(unittest.TestCase):
             self.assertNotIn("statement", payload)
             self.assertFalse(payload["extraction_called"])
             self.assertEqual(0, payload["ledger_ids_not_in_vault"])
+            self.assertEqual(0, payload["leftover_timeout_class_count"])
+
+    def test_segment_duration_logs_last_attempt_not_retry_wall(self) -> None:
+        source = conversation((message("u1", "user", "aaaa"),))
+
+        class Flaky:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def __call__(self, segment: object) -> ExtractionResult:
+                self.calls += 1
+                if self.calls < 3:
+                    time.sleep(0.05)
+                    raise ExtractionError("synthetic timeout", failure_class="timeout")
+                return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = config_for(root)
+            report = run_conversation(
+                config,
+                source,
+                Flaky(),
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=False,
+                sleeper=lambda _: None,
+            )
+            self.assertEqual("completed", report.final_status)
+            rows = [
+                json.loads(line)
+                for line in ingest_log_path(config.data_path).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            timed = [row for row in rows if row.get("segment_status") == "completed"]
+            self.assertTrue(timed)
+            last = timed[-1]
+            duration = int(last["segment_duration_ms"])
+            wall = int(last["segment_wall_ms"])
+            self.assertEqual(3, last["attempt_count"])
+            self.assertLess(duration, 40)
+            self.assertGreater(wall, duration)
 
     def test_human_review_pack_stays_private_and_does_not_declare_quality(self) -> None:
         source = conversation((message("u1", "user", "aaaa"),))

@@ -88,6 +88,7 @@ _OBSERVATION_KEYS = (
     "token_estimate",
     "segment_status",
     "segment_duration_ms",
+    "segment_wall_ms",
     "attempt_count",
     "retry_count",
     "timeout_count",
@@ -583,6 +584,9 @@ def acceptance_report(config: NexusConfig) -> dict[str, Any]:
 
     completed_durations: list[float] = []
     failed_durations: list[float] = []
+    first_attempt_completed: list[float] = []
+    leftover_durations: list[float] = []
+    non_leftover: list[float] = []
     log_dup = 0
     log_path = ingest_log_path(data_path)
     if log_path.is_file() and not log_path.is_symlink():
@@ -599,13 +603,29 @@ def acceptance_report(config: NexusConfig) -> dict[str, Any]:
                 continue
             seconds = float(duration) / 1000
             status = row.get("segment_status")
+            attempts = int(row.get("attempt_count") or 0)
+            timeouts = int(row.get("timeout_count") or 0)
+            leftover = (
+                status == FAILED_SEGMENT
+                and attempts >= MAX_ATTEMPTS
+                and timeouts >= MAX_ATTEMPTS
+                and seconds >= 500
+            )
+            if leftover:
+                leftover_durations.append(seconds)
+            else:
+                non_leftover.append(seconds)
             if status == "completed":
                 completed_durations.append(seconds)
+                if attempts == 1:
+                    first_attempt_completed.append(seconds)
             elif status == FAILED_SEGMENT:
                 failed_durations.append(seconds)
     all_durations = completed_durations + failed_durations
     p95_all = _percentile(all_durations, 95)
     p95_completed = _percentile(completed_durations, 95)
+    p95_first = _percentile(first_attempt_completed, 95)
+    p95_excluding_leftover = _percentile(non_leftover, 95)
 
     records = load_ledger(data_path) if ledger_path(data_path).is_file() else []
     fingerprints = [str(row.get("fingerprint")) for row in records if row.get("fingerprint")]
@@ -661,6 +681,11 @@ def acceptance_report(config: NexusConfig) -> dict[str, Any]:
         "failed_segment_class": dict(fail_class),
         "p95_segment_seconds": None if p95_all is None else round(p95_all, 3),
         "p95_completed_segment_seconds": None if p95_completed is None else round(p95_completed, 3),
+        "p95_first_attempt_completed_seconds": None if p95_first is None else round(p95_first, 3),
+        "p95_excluding_leftover_seconds": None
+        if p95_excluding_leftover is None
+        else round(p95_excluding_leftover, 3),
+        "leftover_timeout_class_count": len(leftover_durations),
         "segment_duration_samples": len(all_durations),
         "duplicate_prevented_log_sum": log_dup,
         "ledger_records": len(records),
@@ -1841,8 +1866,10 @@ def run_conversation(
         )
         outcome: ExtractionResult | None = None
         failure_class: str | None = None
+        last_attempt_ms = 0
         while attempts < MAX_ATTEMPTS:
             attempts += 1
+            attempt_started = time.monotonic()
             segment_state[segment.segment_id] = {
                 "ingest_id": ingest_id,
                 "conversation_id": conversation.external_conversation_id,
@@ -1863,10 +1890,12 @@ def run_conversation(
             try:
                 outcome = extractor(segment)
                 report.extractor_calls += 1
+                last_attempt_ms = int((time.monotonic() - attempt_started) * 1000)
                 failure_class = None
                 break
             except IngestPaused:
                 report.extractor_calls += 1
+                last_attempt_ms = int((time.monotonic() - attempt_started) * 1000)
                 report.final_status = "paused"
                 report.segment_statuses[segment.segment_id] = "incomplete"
                 checkpoint["carry_forward"] = carry_cell[0]
@@ -1882,7 +1911,8 @@ def run_conversation(
                         segment_count=len(segments),
                         segment_id=segment.segment_id,
                         segment_range=[segment.start_message_index, segment.end_message_index],
-                        segment_duration_ms=int((time.monotonic() - segment_started) * 1000),
+                        segment_duration_ms=last_attempt_ms,
+                        segment_wall_ms=int((time.monotonic() - segment_started) * 1000),
                         attempt_count=attempts,
                         retry_count=max(0, attempts - 1),
                         timeout_count=timeouts,
@@ -1893,6 +1923,7 @@ def run_conversation(
                 return report
             except ExtractionError as exc:
                 report.extractor_calls += 1
+                last_attempt_ms = int((time.monotonic() - attempt_started) * 1000)
                 failure_class = exc.failure_class
                 if failure_class == "timeout":
                     timeouts += 1
@@ -1911,7 +1942,8 @@ def run_conversation(
                         min(attempts - 1, len(RETRY_BACKOFF_SECONDS) - 1)
                     ]
                     sleeper(delay)
-        duration_ms = int((time.monotonic() - segment_started) * 1000)
+        duration_ms = last_attempt_ms
+        wall_ms = int((time.monotonic() - segment_started) * 1000)
         if outcome is None:
             report.segment_statuses[segment.segment_id] = FAILED_SEGMENT
             report.final_status = FAILED_SEGMENT
@@ -1944,6 +1976,7 @@ def run_conversation(
                     retries=max(0, attempts - 1),
                     segment_status=FAILED_SEGMENT,
                     segment_duration_ms=duration_ms,
+                    segment_wall_ms=wall_ms,
                     attempt_count=attempts,
                     retry_count=max(0, attempts - 1),
                     timeout_count=timeouts,
@@ -2057,6 +2090,7 @@ def run_conversation(
                 retries=max(0, attempts - 1),
                 segment_status="completed",
                 segment_duration_ms=duration_ms,
+                segment_wall_ms=wall_ms,
                 attempt_count=attempts,
                 retry_count=max(0, attempts - 1),
                 timeout_count=timeouts,

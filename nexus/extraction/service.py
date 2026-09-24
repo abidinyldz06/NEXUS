@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 from hashlib import sha256
 from importlib.resources import files
@@ -95,6 +97,19 @@ class ExtractionService:
         )
         self.prompt_sha256 = sha256(self.instructions.encode("utf-8")).hexdigest()
 
+    def _complete_structured(self, **kwargs: Any) -> Any:
+        """Wait at most ``timeout`` seconds even if the provider ignores its own cap."""
+        timeout = float(kwargs.get("timeout") or self.timeout_seconds)
+        pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="nexus-extract")
+        try:
+            future = pool.submit(self.llm.complete_structured, **kwargs)
+            try:
+                return future.result(timeout=timeout)
+            except FuturesTimeoutError as exc:
+                raise TimeoutError() from exc
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+
     def extract(self, segment: ConversationSegment) -> ExtractionOutcome:
         if not segment.messages:
             raise ExtractionError("cannot extract an empty segment")
@@ -118,7 +133,7 @@ class ExtractionService:
         last_class = "structured_output"
         for attempt in range(1, self.max_attempts + 1):
             try:
-                response = self.llm.complete_structured(
+                response = self._complete_structured(
                     instructions=self.instructions,
                     input=[{"type": "text", "text": input_text}],
                     json_schema=EXTRACTION_JSON_SCHEMA,

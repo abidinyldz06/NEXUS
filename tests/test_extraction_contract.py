@@ -304,6 +304,22 @@ class ExtractionContractTests(unittest.TestCase):
         self.assertNotIn("secret", str(raised.exception))
         self.assertNotIn("hidden timeout", str(raised.exception))
 
+    def test_provider_timeout_is_cut_locally_without_raising_the_cap(self) -> None:
+        import time
+
+        class SlowLlm:
+            def complete_structured(self, **kwargs: object) -> object:
+                time.sleep(0.6)
+                return SimpleNamespace(parsed=valid_payload(), text="{}", usage=None)
+
+        started = time.monotonic()
+        with self.assertRaises(ExtractionError) as raised:
+            ExtractionService(SlowLlm(), max_attempts=1, timeout_seconds=0.15).extract(segment())
+        elapsed = time.monotonic() - started
+        self.assertEqual("timeout", raised.exception.failure_class)
+        self.assertLess(elapsed, 0.45)
+        self.assertEqual(90, __import__("nexus.ingest_v2", fromlist=["V2_HARD_TIMEOUT_SECONDS"]).V2_HARD_TIMEOUT_SECONDS)
+
     def test_invalid_json_failure_class_does_not_echo_payload(self) -> None:
         class BrokenJsonLlm:
             def complete_structured(self, **kwargs):
