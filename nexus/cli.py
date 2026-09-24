@@ -31,12 +31,15 @@ from .index import rebuild_index, search_index
 from .ingest import plan_inbox, shadow_inbox_source, stage_inbox_source
 from .ingest_v2 import (
     pause_ingest,
+    repair_missing_canonical,
     reprocess_failed,
     review_queue_payload,
     rollback_batch,
     run_inbox,
     status_payload,
     unpause_ingest,
+    acceptance_report,
+    write_human_review_pack,
 )
 from .permission_audit import audit_permissions
 from .publication import apply_publication, plan_publication
@@ -167,6 +170,48 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
     )
     ingest_queue.add_argument(
         "--json", action="store_true", dest="queue_json", help="Emit JSON"
+    )
+    ingest_report = ingest_commands.add_parser(
+        "report", help="Emit a PII-free ingest acceptance rollup without extracting"
+    )
+    ingest_report.add_argument(
+        "--json", action="store_true", dest="report_json", help="Emit JSON"
+    )
+    ingest_repair = ingest_commands.add_parser(
+        "repair-canonical",
+        help="Write ledger rows that have no Vault file; does not extract",
+    )
+    ingest_repair.add_argument(
+        "--dry-run",
+        action="store_true",
+        dest="repair_dry_run",
+        help="Count missing Vault files without writing (default)",
+    )
+    ingest_repair.add_argument(
+        "--apply",
+        action="store_true",
+        dest="repair_apply",
+        help="Write missing canonical files; requires --confirm repair",
+    )
+    ingest_repair.add_argument(
+        "--confirm",
+        dest="repair_confirm",
+        help="Must equal repair when --apply is set",
+    )
+    ingest_repair.add_argument(
+        "--json", action="store_true", dest="repair_json", help="Emit JSON"
+    )
+    ingest_pack = ingest_commands.add_parser(
+        "review-pack",
+        help="Copy canonical memories under data_path for private human scoring",
+    )
+    ingest_pack.add_argument(
+        "--dest",
+        dest="pack_dest",
+        help="Absolute directory under data_path (default: data_path/a8-human-review)",
+    )
+    ingest_pack.add_argument(
+        "--json", action="store_true", dest="pack_json", help="Emit JSON"
     )
 
     eval_command = subcommands.add_parser(
@@ -477,6 +522,74 @@ def run_command(args: Namespace, ctx: Any) -> int:
                 payload,
                 as_json=bool(
                     getattr(args, "queue_json", False) or getattr(args, "as_json", False)
+                ),
+            )
+            return 0 if payload.get("ok") else 2
+        if getattr(args, "ingest_command", None) == "report":
+            try:
+                config = from_plugin_context(ctx)
+                payload = acceptance_report(config)
+            except (NexusError, OSError, ValueError) as exc:
+                payload = {
+                    "ok": False,
+                    "extraction_called": False,
+                    "vault_writes": False,
+                    "unmeasured_counted_as_pass": False,
+                    "errors": [type(exc).__name__],
+                }
+            _print_payload(
+                payload,
+                as_json=bool(
+                    getattr(args, "report_json", False) or getattr(args, "as_json", False)
+                ),
+            )
+            return 0 if payload.get("ok") else 2
+        if getattr(args, "ingest_command", None) == "repair-canonical":
+            try:
+                config = from_plugin_context(ctx)
+                payload = repair_missing_canonical(
+                    config,
+                    confirm=getattr(args, "repair_confirm", None),
+                    apply=bool(getattr(args, "repair_apply", False)),
+                )
+            except (NexusError, OSError, ValueError) as exc:
+                payload = {
+                    "ok": False,
+                    "missing_count": 0,
+                    "extraction_called": False,
+                    "vault_writes": False,
+                    "errors": [type(exc).__name__],
+                }
+            _print_payload(
+                payload,
+                as_json=bool(
+                    getattr(args, "repair_json", False) or getattr(args, "as_json", False)
+                ),
+            )
+            return 0 if payload.get("ok") else 2
+        if getattr(args, "ingest_command", None) == "review-pack":
+            try:
+                config = from_plugin_context(ctx)
+                dest_value = getattr(args, "pack_dest", None)
+                dest = (
+                    Path(dest_value).expanduser()
+                    if dest_value
+                    else config.data_path / "a8-human-review"
+                )
+                payload = write_human_review_pack(config, dest)
+            except (NexusError, OSError, ValueError) as exc:
+                payload = {
+                    "ok": False,
+                    "copied": 0,
+                    "quality_declared": False,
+                    "extraction_called": False,
+                    "vault_writes": False,
+                    "errors": [type(exc).__name__],
+                }
+            _print_payload(
+                payload,
+                as_json=bool(
+                    getattr(args, "pack_json", False) or getattr(args, "as_json", False)
                 ),
             )
             return 0 if payload.get("ok") else 2
