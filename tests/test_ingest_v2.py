@@ -17,7 +17,7 @@ from pathlib import Path
 
 from nexus.cli import configure_parser, run_command
 from nexus.config import NexusConfig
-from nexus.contracts import MemoryType
+from nexus.contracts import MemoryType, ReviewStatus
 from nexus.errors import ExtractionError, NexusIndexError
 from nexus.extraction.schema import ExtractionCandidate, ExtractionResult
 from nexus.fingerprints import segment_fingerprint
@@ -57,6 +57,7 @@ from nexus.segmenter import (
     segment_conversation,
     segment_conversation_v2,
 )
+from nexus.review import ReviewStore
 
 FAKE_SECRETS = (
     "sk-test-123456789",
@@ -1031,6 +1032,10 @@ class PipelineV2Tests(unittest.TestCase):
             self.assertFalse(list((root / "vault").rglob("mem_*.md")))
             queue = review_queue_path(root / "data").read_text(encoding="utf-8")
             self.assertIn("review_gate", queue)
+            pending = ReviewStore(root / "data").list(status=ReviewStatus.PENDING)
+            self.assertEqual(1, len(pending))
+            self.assertEqual("Kredi kartı borcum 5000 lira.", pending[0].candidate["statement"])
+            self.assertIn(pending[0].id, queue)
 
     def test_content_hash_mismatch_goes_to_review(self) -> None:
         first = conversation((message("u1", "user", "alpha"),))
@@ -1453,6 +1458,10 @@ class PipelineV2Tests(unittest.TestCase):
             payload = review_queue_payload(config_for(root))
             self.assertGreaterEqual(payload["count"], 1)
             self.assertEqual("review_gate", payload["items"][-1]["reason"])
+            self.assertTrue(str(payload["items"][-1]["review_id"]).startswith("rev_"))
+            pending = ReviewStore(root / "data").list(status=ReviewStatus.PENDING)
+            self.assertEqual(1, len(pending))
+            self.assertEqual(payload["items"][-1]["review_id"], pending[0].id)
             self.assertFalse(payload["extraction_called"])
             context = FakeContext(
                 {

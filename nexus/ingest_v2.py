@@ -23,13 +23,14 @@ from .contracts import (
     SourceRef,
 )
 from .entity.resolver import normalize_alias
-from .errors import ExtractionError, NexusError, NexusIndexError
+from .errors import ExtractionError, NexusError, NexusIndexError, ReviewStoreError
 from .extraction.schema import EXTRACTION_SCHEMA_VERSION, ExtractionCandidate, ExtractionResult
 from .extraction.service import ExtractionService, classify_extraction_failure
 from .fingerprints import memory_fingerprint, stable_hash
 from .index.rebuild import rebuild_index
 from .normalize import NormalizedConversation, normalize_text
 from .policy import contains_secret_value, ingest_write_disposition, redact_secrets
+from .review import ReviewStore, create_review_item
 from .segmenter import (
     DEFAULT_MAX_MESSAGES,
     DEFAULT_TARGET_CHARS,
@@ -513,6 +514,7 @@ def review_queue_payload(config: NexusConfig) -> dict[str, Any]:
                         "segment_id": row.get("segment_id"),
                         "reason": row.get("reason"),
                         "failure_class": row.get("failure_class"),
+                        "review_id": row.get("review_id"),
                     }
                 )
     return {
@@ -536,6 +538,7 @@ def _queue_review(data_path: Path, payload: dict[str, Any]) -> None:
         "segment_id": payload.get("segment_id"),
         "reason": payload.get("reason"),
         "failure_class": payload.get("failure_class"),
+        "review_id": payload.get("review_id"),
     }
     line = redact_secrets(json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
     encoded = (line + "\n").encode("utf-8")
@@ -860,6 +863,50 @@ def _source_ref(conversation_id: str, span_ids: tuple[str, ...]) -> SourceRef:
         span_sha256=stable_hash(list(span_ids)),
         excerpt="",
     )
+
+
+def _enqueue_memory_review(
+    data_path: Path,
+    candidate: ExtractionCandidate,
+    *,
+    conversation_id: str,
+    ingest_id: str,
+    segment_id: str,
+    memory_type: MemoryType,
+) -> str:
+    statement = redact_secrets(candidate.statement).strip()
+    item = create_review_item(
+        candidate_kind="memory",
+        candidate={
+            "statement": statement,
+            "memory_type": memory_type.value,
+            "confidence": candidate.confidence,
+            "impact": Impact.LOW.value,
+            "entity_ids": [],
+            "extractor": {
+                "name": "nexus-ingest-v2",
+                "schema_version": EXTRACTION_SCHEMA_VERSION,
+            },
+        },
+        reason_codes=("review_gate",),
+        source_refs=(_source_ref(conversation_id, tuple(candidate.source_span_ids)),),
+    )
+    try:
+        stored = ReviewStore(data_path).enqueue(item)
+    except ReviewStoreError as exc:
+        raise IngestV2Error("review enqueue failed", failure_class="review") from exc
+    _queue_review(
+        data_path,
+        {
+            "ingest_id": ingest_id,
+            "conversation_id": conversation_id,
+            "segment_id": segment_id,
+            "reason": "review_gate",
+            "failure_class": "review",
+            "review_id": stored.id,
+        },
+    )
+    return stored.id
 
 
 def _match_prior(token: str, records: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -1670,15 +1717,15 @@ def run_conversation(
             elif disposition == "review":
                 rejected += 1
                 report.rejected += 1
-                _queue_review(
+                if canonical_memory_type is None:
+                    raise IngestV2Error("review enqueue failed", failure_class="review")
+                _enqueue_memory_review(
                     config.data_path,
-                    {
-                        "ingest_id": ingest_id,
-                        "conversation_id": conversation.external_conversation_id,
-                        "segment_id": segment.segment_id,
-                        "reason": "review_gate",
-                        "failure_class": "review",
-                    },
+                    candidate,
+                    conversation_id=conversation.external_conversation_id,
+                    ingest_id=ingest_id,
+                    segment_id=segment.segment_id,
+                    memory_type=canonical_memory_type,
                 )
             elif disposition == "scrubber_reject":
                 rejected += 1
