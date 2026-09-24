@@ -18,7 +18,7 @@ ChatGPT adapter güncel `chat.html` export biçimini script çalıştırmadan a�
 gerçek export dry-run'ı 208 konuşma ve 8.065 mesajı içerik yazdırmadan
 doğrulamıştır. Gerçek konuşmalar üzerinde extraction/shadow kabulü ayrıca
 tamamlanacaktır. Aktif kurulum merge commit'i
-`3e382c5e67a5b848c93ea1787fa3b31f303da822` ile sabitlenmiş; 155 kurulu-kopya
+`03117b3730bb221f05678f3caf95b0adcddd9280` ile sabitlenmiş; 235 kurulu-kopya
 testi, bytecode doğrulaması, Plugin Doctor,
 local/no-agent reminder canary, retention dry-run ve salt-okunur production
 permission audit, iki synthetic drill, yazmasız canonical forget ve approved
