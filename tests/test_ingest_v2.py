@@ -411,7 +411,7 @@ class PipelineV2Tests(unittest.TestCase):
             root = Path(directory)
             report = self._run(root, source, extractor, target_chars=4)
             self.assertEqual(FAILED_SEGMENT, report.final_status)
-            self.assertEqual(4, extractor.calls)
+            self.assertEqual(2, extractor.calls)
             self.assertEqual("completed", report.segment_statuses[next(iter(report.segment_statuses))])
             data = root / "data"
             checkpoint = load_checkpoint(data, report.ingest_id)
@@ -420,8 +420,119 @@ class PipelineV2Tests(unittest.TestCase):
                 item for item in checkpoint["segments"].values() if item["status"] == FAILED_SEGMENT
             ]
             self.assertEqual(1, len(failed))
-            self.assertEqual(3, failed[0]["attempt_count"])
+            self.assertEqual(1, failed[0]["attempt_count"])
             self.assertEqual(1, len(current_memories(load_ledger(data))))
+
+    def test_timeout_does_not_overlap_or_retry_the_same_payload(self) -> None:
+        import threading
+
+        import nexus.ingest_v2 as v2
+        from nexus.extraction.schema import CandidateKind
+        from nexus.extraction.service import ExtractionService
+
+        ExtractionService.reset_in_flight_for_tests()
+        original = v2.V2_TARGET_TIMEOUT_SECONDS
+        v2.V2_TARGET_TIMEOUT_SECONDS = 0.12
+
+        class SlowLlm:
+            def __init__(self) -> None:
+                self.starts = 0
+                self.flight = 0
+                self.max_flight = 0
+                self.lock = threading.Lock()
+                self.succeed = False
+
+            def complete_structured(self, **kwargs: object) -> object:
+                with self.lock:
+                    self.starts += 1
+                    self.flight += 1
+                    self.max_flight = max(self.max_flight, self.flight)
+                try:
+                    if not self.succeed:
+                        time.sleep(0.45)
+                    span_ids = [
+                        item["span_id"]
+                        for item in json.loads(str(kwargs["input"][0]["text"]).split("\n", 1)[1])["spans"]  # type: ignore[index]
+                    ]
+                    return type(
+                        "Resp",
+                        (),
+                        {
+                            "parsed": {
+                                "schema_version": 1,
+                                "candidates": [
+                                    {
+                                        "kind": CandidateKind.MEMORY.value,
+                                        "statement": "Kullanıcı kısa yanıtları tercih ediyor.",
+                                        "entity_mentions": [],
+                                        "temporal_expression": None,
+                                        "source_span_ids": span_ids,
+                                        "confidence": 0.95,
+                                        "ambiguity_flags": [],
+                                        "possible_supersedes": [],
+                                    }
+                                ],
+                                "ignored_span_ids": [],
+                                "warnings": [],
+                            },
+                            "text": "{}",
+                            "usage": None,
+                            "provider": "fixture",
+                            "model": "fixture",
+                            "agent_id": "fixture",
+                        },
+                    )()
+                finally:
+                    with self.lock:
+                        self.flight -= 1
+
+        llm = SlowLlm()
+        source = conversation((message("u1", "user", "aaaa"),))
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                config = config_for(root)
+                extractor = v2.service_extractor(llm)
+                first = run_conversation(
+                    config,
+                    source,
+                    extractor,
+                    canonical_memory_type=MemoryType.PREFERENCE,
+                    write_canonical=False,
+                    sleeper=lambda _: None,
+                )
+                self.assertEqual(FAILED_SEGMENT, first.final_status)
+                self.assertEqual(1, llm.starts)
+                self.assertEqual(1, llm.max_flight)
+                checkpoint = load_checkpoint(config.data_path, first.ingest_id)
+                assert checkpoint is not None
+                failed = [
+                    item
+                    for item in checkpoint["segments"].values()
+                    if item["status"] == FAILED_SEGMENT
+                ]
+                self.assertEqual(1, len(failed))
+                self.assertEqual(1, failed[0]["attempt_count"])
+                deadline = time.monotonic() + 1.0
+                while ExtractionService.in_flight_count() and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                llm.succeed = True
+                armed = reprocess_failed(config, first.ingest_id)
+                self.assertEqual(1, armed["reprocess_count"])
+                before = llm.starts
+                second = run_conversation(
+                    config,
+                    source,
+                    extractor,
+                    canonical_memory_type=MemoryType.PREFERENCE,
+                    write_canonical=False,
+                    sleeper=lambda _: None,
+                )
+                self.assertEqual("completed", second.final_status)
+                self.assertEqual(1, llm.starts - before)
+        finally:
+            v2.V2_TARGET_TIMEOUT_SECONDS = original
+            ExtractionService.reset_in_flight_for_tests()
 
     def test_first_timeout_rebuilds_at_min_pack_instead_of_retrying(self) -> None:
         source = conversation((message("u1", "user", "x" * 600),))
@@ -668,7 +779,7 @@ class PipelineV2Tests(unittest.TestCase):
                 sleeper=lambda _: None,
             )
             self.assertEqual(FAILED_SEGMENT, first.final_status)
-            self.assertEqual([1, 1, 1, 2], extractor.calls)
+            self.assertEqual([1, 2], extractor.calls)
             armed = reprocess_failed(config, first.ingest_id)
             self.assertEqual(1, armed["reprocess_count"])
             extractor.fail_first = False
@@ -1156,7 +1267,7 @@ class PipelineV2Tests(unittest.TestCase):
                 if self.calls < self.succeed_on:
                     raise ExtractionError(
                         "structured extraction failed after 1 bounded attempt(s)",
-                        failure_class="timeout",
+                        failure_class="http_5xx" if self.succeed_on != 99 else "timeout",
                     )
                 return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
 
@@ -2213,7 +2324,7 @@ class PipelineV2Tests(unittest.TestCase):
                 self.calls += 1
                 if self.calls < 3:
                     time.sleep(0.05)
-                    raise ExtractionError("synthetic timeout", failure_class="timeout")
+                    raise ExtractionError("synthetic timeout", failure_class="http_5xx")
                 return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
 
         with tempfile.TemporaryDirectory() as directory:

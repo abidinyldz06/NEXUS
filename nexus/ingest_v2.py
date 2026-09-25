@@ -2166,6 +2166,11 @@ def run_conversation(
                         shrunk = True
                         outcome = None
                         break
+                    segment_state[segment.segment_id]["status"] = FAILED_SEGMENT
+                    checkpoint["carry_forward"] = carry_cell[0]
+                    _save_checkpoint(config.data_path, checkpoint)
+                    outcome = None
+                    break
                 if not is_retryable_failure(failure_class) or attempts >= MAX_ATTEMPTS:
                     segment_state[segment.segment_id]["status"] = FAILED_SEGMENT
                     checkpoint["carry_forward"] = carry_cell[0]
