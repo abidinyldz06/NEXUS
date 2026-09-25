@@ -534,6 +534,125 @@ class PipelineV2Tests(unittest.TestCase):
             v2.V2_TARGET_TIMEOUT_SECONDS = original
             ExtractionService.reset_in_flight_for_tests()
 
+    def test_busy_queue_does_not_fail_the_waiting_segment(self) -> None:
+        import threading
+
+        import nexus.ingest_v2 as v2
+        from nexus.extraction.schema import CandidateKind
+        from nexus.extraction.service import ExtractionService
+
+        ExtractionService.reset_in_flight_for_tests()
+        original = v2.V2_TARGET_TIMEOUT_SECONDS
+        v2.V2_TARGET_TIMEOUT_SECONDS = 0.12
+
+        class SlowLlm:
+            def __init__(self) -> None:
+                self.started_indexes: list[int] = []
+                self.lock = threading.Lock()
+                self.succeed_after_first = False
+
+            def complete_structured(self, **kwargs: object) -> object:
+                payload = json.loads(str(kwargs["input"][0]["text"]).split("\n", 1)[1])  # type: ignore[index]
+                index = int(payload["segment_index"])
+                with self.lock:
+                    self.started_indexes.append(index)
+                    first = len(self.started_indexes) == 1
+                if first and not self.succeed_after_first:
+                    time.sleep(0.45)
+                span_ids = [item["span_id"] for item in payload["spans"]]
+                return type(
+                    "Resp",
+                    (),
+                    {
+                        "parsed": {
+                            "schema_version": 1,
+                            "candidates": [
+                                {
+                                    "kind": CandidateKind.MEMORY.value,
+                                    "statement": "Kullanıcı kısa yanıtları tercih ediyor.",
+                                    "entity_mentions": [],
+                                    "temporal_expression": None,
+                                    "source_span_ids": span_ids,
+                                    "confidence": 0.95,
+                                    "ambiguity_flags": [],
+                                    "possible_supersedes": [],
+                                }
+                            ],
+                            "ignored_span_ids": [],
+                            "warnings": [],
+                        },
+                        "text": "{}",
+                        "usage": None,
+                        "provider": "fixture",
+                        "model": "fixture",
+                        "agent_id": "fixture",
+                    },
+                )()
+
+        llm = SlowLlm()
+        source = conversation(
+            (
+                message("u1", "user", "aaaa"),
+                message("a1", "assistant", "bbbb"),
+            )
+        )
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                config = config_for(Path(directory))
+                extractor = v2.service_extractor(llm)
+                first = run_conversation(
+                    config,
+                    source,
+                    extractor,
+                    canonical_memory_type=MemoryType.PREFERENCE,
+                    write_canonical=False,
+                    target_chars=4,
+                    max_messages=1,
+                    sleeper=lambda _: None,
+                )
+                self.assertEqual("paused", first.final_status)
+                self.assertEqual([1], llm.started_indexes)
+                checkpoint = load_checkpoint(config.data_path, first.ingest_id)
+                assert checkpoint is not None
+                by_start = {
+                    item["start_message_index"]: item
+                    for item in checkpoint["segments"].values()
+                    if isinstance(item, dict)
+                }
+                self.assertEqual(FAILED_SEGMENT, by_start[0]["status"])
+                self.assertEqual("incomplete", by_start[1]["status"])
+                self.assertEqual(0, by_start[1]["attempt_count"])
+                self.assertIsNone(by_start[1].get("failure_class"))
+                self.assertNotEqual(FAILED_SEGMENT, by_start[1]["status"])
+                deadline = time.monotonic() + 1.0
+                while ExtractionService.in_flight_count() and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                llm.succeed_after_first = True
+                second = run_conversation(
+                    config,
+                    source,
+                    extractor,
+                    canonical_memory_type=MemoryType.PREFERENCE,
+                    write_canonical=False,
+                    target_chars=4,
+                    max_messages=1,
+                    sleeper=lambda _: None,
+                )
+                self.assertEqual(1, llm.started_indexes.count(2))
+                later = load_checkpoint(config.data_path, first.ingest_id)
+                assert later is not None
+                second_row = next(
+                    item
+                    for item in later["segments"].values()
+                    if isinstance(item, dict) and item.get("start_message_index") == 1
+                )
+                self.assertEqual("completed", second_row["status"])
+                self.assertEqual(1, second_row["attempt_count"])
+                self.assertEqual("completed", second.segment_statuses[second_row["segment_id"]])
+        finally:
+            v2.V2_TARGET_TIMEOUT_SECONDS = original
+            ExtractionService.reset_in_flight_for_tests()
+
     def test_first_timeout_rebuilds_at_min_pack_instead_of_retrying(self) -> None:
         source = conversation((message("u1", "user", "x" * 600),))
 

@@ -20,7 +20,7 @@ from nexus.extraction.schema import (
     ExtractionResult,
     validate_extraction_payload,
 )
-from nexus.extraction.service import PROMPT_VERSION, ExtractionService
+from nexus.extraction.service import PROMPT_VERSION, ExtractionService, ExtractorBusy
 from nexus.normalize import NormalizedConversation, NormalizedMessage
 from nexus.segmenter import ConversationSegment, segment_conversation
 
@@ -346,10 +346,12 @@ class ExtractionContractTests(unittest.TestCase):
                         self.flight -= 1
 
         llm = SlowLlm()
-        for _ in range(3):
-            with self.assertRaises(ExtractionError) as raised:
+        with self.assertRaises(ExtractionError) as raised:
+            ExtractionService(llm, max_attempts=1, timeout_seconds=0.12).extract(segment())
+        self.assertEqual("timeout", raised.exception.failure_class)
+        for _ in range(2):
+            with self.assertRaises(ExtractorBusy):
                 ExtractionService(llm, max_attempts=1, timeout_seconds=0.12).extract(segment())
-            self.assertEqual("timeout", raised.exception.failure_class)
         self.assertEqual(1, llm.starts)
         self.assertEqual(1, llm.max_flight)
         deadline = time.monotonic() + 1.0

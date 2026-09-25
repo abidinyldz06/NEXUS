@@ -19,6 +19,10 @@ from .schema import EXTRACTION_JSON_SCHEMA, ExtractionResult, validate_extractio
 PROMPT_VERSION = "nexus-extraction-prompt-v2"
 
 
+class ExtractorBusy(Exception):
+    """The previous provider call still owns the flight. This segment was not sent."""
+
+
 def _exception_chain(exc: BaseException) -> tuple[BaseException, ...]:
     seen: list[BaseException] = []
     current: BaseException | None = exc
@@ -114,15 +118,18 @@ class ExtractionService:
             cls._in_flight = 0
             cls._in_flight_cond.notify_all()
 
-    def _acquire_flight(self, timeout: float) -> None:
-        deadline = time.monotonic() + timeout
+    def _acquire_flight_until(self, deadline: float) -> float:
         with self._in_flight_cond:
             while ExtractionService._in_flight > 0:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise TimeoutError()
+                    raise ExtractorBusy()
                 self._in_flight_cond.wait(timeout=remaining)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ExtractorBusy()
             ExtractionService._in_flight += 1
+            return remaining
 
     def _release_flight(self) -> None:
         with self._in_flight_cond:
@@ -132,11 +139,13 @@ class ExtractionService:
     def _complete_structured(self, **kwargs: Any) -> Any:
         """Wait at most ``timeout`` seconds even if the provider ignores its own cap.
 
-        A timed-out provider thread is not cancelled. The next call waits until
-        that in-flight request finishes so retries cannot stack.
+        Queue wait and the provider call share that budget. A timed-out provider
+        thread is not cancelled; the next segment waits, and if the budget
+        elapses before a new call starts it is not counted as a model attempt.
         """
         timeout = float(kwargs.get("timeout") or self.timeout_seconds)
-        self._acquire_flight(timeout)
+        deadline = time.monotonic() + timeout
+        remaining = self._acquire_flight_until(deadline)
         released = False
 
         def release() -> None:
@@ -151,7 +160,7 @@ class ExtractionService:
         try:
             future = pool.submit(self.llm.complete_structured, **kwargs)
             try:
-                return future.result(timeout=timeout)
+                return future.result(timeout=remaining)
             except FuturesTimeoutError as exc:
                 raise TimeoutError() from exc
         finally:
@@ -227,6 +236,8 @@ class ExtractionService:
                         total_tokens=int(getattr(usage, "total_tokens", 0) or 0),
                     ),
                 )
+            except ExtractorBusy:
+                raise
             except json.JSONDecodeError:
                 last_class = "invalid_json"
             except ExtractionError:

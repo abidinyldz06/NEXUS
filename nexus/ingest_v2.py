@@ -26,7 +26,11 @@ from .contracts import (
 from .entity.resolver import normalize_alias
 from .errors import ExtractionError, NexusError, NexusIndexError, ReviewStoreError, VaultError
 from .extraction.schema import EXTRACTION_SCHEMA_VERSION, ExtractionCandidate, ExtractionResult
-from .extraction.service import ExtractionService, classify_extraction_failure
+from .extraction.service import (
+    ExtractionService,
+    ExtractorBusy,
+    classify_extraction_failure,
+)
 from .fingerprints import memory_fingerprint, stable_hash
 from .index.rebuild import rebuild_index
 from .normalize import NormalizedConversation, normalize_text
@@ -2112,6 +2116,58 @@ def run_conversation(
                         segment_wall_ms=int((time.monotonic() - segment_started) * 1000),
                         attempt_count=attempts,
                         retry_count=max(0, attempts - 1),
+                        timeout_count=timeouts,
+                        writes="none",
+                        final_status="paused",
+                    ),
+                )
+                return report
+            except ExtractorBusy:
+                last_attempt_ms = int((time.monotonic() - attempt_started) * 1000)
+                attempts = max(0, attempts - 1)
+                segment_state[segment.segment_id] = {
+                    "ingest_id": ingest_id,
+                    "conversation_id": conversation.external_conversation_id,
+                    "segment_id": segment.segment_id,
+                    "start_message_index": segment.start_message_index,
+                    "end_message_index": segment.end_message_index,
+                    "schema_version": schema_version,
+                    "status": "incomplete",
+                    "attempt_count": attempts,
+                    "started_at": started_at if attempts else None,
+                    "completed_at": None,
+                    "content_hash": segment.content_hash,
+                    "split_fallback": segment.split_fallback,
+                    "source_content_hash": (
+                        _range_content_hash(
+                            conversation, segment.start_message_index, segment.end_message_index
+                        )
+                        if segment.split_fallback
+                        else None
+                    ),
+                    "failure_class": None,
+                    "extraction": {"timeout_count": timeouts},
+                }
+                report.final_status = "paused"
+                report.segment_statuses[segment.segment_id] = "incomplete"
+                checkpoint["carry_forward"] = carry_cell[0]
+                checkpoint["segments"] = segment_state
+                _save_checkpoint(config.data_path, checkpoint)
+                append_observation(
+                    config.data_path,
+                    _observation(
+                        ingest_id=ingest_id,
+                        conversation_id=conversation.external_conversation_id,
+                        started_at=started,
+                        finished_at=_utc_now(),
+                        schema_version=schema_version,
+                        segment_count=len(segments),
+                        segment_id=segment.segment_id,
+                        segment_range=[segment.start_message_index, segment.end_message_index],
+                        segment_duration_ms=last_attempt_ms,
+                        segment_wall_ms=int((time.monotonic() - segment_started) * 1000),
+                        attempt_count=attempts,
+                        retry_count=0,
                         timeout_count=timeouts,
                         writes="none",
                         final_status="paused",
