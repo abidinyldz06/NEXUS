@@ -1608,6 +1608,21 @@ def _resume_after_index(segment_state: dict[str, Any]) -> int:
     return _completed_end(segment_state)
 
 
+def _prune_failed_segments(segment_state: dict[str, Any], resume_after: int) -> int:
+    """Drop FAILED_SEGMENT rows that will be packed again so leftover status cannot stick."""
+    drop = [
+        key
+        for key, item in list(segment_state.items())
+        if isinstance(item, dict)
+        and item.get("status") == FAILED_SEGMENT
+        and isinstance(item.get("start_message_index"), int)
+        and item["start_message_index"] > resume_after
+    ]
+    for key in drop:
+        del segment_state[key]
+    return len(drop)
+
+
 def _completed_count(segment_state: dict[str, Any]) -> int:
     return sum(
         1
@@ -1661,12 +1676,16 @@ def run_conversation(
         ingest_id, conversation.external_conversation_id, schema_version
     )
     segment_state: dict[str, Any] = checkpoint.setdefault("segments", {})
+    resume_after = _resume_after_index(segment_state)
+    if _prune_failed_segments(segment_state, resume_after):
+        checkpoint["segments"] = segment_state
+        _save_checkpoint(config.data_path, checkpoint)
     segments = segment_conversation_v2(
         conversation,
         target_chars=target_chars,
         max_messages=max_messages,
         schema_version=schema_version,
-        start_after_index=_resume_after_index(segment_state),
+        start_after_index=resume_after,
         start_ordinal=_completed_count(segment_state) + 1,
     )
     if not carry_cell[0]:
@@ -2181,6 +2200,10 @@ def run_inbox(
 
     if not config.ingest_pipeline_v2:
         raise IngestV2Error("ingest_pipeline_v2 is off")
+    if not 500 <= int(max_segment_chars) <= DEFAULT_TARGET_CHARS:
+        raise IngestV2Error("max-segment-chars must stay within 500-12000")
+    if not 1 <= int(max_messages) <= DEFAULT_MAX_MESSAGES:
+        raise IngestV2Error("max-messages must stay within 1-12")
     prepared = _prepare_exact_source(
         config,
         relative_path=relative_path,
