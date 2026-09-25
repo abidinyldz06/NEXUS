@@ -52,12 +52,14 @@ from nexus.ingest_v2 import (
     status_payload,
     unpause_ingest,
     write_human_review_pack,
+    _save_checkpoint,
 )
 from nexus.normalize import NormalizedConversation, NormalizedMessage
 from nexus.segmenter import (
     SEGMENTER_VERSION,
     _fallback_parts,
     normalize_for_segment_id,
+    normalized_content_hash,
     segment_conversation,
     segment_conversation_v2,
 )
@@ -420,6 +422,214 @@ class PipelineV2Tests(unittest.TestCase):
             self.assertEqual(1, len(failed))
             self.assertEqual(3, failed[0]["attempt_count"])
             self.assertEqual(1, len(current_memories(load_ledger(data))))
+
+    def test_first_timeout_rebuilds_at_min_pack_instead_of_retrying(self) -> None:
+        source = conversation((message("u1", "user", "x" * 600),))
+
+        class Extractor:
+            def __init__(self) -> None:
+                self.sizes: list[int] = []
+
+            def __call__(self, segment: object) -> ExtractionResult:
+                size = segment.character_count  # type: ignore[attr-defined]
+                self.sizes.append(size)
+                if size > 500:
+                    raise ExtractionError(
+                        "structured extraction failed after 1 bounded attempt(s)",
+                        failure_class="timeout",
+                    )
+                return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+
+        extractor = Extractor()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            report = self._run(
+                root,
+                source,
+                extractor,
+                target_chars=12000,
+                max_messages=12,
+                sleeper=lambda _: None,
+            )
+            self.assertEqual("completed", report.final_status)
+            self.assertGreater(extractor.sizes[0], 500)
+            self.assertTrue(all(size <= 500 for size in extractor.sizes[1:]))
+            self.assertEqual(1, sum(1 for size in extractor.sizes if size > 500))
+            checkpoint = load_checkpoint(root / "data", report.ingest_id)
+            assert checkpoint is not None
+            self.assertEqual(500, checkpoint.get("shrink_target_chars"))
+            self.assertEqual(1, checkpoint.get("shrink_max_messages"))
+            self.assertFalse(
+                any(
+                    item.get("status") == FAILED_SEGMENT
+                    for item in checkpoint["segments"].values()
+                )
+            )
+
+    def test_timeout_shrink_survives_resume_without_repeating_large_payload(self) -> None:
+        source = conversation((message("u1", "user", "x" * 600),))
+
+        class Extractor:
+            def __init__(self) -> None:
+                self.sizes: list[int] = []
+                self.pause = True
+
+            def __call__(self, segment: object) -> ExtractionResult:
+                size = segment.character_count  # type: ignore[attr-defined]
+                self.sizes.append(size)
+                if size > 500:
+                    raise ExtractionError(
+                        "structured extraction failed after 1 bounded attempt(s)",
+                        failure_class="timeout",
+                    )
+                if self.pause:
+                    raise IngestPaused("deterministic stop")
+                return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+
+        extractor = Extractor()
+        with tempfile.TemporaryDirectory() as directory:
+            config = config_for(Path(directory))
+            first = run_conversation(
+                config,
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=False,
+                target_chars=12000,
+                max_messages=12,
+                sleeper=lambda _: None,
+            )
+            self.assertEqual("paused", first.final_status)
+            self.assertEqual(1, sum(1 for size in extractor.sizes if size > 500))
+            extractor.pause = False
+            second = run_conversation(
+                config,
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=False,
+                target_chars=12000,
+                max_messages=12,
+                sleeper=lambda _: None,
+            )
+            self.assertEqual("completed", second.final_status)
+            self.assertEqual(1, sum(1 for size in extractor.sizes if size > 500))
+
+    def test_timeout_shrink_crash_resumes_hole_despite_later_completed(self) -> None:
+        source = conversation(
+            (
+                message("u1", "user", "x" * 600),
+                message("u2", "user", "later"),
+            )
+        )
+
+        class Extractor:
+            def __init__(self) -> None:
+                self.sizes: list[int] = []
+                self.data_path: Path | None = None
+
+            def __call__(self, segment: object) -> ExtractionResult:
+                size = segment.character_count  # type: ignore[attr-defined]
+                self.sizes.append(size)
+                if size > 500:
+                    assert self.data_path is not None
+                    set_paused(self.data_path)
+                    raise ExtractionError(
+                        "structured extraction failed after 1 bounded attempt(s)",
+                        failure_class="timeout",
+                    )
+                return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+
+        extractor = Extractor()
+        with tempfile.TemporaryDirectory() as directory:
+            config = config_for(Path(directory))
+            extractor.data_path = config.data_path
+            first = run_conversation(
+                config,
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=False,
+                target_chars=12000,
+                max_messages=12,
+                sleeper=lambda _: None,
+            )
+            self.assertEqual("paused", first.final_status)
+            self.assertEqual(1, len(extractor.sizes))
+            self.assertGreater(extractor.sizes[0], 500)
+            checkpoint = load_checkpoint(config.data_path, first.ingest_id)
+            assert checkpoint is not None
+            holes = [
+                item
+                for item in checkpoint["segments"].values()
+                if item.get("status") == "incomplete"
+                and item.get("start_message_index") == 0
+            ]
+            self.assertTrue(holes)
+            checkpoint["segments"]["later-completed"] = {
+                "ingest_id": first.ingest_id,
+                "conversation_id": source.external_conversation_id,
+                "segment_id": "later-completed",
+                "start_message_index": 99,
+                "end_message_index": 99,
+                "status": "completed",
+                "attempt_count": 1,
+                "content_hash": normalized_content_hash(()),
+                "split_fallback": False,
+            }
+            _save_checkpoint(config.data_path, checkpoint)
+            set_paused(config.data_path, False)
+            second = run_conversation(
+                config,
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=False,
+                target_chars=12000,
+                max_messages=12,
+                sleeper=lambda _: None,
+            )
+            self.assertEqual("completed", second.final_status)
+            self.assertEqual(1, sum(1 for size in extractor.sizes if size > 500))
+            self.assertGreater(len(extractor.sizes), 1)
+            self.assertTrue(all(size <= 500 for size in extractor.sizes[1:]))
+
+    def test_timeout_shrink_over_max_segments_makes_no_further_model_calls(self) -> None:
+        source = conversation((message("u1", "user", "x" * 12000),))
+
+        class Extractor:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def __call__(self, segment: object) -> ExtractionResult:
+                self.calls += 1
+                raise ExtractionError(
+                    "structured extraction failed after 1 bounded attempt(s)",
+                    failure_class="timeout",
+                )
+
+        extractor = Extractor()
+        with tempfile.TemporaryDirectory() as directory:
+            report = self._run(
+                Path(directory),
+                source,
+                extractor,
+                target_chars=12000,
+                max_messages=12,
+                max_segments=20,
+                sleeper=lambda _: None,
+            )
+            self.assertEqual(FAILED_SEGMENT, report.final_status)
+            self.assertEqual(1, extractor.calls)
+            checkpoint = load_checkpoint(Path(directory) / "data", report.ingest_id)
+            assert checkpoint is not None
+            failed = [
+                item
+                for item in checkpoint["segments"].values()
+                if item.get("status") == FAILED_SEGMENT
+            ]
+            self.assertEqual(1, len(failed))
+            self.assertEqual(1, failed[0]["attempt_count"])
 
     def test_resume_retries_failed_prefix_without_reextracting_later_completed(self) -> None:
         source = conversation(

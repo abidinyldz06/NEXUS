@@ -6,7 +6,7 @@ import json
 import os
 import tempfile
 import time
-from collections import Counter
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
@@ -47,6 +47,7 @@ from .vault.renderer import extract_record_payload, extract_written_at, memory_f
 V2_TARGET_TIMEOUT_SECONDS = 60
 V2_HARD_TIMEOUT_SECONDS = 90
 LONG_UNIT_DEFAULT_SECONDS = 300
+MIN_SEGMENT_CHARS = 500
 MAX_RETRIES = 2
 MAX_ATTEMPTS = 1 + MAX_RETRIES
 RETRY_BACKOFF_SECONDS = (1.0, 2.0)
@@ -1636,6 +1637,146 @@ def _completed_count(segment_state: dict[str, Any]) -> int:
     )
 
 
+def _effective_pack_budget(
+    checkpoint: dict[str, Any], target_chars: int, max_messages: int
+) -> tuple[int, int]:
+    chars = int(target_chars)
+    msgs = int(max_messages)
+    stored_chars = checkpoint.get("shrink_target_chars")
+    stored_msgs = checkpoint.get("shrink_max_messages")
+    if isinstance(stored_chars, int) and stored_chars >= 1:
+        chars = min(chars, stored_chars)
+    if isinstance(stored_msgs, int) and stored_msgs >= 1:
+        msgs = min(msgs, stored_msgs)
+    return chars, msgs
+
+
+def _shrink_pack_budget(target_chars: int, max_messages: int) -> tuple[int, int]:
+    chars = min(int(target_chars), MIN_SEGMENT_CHARS)
+    return max(1, chars), 1
+
+
+def _completed_split_fallback_at(segment_state: dict[str, Any], start: int) -> bool:
+    for item in segment_state.values():
+        if not isinstance(item, dict) or item.get("status") != "completed":
+            continue
+        if item.get("split_fallback") and item.get("start_message_index") == start:
+            return True
+    return False
+
+
+def _drop_unfinished_from(segment_state: dict[str, Any], start: int) -> None:
+    for key, item in list(segment_state.items()):
+        if not isinstance(item, dict) or item.get("status") == "completed":
+            continue
+        value = item.get("start_message_index")
+        if isinstance(value, int) and value >= start:
+            del segment_state[key]
+
+
+def _timeout_shrink_tail(
+    conversation: NormalizedConversation,
+    segment: ConversationSegment,
+    *,
+    target_chars: int,
+    max_messages: int,
+    schema_version: str,
+    start_ordinal: int,
+    segment_state: dict[str, Any],
+) -> tuple[ConversationSegment, ...]:
+    """Rebuild remaining work at the smallest safe pack after a first timeout."""
+    if _completed_split_fallback_at(segment_state, segment.start_message_index):
+        return ()
+    chars, msgs = _shrink_pack_budget(target_chars, max_messages)
+    if (
+        chars >= int(target_chars)
+        and msgs >= int(max_messages)
+        and segment.character_count <= chars
+    ):
+        return ()
+    tail = segment_conversation_v2(
+        conversation,
+        target_chars=chars,
+        max_messages=msgs,
+        schema_version=schema_version,
+        start_after_index=segment.start_message_index - 1,
+        start_ordinal=start_ordinal,
+    )
+    if not tail:
+        return ()
+    first = tail[0]
+    if (
+        first.segment_id == segment.segment_id
+        and first.content_hash == segment.content_hash
+        and first.character_count == segment.character_count
+    ):
+        return ()
+    return tail
+
+
+def _incomplete_shrink_row(
+    ingest_id: str,
+    conversation: NormalizedConversation,
+    segment: ConversationSegment,
+    *,
+    schema_version: str,
+) -> dict[str, Any]:
+    return {
+        "ingest_id": ingest_id,
+        "conversation_id": conversation.external_conversation_id,
+        "segment_id": segment.segment_id,
+        "start_message_index": segment.start_message_index,
+        "end_message_index": segment.end_message_index,
+        "schema_version": schema_version,
+        "status": "incomplete",
+        "attempt_count": 0,
+        "started_at": None,
+        "completed_at": None,
+        "content_hash": segment.content_hash,
+        "split_fallback": segment.split_fallback,
+        "source_content_hash": (
+            _range_content_hash(
+                conversation, segment.start_message_index, segment.end_message_index
+            )
+            if segment.split_fallback
+            else None
+        ),
+        "failure_class": None,
+        "extraction": {"timeout_count": 0, "timeout_shrink": True},
+    }
+
+
+def _persist_shrink_tail(
+    checkpoint: dict[str, Any],
+    segment_state: dict[str, Any],
+    *,
+    ingest_id: str,
+    conversation: NormalizedConversation,
+    parent_start: int,
+    tail: tuple[ConversationSegment, ...],
+    chars: int,
+    msgs: int,
+    schema_version: str,
+    carry: str,
+) -> None:
+    """Drop the timed-out parent and write child holes in one checkpoint save."""
+    checkpoint["shrink_target_chars"] = chars
+    checkpoint["shrink_max_messages"] = msgs
+    checkpoint["carry_forward"] = carry
+    _drop_unfinished_from(segment_state, parent_start)
+    for child in tail:
+        existing = segment_state.get(child.segment_id)
+        if isinstance(existing, dict) and existing.get("status") == "completed":
+            continue
+        segment_state[child.segment_id] = _incomplete_shrink_row(
+            ingest_id,
+            conversation,
+            child,
+            schema_version=schema_version,
+        )
+    checkpoint["segments"] = segment_state
+
+
 def _range_content_hash(
     conversation: NormalizedConversation, start: int, end: int
 ) -> str:
@@ -1658,6 +1799,7 @@ def run_conversation(
     canonical_memory_type: MemoryType = MemoryType.PREFERENCE,
     target_chars: int = DEFAULT_TARGET_CHARS,
     max_messages: int = DEFAULT_MAX_MESSAGES,
+    max_segments: int | None = None,
     schema_version: str = SEGMENT_ID_SCHEMA_VERSION,
     index_writer: Callable[[Path, Path], object] | None = None,
     sleeper: Callable[[float], None] | None = None,
@@ -1681,11 +1823,14 @@ def run_conversation(
         ingest_id, conversation.external_conversation_id, schema_version
     )
     segment_state: dict[str, Any] = checkpoint.setdefault("segments", {})
+    pack_chars, pack_messages = _effective_pack_budget(
+        checkpoint, target_chars, max_messages
+    )
     resume_after = _resume_after_index(segment_state)
     segments = segment_conversation_v2(
         conversation,
-        target_chars=target_chars,
-        max_messages=max_messages,
+        target_chars=pack_chars,
+        max_messages=pack_messages,
         schema_version=schema_version,
         start_after_index=resume_after,
         start_ordinal=_completed_count(segment_state) + 1,
@@ -1869,7 +2014,9 @@ def run_conversation(
         )
         return report
 
-    for segment in segments:
+    work: deque[ConversationSegment] = deque(segments)
+    while work:
+        segment = work.popleft()
         if is_paused(config.data_path):
             write_canonical = False
         state = segment_state.get(segment.segment_id)
@@ -1909,6 +2056,7 @@ def run_conversation(
         outcome: ExtractionResult | None = None
         failure_class: str | None = None
         last_attempt_ms = 0
+        shrunk = False
         while attempts < MAX_ATTEMPTS:
             attempts += 1
             attempt_started = time.monotonic()
@@ -1980,6 +2128,44 @@ def run_conversation(
                 segment_state[segment.segment_id]["extraction"] = {"timeout_count": timeouts}
                 checkpoint["carry_forward"] = carry_cell[0]
                 _save_checkpoint(config.data_path, checkpoint)
+                if failure_class == "timeout" and attempts == 1:
+                    tail = _timeout_shrink_tail(
+                        conversation,
+                        segment,
+                        target_chars=pack_chars,
+                        max_messages=pack_messages,
+                        schema_version=schema_version,
+                        start_ordinal=_completed_count(segment_state) + 1,
+                        segment_state=segment_state,
+                    )
+                    if tail:
+                        if max_segments is not None and len(tail) > max_segments:
+                            segment_state[segment.segment_id]["status"] = FAILED_SEGMENT
+                            checkpoint["carry_forward"] = carry_cell[0]
+                            _save_checkpoint(config.data_path, checkpoint)
+                            work.clear()
+                            outcome = None
+                            break
+                        chars, msgs = _shrink_pack_budget(pack_chars, pack_messages)
+                        pack_chars, pack_messages = chars, msgs
+                        _persist_shrink_tail(
+                            checkpoint,
+                            segment_state,
+                            ingest_id=ingest_id,
+                            conversation=conversation,
+                            parent_start=segment.start_message_index,
+                            tail=tail,
+                            chars=chars,
+                            msgs=msgs,
+                            schema_version=schema_version,
+                            carry=carry_cell[0],
+                        )
+                        _save_checkpoint(config.data_path, checkpoint)
+                        work.clear()
+                        work.extend(tail)
+                        shrunk = True
+                        outcome = None
+                        break
                 if not is_retryable_failure(failure_class) or attempts >= MAX_ATTEMPTS:
                     segment_state[segment.segment_id]["status"] = FAILED_SEGMENT
                     checkpoint["carry_forward"] = carry_cell[0]
@@ -1993,6 +2179,38 @@ def run_conversation(
                     sleeper(delay)
         duration_ms = last_attempt_ms
         wall_ms = int((time.monotonic() - segment_started) * 1000)
+        if shrunk:
+            report.segment_statuses[segment.segment_id] = "timeout_shrink"
+            append_observation(
+                config.data_path,
+                _observation(
+                    ingest_id=ingest_id,
+                    conversation_id=conversation.external_conversation_id,
+                    started_at=started,
+                    finished_at=_utc_now(),
+                    schema_version=schema_version,
+                    status="RUNNING",
+                    segment_count=len(segments),
+                    segment_id=segment.segment_id,
+                    segment_range=[segment.start_message_index, segment.end_message_index],
+                    latency_ms=duration_ms,
+                    token_estimate=_logged_tokens(segment, extractor),
+                    retries=0,
+                    segment_status="timeout_shrink",
+                    segment_duration_ms=duration_ms,
+                    segment_wall_ms=wall_ms,
+                    attempt_count=attempts,
+                    retry_count=0,
+                    timeout_count=timeouts,
+                    error_class="timeout",
+                    writes="none",
+                    final_status="timeout_shrink",
+                ),
+            )
+            if is_paused(config.data_path):
+                report.final_status = "paused"
+                return report
+            continue
         if outcome is None:
             report.segment_statuses[segment.segment_id] = FAILED_SEGMENT
             report.final_status = FAILED_SEGMENT
@@ -2222,7 +2440,7 @@ def run_inbox(
 
     if not config.ingest_pipeline_v2:
         raise IngestV2Error("ingest_pipeline_v2 is off")
-    if not 500 <= int(max_segment_chars) <= DEFAULT_TARGET_CHARS:
+    if not MIN_SEGMENT_CHARS <= int(max_segment_chars) <= DEFAULT_TARGET_CHARS:
         raise IngestV2Error("max-segment-chars must stay within 500-12000")
     if not 1 <= int(max_messages) <= DEFAULT_MAX_MESSAGES:
         raise IngestV2Error("max-messages must stay within 1-12")
@@ -2243,10 +2461,13 @@ def run_inbox(
         write_canonical = True
     stored = load_checkpoint(config.data_path, ingest_id)
     stored_segments = stored.get("segments", {}) if isinstance(stored, dict) else {}
+    pack_chars, pack_messages = _effective_pack_budget(
+        stored or {}, max_segment_chars, max_messages
+    )
     planned = segment_conversation_v2(
         conversation,
-        target_chars=max_segment_chars,
-        max_messages=max_messages,
+        target_chars=pack_chars,
+        max_messages=pack_messages,
         start_after_index=_resume_after_index(stored_segments),
         start_ordinal=_completed_count(stored_segments) + 1,
     )
@@ -2281,6 +2502,7 @@ def run_inbox(
         canonical_memory_type=MemoryType.PREFERENCE,
         target_chars=max_segment_chars,
         max_messages=max_messages,
+        max_segments=max_segments,
         sleeper=time.sleep,
         carry_cell=carry_cell,
     )
