@@ -1603,6 +1603,10 @@ def _resume_after_index(segment_state: dict[str, Any]) -> int:
         status = item.get("status")
         if status in {FAILED_SEGMENT, "incomplete"} and isinstance(start, int):
             unfinished_starts.append(start)
+        # Several fallback parts share one message index. A completed part
+        # must never freeze the rest of that source message on resume.
+        if status == "completed" and item.get("split_fallback") and isinstance(start, int):
+            unfinished_starts.append(start)
     if unfinished_starts:
         return min(unfinished_starts) - 1
     return _completed_end(segment_state)
@@ -1707,7 +1711,10 @@ def run_conversation(
         end = item.get("end_message_index")
         if not isinstance(start, int) or not isinstance(end, int):
             continue
-        if _range_content_hash(conversation, start, end) == item.get("content_hash"):
+        expected_hash = item.get(
+            "source_content_hash" if item.get("split_fallback") else "content_hash"
+        )
+        if _range_content_hash(conversation, start, end) == expected_hash:
             continue
         _queue_review(
             config.data_path,
@@ -1916,6 +1923,13 @@ def run_conversation(
                 "started_at": started_at,
                 "completed_at": None,
                 "content_hash": segment.content_hash,
+                "split_fallback": segment.split_fallback,
+                "source_content_hash": (
+                    _range_content_hash(
+                        conversation, segment.start_message_index, segment.end_message_index
+                    )
+                    if segment.split_fallback else None
+                ),
                 "failure_class": None,
                 "extraction": {"timeout_count": timeouts},
             }
@@ -2092,6 +2106,13 @@ def run_conversation(
             "started_at": started_at,
             "completed_at": _utc_now(),
             "content_hash": segment.content_hash,
+            "split_fallback": segment.split_fallback,
+            "source_content_hash": (
+                _range_content_hash(
+                    conversation, segment.start_message_index, segment.end_message_index
+                )
+                if segment.split_fallback else None
+            ),
             "failure_class": None,
             "extraction": {
                 "candidate_count": len(outcome.candidates),

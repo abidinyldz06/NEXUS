@@ -205,6 +205,9 @@ class SegmenterV2Tests(unittest.TestCase):
         self.assertGreater(len(split), 1)
         self.assertTrue(all(item.split_fallback for item in split))
         self.assertEqual(len(split), len({item.segment_id for item in split}))
+        self.assertEqual(parts, tuple(item.messages[0].content_text for item in split))
+        self.assertTrue(all(item.character_count <= 5 for item in split))
+        self.assertTrue(all(item.messages[0].message_id == "u1" for item in split))
 
     def test_segment_id_is_stable_for_the_same_normalized_input(self) -> None:
         left = conversation((message("u1", "user", "alpha  \r\nbeta"),))
@@ -324,6 +327,61 @@ class PipelineV2Tests(unittest.TestCase):
             self.assertEqual(before + [3], extractor.calls)
             self.assertEqual("completed", second.final_status)
             self.assertEqual(3, len(current_memories(load_ledger(data))))
+
+    def test_split_fallback_resumes_remaining_parts_without_reextracting_first(self) -> None:
+        source = conversation((message("u1", "user", "abcdefghijKLMNO"),))
+
+        class Extractor:
+            def __init__(self) -> None:
+                self.seen: list[str] = []
+                self.pause = True
+
+            def __call__(self, segment: object) -> ExtractionResult:
+                part = segment.messages[0].content_text  # type: ignore[attr-defined]
+                self.seen.append(part)
+                if self.pause and len(self.seen) == 2:
+                    raise IngestPaused("deterministic stop")
+                return result_for(segment, f"Kullanıcı {part} ifadesini tercih ediyor.")
+
+        extractor = Extractor()
+        with tempfile.TemporaryDirectory() as directory:
+            config = config_for(Path(directory))
+            first = run_conversation(
+                config,
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=False,
+                target_chars=5,
+            )
+            self.assertEqual("paused", first.final_status)
+            extractor.pause = False
+            second = run_conversation(
+                config,
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=False,
+                target_chars=5,
+            )
+            self.assertEqual("completed", second.final_status)
+            self.assertEqual(["abcde", "fghij", "fghij", "KLMNO"], extractor.seen)
+            checkpoint = load_checkpoint(config.data_path, first.ingest_id)
+            assert checkpoint is not None
+            self.assertEqual(3, len(checkpoint["segments"]))
+            self.assertTrue(
+                all(row["status"] == "completed" for row in checkpoint["segments"].values())
+            )
+            again = run_conversation(
+                config,
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=False,
+                target_chars=5,
+            )
+            self.assertEqual("already_processed", again.final_status)
+            self.assertEqual(4, len(extractor.seen))
 
     def test_retry_exhaustion_keeps_successful_segments(self) -> None:
         source = conversation(
