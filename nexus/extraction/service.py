@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
@@ -15,6 +17,10 @@ from ..segmenter import ConversationSegment
 from .schema import EXTRACTION_JSON_SCHEMA, ExtractionResult, validate_extraction_payload
 
 PROMPT_VERSION = "nexus-extraction-prompt-v2"
+
+
+class ExtractorBusy(Exception):
+    """The previous provider call still owns the flight. This segment was not sent."""
 
 
 def _exception_chain(exc: BaseException) -> tuple[BaseException, ...]:
@@ -75,6 +81,10 @@ class ExtractionOutcome:
 
 
 class ExtractionService:
+    _flight_lock = threading.Lock()
+    _in_flight = 0
+    _in_flight_cond = threading.Condition(_flight_lock)
+
     def __init__(
         self,
         llm: Any,
@@ -97,18 +107,77 @@ class ExtractionService:
         )
         self.prompt_sha256 = sha256(self.instructions.encode("utf-8")).hexdigest()
 
+    @classmethod
+    def in_flight_count(cls) -> int:
+        with cls._flight_lock:
+            return cls._in_flight
+
+    @classmethod
+    def reset_in_flight_for_tests(cls) -> None:
+        with cls._in_flight_cond:
+            cls._in_flight = 0
+            cls._in_flight_cond.notify_all()
+
+    def _acquire_flight_until(self, deadline: float) -> float:
+        with self._in_flight_cond:
+            while ExtractionService._in_flight > 0:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ExtractorBusy()
+                self._in_flight_cond.wait(timeout=remaining)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ExtractorBusy()
+            ExtractionService._in_flight += 1
+            return remaining
+
+    def _release_flight(self) -> None:
+        with self._in_flight_cond:
+            ExtractionService._in_flight = max(0, ExtractionService._in_flight - 1)
+            self._in_flight_cond.notify_all()
+
     def _complete_structured(self, **kwargs: Any) -> Any:
-        """Wait at most ``timeout`` seconds even if the provider ignores its own cap."""
+        """Wait at most ``timeout`` seconds even if the provider ignores its own cap.
+
+        Queue wait and the provider call share that budget. A timed-out provider
+        thread is not cancelled; the next segment waits, and if the budget
+        elapses before a new call starts it is not counted as a model attempt.
+        """
         timeout = float(kwargs.get("timeout") or self.timeout_seconds)
+        deadline = time.monotonic() + timeout
+        remaining = self._acquire_flight_until(deadline)
+        released = False
+
+        def release() -> None:
+            nonlocal released
+            if released:
+                return
+            released = True
+            self._release_flight()
+
         pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="nexus-extract")
+        future = None
         try:
             future = pool.submit(self.llm.complete_structured, **kwargs)
             try:
-                return future.result(timeout=timeout)
+                return future.result(timeout=remaining)
             except FuturesTimeoutError as exc:
                 raise TimeoutError() from exc
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
+            if future is None or future.done():
+                release()
+            else:
+
+                def reap() -> None:
+                    try:
+                        future.result()
+                    except Exception:
+                        pass
+                    finally:
+                        release()
+
+                threading.Thread(target=reap, name="nexus-extract-reap", daemon=True).start()
 
     def extract(self, segment: ConversationSegment) -> ExtractionOutcome:
         if not segment.messages:
@@ -167,6 +236,8 @@ class ExtractionService:
                         total_tokens=int(getattr(usage, "total_tokens", 0) or 0),
                     ),
                 )
+            except ExtractorBusy:
+                raise
             except json.JSONDecodeError:
                 last_class = "invalid_json"
             except ExtractionError:

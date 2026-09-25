@@ -20,7 +20,7 @@ from nexus.extraction.schema import (
     ExtractionResult,
     validate_extraction_payload,
 )
-from nexus.extraction.service import PROMPT_VERSION, ExtractionService
+from nexus.extraction.service import PROMPT_VERSION, ExtractionService, ExtractorBusy
 from nexus.normalize import NormalizedConversation, NormalizedMessage
 from nexus.segmenter import ConversationSegment, segment_conversation
 
@@ -319,6 +319,45 @@ class ExtractionContractTests(unittest.TestCase):
         self.assertEqual("timeout", raised.exception.failure_class)
         self.assertLess(elapsed, 0.45)
         self.assertEqual(90, __import__("nexus.ingest_v2", fromlist=["V2_HARD_TIMEOUT_SECONDS"]).V2_HARD_TIMEOUT_SECONDS)
+
+    def test_timed_out_provider_thread_blocks_overlapping_calls(self) -> None:
+        import threading
+        import time
+
+        ExtractionService.reset_in_flight_for_tests()
+
+        class SlowLlm:
+            def __init__(self) -> None:
+                self.starts = 0
+                self.flight = 0
+                self.max_flight = 0
+                self.lock = threading.Lock()
+
+            def complete_structured(self, **kwargs: object) -> object:
+                with self.lock:
+                    self.starts += 1
+                    self.flight += 1
+                    self.max_flight = max(self.max_flight, self.flight)
+                try:
+                    time.sleep(0.45)
+                    return SimpleNamespace(parsed=valid_payload(), text="{}", usage=None)
+                finally:
+                    with self.lock:
+                        self.flight -= 1
+
+        llm = SlowLlm()
+        with self.assertRaises(ExtractionError) as raised:
+            ExtractionService(llm, max_attempts=1, timeout_seconds=0.12).extract(segment())
+        self.assertEqual("timeout", raised.exception.failure_class)
+        for _ in range(2):
+            with self.assertRaises(ExtractorBusy):
+                ExtractionService(llm, max_attempts=1, timeout_seconds=0.12).extract(segment())
+        self.assertEqual(1, llm.starts)
+        self.assertEqual(1, llm.max_flight)
+        deadline = time.monotonic() + 1.0
+        while ExtractionService.in_flight_count() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        ExtractionService.reset_in_flight_for_tests()
 
     def test_invalid_json_failure_class_does_not_echo_payload(self) -> None:
         class BrokenJsonLlm:
