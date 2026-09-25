@@ -1608,15 +1608,16 @@ def _resume_after_index(segment_state: dict[str, Any]) -> int:
     return _completed_end(segment_state)
 
 
-def _prune_failed_segments(segment_state: dict[str, Any], resume_after: int) -> int:
-    """Drop FAILED_SEGMENT rows that will be packed again so leftover status cannot stick."""
+def _prune_stale_unfinished(
+    segment_state: dict[str, Any], planned_ids: set[str]
+) -> int:
+    """Drop FAILED/incomplete rows whose segment_id is not in the new pack."""
     drop = [
         key
         for key, item in list(segment_state.items())
         if isinstance(item, dict)
-        and item.get("status") == FAILED_SEGMENT
-        and isinstance(item.get("start_message_index"), int)
-        and item["start_message_index"] > resume_after
+        and item.get("status") in {FAILED_SEGMENT, "incomplete"}
+        and str(item.get("segment_id") or key) not in planned_ids
     ]
     for key in drop:
         del segment_state[key]
@@ -1677,9 +1678,6 @@ def run_conversation(
     )
     segment_state: dict[str, Any] = checkpoint.setdefault("segments", {})
     resume_after = _resume_after_index(segment_state)
-    if _prune_failed_segments(segment_state, resume_after):
-        checkpoint["segments"] = segment_state
-        _save_checkpoint(config.data_path, checkpoint)
     segments = segment_conversation_v2(
         conversation,
         target_chars=target_chars,
@@ -1688,6 +1686,9 @@ def run_conversation(
         start_after_index=resume_after,
         start_ordinal=_completed_count(segment_state) + 1,
     )
+    if _prune_stale_unfinished(segment_state, {item.segment_id for item in segments}):
+        checkpoint["segments"] = segment_state
+        _save_checkpoint(config.data_path, checkpoint)
     if not carry_cell[0]:
         prior = checkpoint.get("carry_forward")
         if isinstance(prior, str) and prior.strip():
