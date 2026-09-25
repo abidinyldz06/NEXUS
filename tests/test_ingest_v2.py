@@ -422,6 +422,58 @@ class PipelineV2Tests(unittest.TestCase):
                 [item for item in later["segments"].values() if item.get("status") == FAILED_SEGMENT]
             )
 
+    def test_smaller_repack_drops_reprocess_incomplete_ghost(self) -> None:
+        source = conversation(
+            (
+                message("u1", "user", "aaaa"),
+                message("a1", "assistant", "bbbb"),
+                message("u2", "user", "cccc"),
+                message("a2", "assistant", "dddd"),
+            )
+        )
+
+        class Extractor:
+            def __init__(self) -> None:
+                self.fail_first = True
+
+            def __call__(self, segment: object) -> ExtractionResult:
+                if self.fail_first and segment.index == 1:  # type: ignore[attr-defined]
+                    raise ExtractionError("timeout", failure_class="timeout")
+                return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+
+        extractor = Extractor()
+        with tempfile.TemporaryDirectory() as directory:
+            config = config_for(Path(directory))
+            first = run_conversation(
+                config,
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=False,
+                target_chars=12_000,
+                max_messages=12,
+                sleeper=lambda _: None,
+            )
+            self.assertEqual(FAILED_SEGMENT, first.final_status)
+            reprocess_failed(config, first.ingest_id)
+            extractor.fail_first = False
+            second = run_conversation(
+                config,
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=False,
+                target_chars=4,
+                max_messages=1,
+                sleeper=lambda _: None,
+            )
+            self.assertEqual("completed", second.final_status)
+            later = load_checkpoint(config.data_path, first.ingest_id)
+            assert later is not None
+            statuses = [item.get("status") for item in later["segments"].values()]
+            self.assertNotIn(FAILED_SEGMENT, statuses)
+            self.assertNotIn("incomplete", statuses)
+
     def test_non_retryable_failure_stops_at_one_attempt(self) -> None:
         source = conversation((message("u1", "user", "aaaa"),))
 
