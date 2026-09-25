@@ -95,6 +95,20 @@ def configure_parser(parser: ArgumentParser, handler: Callable[[Namespace], int]
         help="Maximum model calls for one shadow/stage run (1-100; default: 20)",
     )
     ingest.add_argument(
+        "--max-segment-chars",
+        type=int,
+        default=12000,
+        dest="max_segment_chars",
+        help="Character budget per v2 segment (500-12000; default: 12000). Smaller splits timeout less.",
+    )
+    ingest.add_argument(
+        "--max-messages",
+        type=int,
+        default=12,
+        dest="max_messages",
+        help="Extractable messages packed into one v2 segment (1-12; default: 12)",
+    )
+    ingest.add_argument(
         "--long-unit-budget",
         nargs="?",
         const=300,
@@ -607,6 +621,8 @@ def run_command(args: Namespace, ctx: Any) -> int:
                     or getattr(args, "conversation", None)
                     or getattr(args, "confirm_sha", None)
                     or getattr(args, "max_segments", 20) != 20
+                    or getattr(args, "max_segment_chars", 12000) != 12000
+                    or getattr(args, "max_messages", 12) != 12
                 ):
                     raise ValueError(
                         "source selection options are only valid with --shadow or --stage"
@@ -625,6 +641,8 @@ def run_command(args: Namespace, ctx: Any) -> int:
                         confirmed_sha256=args.confirm_sha,
                         conversation_id=getattr(args, "conversation", None),
                         max_segments=args.max_segments,
+                        max_segment_chars=getattr(args, "max_segment_chars", 12000),
+                        max_messages=getattr(args, "max_messages", 12),
                         long_unit_budget=getattr(args, "long_unit_budget", None),
                         canary_write=bool(getattr(args, "canary_write", False)),
                         confirm=getattr(args, "ingest_confirm", None),

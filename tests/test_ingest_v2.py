@@ -363,6 +363,65 @@ class PipelineV2Tests(unittest.TestCase):
             self.assertEqual(3, failed[0]["attempt_count"])
             self.assertEqual(1, len(current_memories(load_ledger(data))))
 
+    def test_resume_retries_failed_prefix_without_reextracting_later_completed(self) -> None:
+        source = conversation(
+            (
+                message("u1", "user", "aaaa"),
+                message("a1", "assistant", "bbbb"),
+            )
+        )
+
+        class Extractor:
+            def __init__(self) -> None:
+                self.calls: list[int] = []
+                self.fail_first = True
+
+            def __call__(self, segment: object) -> ExtractionResult:
+                index = segment.index  # type: ignore[attr-defined]
+                self.calls.append(index)
+                if self.fail_first and index == 1:
+                    raise ExtractionError(
+                        "structured extraction failed after 1 bounded attempt(s)",
+                        failure_class="timeout",
+                    )
+                return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+
+        extractor = Extractor()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = config_for(root)
+            first = run_conversation(
+                config,
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=False,
+                target_chars=4,
+                sleeper=lambda _: None,
+            )
+            self.assertEqual(FAILED_SEGMENT, first.final_status)
+            self.assertEqual([1, 1, 1, 2], extractor.calls)
+            armed = reprocess_failed(config, first.ingest_id)
+            self.assertEqual(1, armed["reprocess_count"])
+            extractor.fail_first = False
+            before = len(extractor.calls)
+            second = run_conversation(
+                config,
+                source,
+                extractor,
+                canonical_memory_type=MemoryType.PREFERENCE,
+                write_canonical=False,
+                target_chars=4,
+                sleeper=lambda _: None,
+            )
+            self.assertEqual(1, len(extractor.calls) - before)
+            self.assertEqual("completed", second.final_status)
+            later = load_checkpoint(config.data_path, first.ingest_id)
+            assert later is not None
+            self.assertFalse(
+                [item for item in later["segments"].values() if item.get("status") == FAILED_SEGMENT]
+            )
+
     def test_non_retryable_failure_stops_at_one_attempt(self) -> None:
         source = conversation((message("u1", "user", "aaaa"),))
 
@@ -1933,6 +1992,30 @@ class PipelineV2Tests(unittest.TestCase):
             self.assertEqual(0, dry_code)
             self.assertEqual(1, dry["missing_count"])
             self.assertFalse(dry["vault_writes"])
+
+    def test_ingest_cli_accepts_smaller_segment_budget(self) -> None:
+        parser = __import__("argparse").ArgumentParser()
+        configure_parser(parser, lambda args: 0)
+        args = parser.parse_args(
+            [
+                "ingest",
+                "--shadow",
+                "--source",
+                "a.json",
+                "--confirm-sha",
+                "ab" * 32,
+                "--max-segment-chars",
+                "3000",
+                "--max-messages",
+                "4",
+                "--max-segments",
+                "80",
+            ]
+        )
+        self.assertEqual(3000, args.max_segment_chars)
+        self.assertEqual(4, args.max_messages)
+        self.assertEqual(80, args.max_segments)
+        self.assertEqual(90, __import__("nexus.ingest_v2", fromlist=["V2_HARD_TIMEOUT_SECONDS"]).V2_HARD_TIMEOUT_SECONDS)
 
 
 class PilotMatrixTests(unittest.TestCase):
