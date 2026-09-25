@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from hashlib import sha256
 
 from .fingerprints import segment_fingerprint
@@ -279,11 +279,18 @@ def segment_conversation_v2(
                 current = []
                 size = 0
             for part_index, part in enumerate(_fallback_parts(message.content_text, target_chars)):
+                # Keep the source span id for provenance, but send only this part
+                # to the extractor. The original message is never mutated.
+                part_message = replace(
+                    message,
+                    content_text=part,
+                    content_sha256=sha256(part.encode("utf-8")).hexdigest(),
+                )
                 built.append(
                     _segment_from_messages(
                         conversation,
                         ordinal=len(built) + start_ordinal,
-                        indexed=((index, message),),
+                        indexed=((index, part_message),),
                         texts=(part,),
                         schema_version=schema_version,
                         split_fallback=True,
