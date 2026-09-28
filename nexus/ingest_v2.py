@@ -672,8 +672,14 @@ def acceptance_report(config: NexusConfig) -> dict[str, Any]:
                     for ref in refs
                 ):
                     vault_missing_prov += 1
-    ledger_ids = [str(row.get("id")) for row in records if row.get("id")]
-    ledger_not_in_vault = len(set(ledger_ids) - set(vault_ids))
+    vault_id_set = set(vault_ids)
+    missing_rows = [
+        row for row in records if row.get("id") and str(row["id"]) not in vault_id_set
+    ]
+    ledger_not_in_vault = len({str(row["id"]) for row in missing_rows})
+    shadow_unpublished = sum(row.get("publication_intent") == "shadow" for row in missing_rows)
+    canonical_missing = sum(row.get("publication_intent") == "canonical" for row in missing_rows)
+    legacy_unclassified = len(missing_rows) - shadow_unpublished - canonical_missing
     payload = {
         "ok": True,
         "extraction_called": False,
@@ -701,10 +707,13 @@ def acceptance_report(config: NexusConfig) -> dict[str, Any]:
         "vault_duplicate_ids": len(vault_ids) - len(set(vault_ids)),
         "vault_missing_provenance": vault_missing_prov,
         "ledger_ids_not_in_vault": ledger_not_in_vault,
+        "shadow_unpublished_rows": shadow_unpublished,
+        "canonical_missing_rows": canonical_missing,
+        "legacy_unclassified_missing_rows": legacy_unclassified,
         "thresholds": {
             "completion_ge_95": bool(completion_pct is not None and completion_pct >= 95),
             "p95_lt_60": bool(p95_all is not None and p95_all < 60),
-            "silent_loss_0": ledger_not_in_vault == 0,
+            "silent_loss_0": canonical_missing == 0 and legacy_unclassified == 0,
             "duplicate_0": (len(fingerprints) == len(set(fingerprints)))
             and (len(statements) == len(set(statements)))
             and (len(vault_ids) == len(set(vault_ids))),
@@ -749,6 +758,7 @@ def repair_missing_canonical(
     }
     if not apply or not missing:
         return payload
+    _mark_canonical_intent(config.data_path, missing)
     written: list[str] = []
     _write_canonical(
         config,
@@ -1346,6 +1356,7 @@ def _consider_candidate(
         "superseded_by": None,
         "ingest_id": ingest_id,
         "batch_id": ingest_id,
+        "publication_intent": "shadow",
     }
     records.append(row)
     _collapse_supersede_chains(records)
@@ -1537,6 +1548,7 @@ def _commit_canonical(
 ) -> str:
     if not rows:
         return "none"
+    _mark_canonical_intent(config.data_path, rows)
     try:
         writes = _write_canonical(
             config,
@@ -1564,6 +1576,20 @@ def _commit_canonical(
         report.mirror_status = "not_written"
         report.final_status = FAILED_SEGMENT
         return "none"
+
+
+def _mark_canonical_intent(data_path: Path, rows: list[dict[str, Any]]) -> None:
+    """Persist intent before a canonical attempt, including shadow promotions."""
+    # Record publication intent before attempting the Vault write. A crash or
+    # failed write must remain visible as a missing canonical record.
+    requested_ids = {str(row["id"]) for row in rows}
+    ledger = load_ledger(data_path)
+    for row in ledger:
+        if str(row.get("id")) in requested_ids:
+            row["publication_intent"] = "canonical"
+    _save_ledger(data_path, ledger)
+    for row in rows:
+        row["publication_intent"] = "canonical"
 
 
 def _token_estimate(segment: ConversationSegment) -> int:

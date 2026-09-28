@@ -261,6 +261,8 @@ hazırlar; model çağırmaz. `hermes nexus ingest queue` review kuyruğunu okur
 `--long-unit-budget` yalnız insan tetiklemelidir (default 300s, her kullanım loglanır).
 `--canary-write --confirm canary` kabul edilen kayıtları `Nexus/` altına yazar; günde en fazla 25 ingest.
 Auto-publish kapalı kalır. Dry-run ve `--shadow` (canary'siz) Vault'a dokunmaz.
+Güncel A8 sonucu ve A8 açıkken insan denetimli kullanım sınırı:
+[`docs/a8-limited-use-decision.md`](docs/a8-limited-use-decision.md).
 v2 segmenter mesaj sınırında böler; karakter bütçesi 12.000 ve en fazla 12 mesaj,
 böylece 54 mesajlık v1 tek-segment timeout sınıfı tek 90s çağrıda kalmaz.
 Overlap varsayılanı kapalıdır; süreklilik önceki kabulün salt-okunur özetidir
