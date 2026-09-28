@@ -70,7 +70,7 @@ def search_index(
     """
     try:
         with IndexStore(index_path, read_only=True) as store:
-            store.require_current_schema()
+            store.require_current_search_profile()
             rows = store.connection.execute(
                 sql, (expression, kind, kind, status, status, limit)
             ).fetchall()

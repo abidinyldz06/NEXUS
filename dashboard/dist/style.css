@@ -1,0 +1,26 @@
+.nexus-hub { width: 100%; max-width: 1120px; margin: 0 auto; padding: 1rem; color: var(--color-foreground); }
+.nexus-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+.nexus-header h1 { font-size: 1.6rem; font-weight: 700; margin: 0; }
+.nexus-eyebrow { margin: 0 0 .2rem; color: var(--color-muted-foreground); font-size: .8rem; }
+.nexus-badge { border: 1px solid var(--color-border); border-radius: 999px; padding: .35rem .7rem; white-space: nowrap; font-size: .8rem; }
+.nexus-tabs { display: flex; gap: .35rem; overflow-x: auto; margin-bottom: 1rem; padding-bottom: .3rem; }
+.nexus-tabs button, .nexus-card button { border: 1px solid var(--color-border); border-radius: .5rem; padding: .55rem .8rem; background: var(--color-card); color: inherit; cursor: pointer; }
+.nexus-tabs button { white-space: nowrap; }
+.nexus-tabs .nexus-active { border-color: var(--color-ring); background: var(--color-accent); }
+.nexus-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .8rem; }
+.nexus-card { border: 1px solid var(--color-border); border-radius: .8rem; background: var(--color-card); padding: 1rem; min-width: 0; }
+.nexus-card h2 { font-size: 1.05rem; font-weight: 650; margin: 0 0 .75rem; }
+.nexus-card h3 { font-size: 1rem; font-weight: 600; margin: .7rem 0; }
+.nexus-card p { margin: .4rem 0; overflow-wrap: anywhere; }
+.nexus-number { font-size: 2rem; font-weight: 700; line-height: 1.2; }
+.nexus-muted { color: var(--color-muted-foreground); font-size: .84rem; }
+.nexus-error { border: 1px solid var(--color-destructive); border-radius: .5rem; padding: .6rem; }
+.nexus-good { color: var(--color-foreground); font-weight: 600; }
+.nexus-memory { display: grid; gap: .8rem; }
+.nexus-search { display: flex; gap: .5rem; }
+.nexus-search input { flex: 1; min-width: 0; border: 1px solid var(--color-border); border-radius: .5rem; padding: .55rem .7rem; background: var(--background-base); color: inherit; }
+.nexus-row { display: flex; flex-direction: column; gap: .2rem; width: 100%; text-align: left; margin: .45rem 0; overflow-wrap: anywhere; }
+.nexus-row:hover, .nexus-card button:hover { border-color: var(--color-ring); }
+.nexus-row span { display: block; }
+.nexus-source { margin-top: .7rem; padding: .6rem; border-left: 2px solid var(--color-border); }
+@media (max-width: 640px) { .nexus-header { align-items: flex-start; flex-direction: column; } .nexus-search { flex-direction: column; } }

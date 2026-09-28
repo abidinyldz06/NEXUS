@@ -13,7 +13,7 @@ from ..contracts import SCHEMA_VERSION
 from ..errors import NexusIndexError, VaultError
 from ..ids import IdPrefix, is_nexus_id
 from ..vault import extract_record_payload
-from .store import IndexedRecord, IndexStore
+from .store import SEARCH_PROFILE_VERSION, IndexedRecord, IndexStore
 
 _CANONICAL_ROOTS = {
     "Memory": ("memory", IdPrefix.MEMORY),
@@ -43,47 +43,66 @@ class RebuildResult:
         }
 
 
-def _text_values(value: object) -> list[str]:
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, list):
-        result: list[str] = []
-        for item in value:
-            result.extend(_text_values(item))
-        return result
-    if isinstance(value, dict):
-        result = []
-        for item in value.values():
-            result.extend(_text_values(item))
-        return result
-    return []
+def _readable_text(*values: object) -> str:
+    """Index explicit human-facing fields, never IDs or extractor metadata."""
+    parts: list[str] = []
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            parts.append(value)
+        elif isinstance(value, list):
+            parts.extend(item for item in value if isinstance(item, str) and item.strip())
+    return " ".join(parts)
+
+
+def _source_excerpts(payload: dict[str, Any]) -> list[str]:
+    refs = payload.get("source_refs", [])
+    if not isinstance(refs, list):
+        return []
+    return [
+        ref["excerpt"]
+        for ref in refs
+        if isinstance(ref, dict) and isinstance(ref.get("excerpt"), str)
+    ]
 
 
 def _record_fields(kind: str, payload: dict[str, Any]) -> tuple[str, str, str]:
     if kind == "memory":
-        return str(payload.get("summary", "")), str(payload.get("status", "active")), " ".join(
-            _text_values(payload)
+        title = str(payload.get("summary", ""))
+        return title, str(payload.get("status", "active")), _readable_text(
+            title, _source_excerpts(payload)
         )
     if kind == "entity":
-        return str(payload.get("display_name", "")), "active", " ".join(_text_values(payload))
+        title = str(payload.get("display_name", ""))
+        return title, "active", _readable_text(title, payload.get("aliases"))
     if kind == "relation":
-        return str(payload.get("predicate", "")), str(payload.get("status", "active")), " ".join(
-            _text_values(payload)
+        title = str(payload.get("predicate", ""))
+        return title, str(payload.get("status", "active")), _readable_text(
+            title, payload.get("literal"), _source_excerpts(payload)
         )
     if kind == "commitment":
-        return str(payload.get("summary", "")), str(payload.get("status", "open")), " ".join(
-            _text_values(payload)
+        title = str(payload.get("summary", ""))
+        return title, str(payload.get("status", "open")), _readable_text(
+            title, _source_excerpts(payload)
         )
     if kind == "source":
-        title = payload.get("original_name") or payload.get("locator") or payload.get("id", "")
-        return str(title), str(payload.get("availability", "available")), " ".join(
-            _text_values(payload)
+        title = payload.get("original_name") or payload.get("locator") or "Kaynak"
+        return str(title), str(payload.get("availability", "available")), _readable_text(
+            payload.get("original_name"), payload.get("locator")
         )
     if kind == "review":
+        candidate = payload.get("candidate", {})
+        if not isinstance(candidate, dict):
+            candidate = {}
         return (
             str(payload.get("candidate_kind", "")),
             str(payload.get("status", "pending")),
-            " ".join(_text_values(payload)),
+            _readable_text(
+                candidate.get("summary"),
+                candidate.get("display_name"),
+                candidate.get("predicate"),
+                candidate.get("literal"),
+                _source_excerpts(payload),
+            ),
         )
     raise NexusIndexError(f"unsupported canonical record kind: {kind}")
 
@@ -171,6 +190,14 @@ def rebuild_index(vault_root: Path, index_path: Path) -> RebuildResult:
             store.migrate()
             try:
                 with store.connection:
+                    store.connection.execute(
+                        "CREATE TABLE search_profile (id INTEGER PRIMARY KEY CHECK(id = 1), "
+                        "version INTEGER NOT NULL)"
+                    )
+                    store.connection.execute(
+                        "INSERT INTO search_profile (id, version) VALUES (1, ?)",
+                        (SEARCH_PROFILE_VERSION,),
+                    )
                     for record in records:
                         store.add_record(record)
             except Exception:

@@ -11,6 +11,8 @@ from typing import Any
 from ..errors import NexusIndexError
 from ..migrations import CURRENT_SCHEMA_VERSION, migrate
 
+SEARCH_PROFILE_VERSION = 2
+
 
 @dataclass(frozen=True, slots=True)
 class IndexedRecord:
@@ -68,6 +70,18 @@ class IndexStore:
             raise NexusIndexError("index schema metadata is missing; run rebuild") from exc
         if row is None or row[0] != CURRENT_SCHEMA_VERSION:
             raise NexusIndexError("index schema is not current; run rebuild")
+
+    def require_current_search_profile(self) -> None:
+        """Older derived indexes must be rebuilt before content search is shown."""
+        self.require_current_schema()
+        try:
+            row = self.connection.execute(
+                "SELECT version FROM search_profile WHERE id = 1"
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise NexusIndexError("index search profile is old; run rebuild") from exc
+        if row is None or row[0] != SEARCH_PROFILE_VERSION:
+            raise NexusIndexError("index search profile is old; run rebuild")
 
     def add_record(self, record: IndexedRecord) -> None:
         payload_json = json.dumps(
