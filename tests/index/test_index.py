@@ -153,6 +153,55 @@ class IndexTests(unittest.TestCase):
             self.assertEqual((), hostile)
             self.assertIn(task.id, [item.record_id for item in search_index(index, "İstanbul")])
 
+    def test_extractor_metadata_does_not_create_false_content_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            vault = root / "vault"
+            vault.mkdir()
+            index = root / "private" / "nexus.db"
+            repository = VaultRepository(vault)
+            game = memory(1, "Total War oyununu seviyor")
+            game = Memory(
+                id=game.id,
+                type=game.type,
+                summary=game.summary,
+                source_refs=game.source_refs,
+                confidence=game.confidence,
+                impact=game.impact,
+                review_status=game.review_status,
+                extractor={"pipeline": "nexus-ingest-v2"},
+            )
+            project = memory(2, "NEXUS Hub planını hazırla")
+            repository.commit_records((game, project), run_id=new_id(IdPrefix.RUN))
+            rebuild_index(vault, index)
+
+            self.assertEqual(
+                [project.id], [item.record_id for item in search_index(index, "NEXUS")]
+            )
+            self.assertEqual(
+                [game.id], [item.record_id for item in search_index(index, "Total War")]
+            )
+
+    def test_legacy_search_profile_requires_rebuild(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            vault = root / "vault"
+            vault.mkdir()
+            index = root / "private" / "nexus.db"
+            repository = VaultRepository(vault)
+            item = memory(1, "NEXUS Hub planı")
+            repository.commit_records((item,), run_id=new_id(IdPrefix.RUN))
+            rebuild_index(vault, index)
+            with closing(sqlite3.connect(index)) as connection:
+                connection.execute("DROP TABLE search_profile")
+
+            with self.assertRaisesRegex(NexusIndexError, "run rebuild"):
+                search_index(index, "NEXUS")
+            rebuild_index(vault, index)
+            self.assertEqual(
+                [item.id], [result.record_id for result in search_index(index, "NEXUS")]
+            )
+
     def test_empty_query_and_missing_index_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "missing.db"

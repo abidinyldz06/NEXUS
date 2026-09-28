@@ -1,0 +1,15 @@
+{
+  "name": "nexus",
+  "label": "NEXUS",
+  "description": "Yerel hafıza ve bağlantılar için salt okunur yönetim paneli",
+  "icon": "Brain",
+  "version": "0.1.0",
+  "tab": {
+    "path": "/nexus",
+    "position": "after:skills"
+  },
+  "slots": [],
+  "entry": "dist/index.js",
+  "css": "dist/style.css",
+  "api": "plugin_api.py"
+}
