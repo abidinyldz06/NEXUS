@@ -14,6 +14,7 @@ import time
 import unittest
 from hashlib import sha256
 from pathlib import Path
+from unittest.mock import patch
 
 from nexus.cli import configure_parser, run_command
 from nexus.config import NexusConfig
@@ -2390,10 +2391,12 @@ class PipelineV2Tests(unittest.TestCase):
             self.assertEqual(1, dry["missing_count"])
             self.assertFalse(dry["vault_writes"])
             self.assertFalse(dry["extraction_called"])
+            self.assertEqual("shadow", load_ledger(config.data_path)[0]["publication_intent"])
             with self.assertRaises(IngestV2Error):
                 repair_missing_canonical(config, confirm="nope", apply=True)
             applied = repair_missing_canonical(config, confirm="repair", apply=True)
             self.assertTrue(applied["vault_writes"])
+            self.assertEqual("canonical", load_ledger(config.data_path)[0]["publication_intent"])
             self.assertGreaterEqual(applied["written_file_count"], 1)
             self.assertTrue(all(item.startswith("Nexus/") for item in applied["written_prefixes"]))
             self.assertEqual(1, extractor.calls)
@@ -2431,6 +2434,42 @@ class PipelineV2Tests(unittest.TestCase):
             self.assertFalse(payload["extraction_called"])
             self.assertEqual(0, payload["ledger_ids_not_in_vault"])
             self.assertEqual(0, payload["leftover_timeout_class_count"])
+
+    def test_shadow_ledger_is_not_silent_loss_but_failed_publication_is(self) -> None:
+        source = conversation((message("u1", "user", "aaaa"),), external_id="conv-intent")
+
+        def extractor(segment: object) -> ExtractionResult:
+            return result_for(segment, "Kullanıcı kısa yanıtları tercih ediyor.")
+
+        with tempfile.TemporaryDirectory() as directory:
+            config = config_for(Path(directory))
+            run_conversation(config, source, extractor, write_canonical=False)
+            shadow = acceptance_report(config)
+            self.assertEqual(1, shadow["ledger_ids_not_in_vault"])
+            self.assertEqual(1, shadow["shadow_unpublished_rows"])
+            self.assertEqual(0, shadow["canonical_missing_rows"])
+            self.assertTrue(shadow["thresholds"]["silent_loss_0"])
+            self.assertFalse(shadow["a8_all_required"])
+
+            from nexus.ingest_v2 import _save_ledger
+
+            legacy_rows = load_ledger(config.data_path)
+            legacy_rows[0].pop("publication_intent")
+            _save_ledger(config.data_path, legacy_rows)
+            legacy = acceptance_report(config)
+            self.assertEqual(1, legacy["legacy_unclassified_missing_rows"])
+            self.assertFalse(legacy["thresholds"]["silent_loss_0"])
+
+            with patch(
+                "nexus.ingest_v2._write_canonical",
+                side_effect=IngestV2Error("simulated failure", failure_class="vault_failed"),
+            ):
+                promoted = run_conversation(config, source, extractor, write_canonical=True)
+            self.assertEqual(FAILED_SEGMENT, promoted.final_status)
+            failed = acceptance_report(config)
+            self.assertEqual(0, failed["shadow_unpublished_rows"])
+            self.assertEqual(1, failed["canonical_missing_rows"])
+            self.assertFalse(failed["thresholds"]["silent_loss_0"])
 
     def test_segment_duration_logs_last_attempt_not_retry_wall(self) -> None:
         source = conversation((message("u1", "user", "aaaa"),))
