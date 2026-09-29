@@ -11,6 +11,28 @@
     ["today", "Bugün"], ["apps", "Uygulamalar"], ["tasks", "Görevler"],
     ["memory", "Hafıza"], ["models", "Modeller ve kullanım"],
   ];
+  const providerCatalog = [
+    ["OpenRouter", "Model API · bağlantı ve hesap bakiyesi henüz doğrulanmadı"],
+    ["Gemini API", "Model API · Antigravity abonelik kotasından ayrı"],
+    ["NVIDIA NIM", "Model API · inference anahtarı NGC anahtarından ayrı"],
+    ["Antigravity", "Ajan uygulaması · uygulama kotası burada henüz okunmuyor"],
+  ];
+
+  function providerUsage(snapshot) {
+    const groups = new Map();
+    (snapshot && Array.isArray(snapshot.models) ? snapshot.models : []).forEach(function (row) {
+      if (!row || typeof row !== "object") return;
+      const name = typeof row.provider === "string" && row.provider.trim() ?
+        row.provider.trim() : "Sağlayıcı atfı bilinmiyor";
+      const entry = groups.get(name) || { name: name, models: 0, sessions: 0 };
+      entry.models += 1;
+      if (typeof row.sessions === "number" && Number.isFinite(row.sessions) && row.sessions >= 0) {
+        entry.sessions += row.sessions;
+      }
+      groups.set(name, entry);
+    });
+    return Array.from(groups.values()).sort(function (a, b) { return b.sessions - a.sessions; });
+  }
 
   function errorText(error) {
     const raw = error && error.message ? String(error.message) : "Bağlantı kurulamadı";
@@ -70,6 +92,9 @@
     const [tasks, setTasks] = useState(null);
     const [taskError, setTaskError] = useState("");
     const [sessionStatus, setSessionStatus] = useState({});
+    const [modelUsage, setModelUsage] = useState(null);
+    const [modelUsageError, setModelUsageError] = useState("");
+    const [modelUsageLoading, setModelUsageLoading] = useState(false);
     const [savingTask, setSavingTask] = useState(false);
     const [draft, setDraft] = useState({ title: "", goal: "", expected_output: "",
       target_app: "Hermes", data_class: "undetermined", hermes_session_id: "" });
@@ -158,6 +183,25 @@
           return Object.assign({}, current, { [item.id]: "Oturum doğrulanamadı; durum bilinmiyor." });
         });
       });
+    }
+
+    function loadModelUsage() {
+      if (modelUsageLoading) return;
+      if (!defaultTaskScope()) {
+        setModelUsageError("Kullanım yalnız default profilde görüntülenebilir.");
+        return;
+      }
+      setModelUsageLoading(true);
+      setModelUsage(null);
+      setModelUsageError("");
+      SDK.fetchJSON("/api/analytics/models?days=30&profile=default").then(function (data) {
+        if (!data || !Array.isArray(data.models) || data.period_days !== 30) {
+          throw new Error("geçersiz kullanım yanıtı");
+        }
+        setModelUsage(data);
+      }).catch(function () {
+        setModelUsageError("Hermes kullanım verisi alınamadı; durum bilinmiyor.");
+      }).finally(function () { setModelUsageLoading(false); });
     }
 
     function runSearch(event) {
@@ -267,8 +311,33 @@
                   sessionStatus[item.id] || "Oturum henüz doğrulanmadı.")));
           }))));
     } else if (tab === "models") {
-      content = panel("Modeller ve kullanım", h("p", null,
-        "OpenRouter bağlantısı, veri sınırları ve harcama kontrolü H4 aşamasında açılacak."));
+      const providerRows = providerUsage(modelUsage);
+      content = h("div", { className: "nexus-memory" },
+        panel("Sağlayıcı Merkezi", h("div", null,
+          h("p", null, "OpenRouter tek seçenek değil. Bağlantılar Hermes veya ilgili uygulamada yönetilir; NEXUS anahtar saklamaz."),
+          h("p", { className: "nexus-muted" },
+            "Bağlı görünümü, hesap bakiyesi ve uygulama kotası henüz doğrulanmadı."))),
+        h("div", { className: "nexus-grid" }, providerCatalog.map(function (item) {
+          return panel(item[0], h("p", { className: "nexus-muted" }, item[1]),
+            "nexus-app", item[0]);
+        })),
+        panel("Hermes model-oturum kayıtları · son 30 gün", h("div", null,
+          h("p", { className: "nexus-muted" },
+            "Yalnız Hermes'in default profilindeki model-oturum kayıtlarıdır; tek bir oturum birden çok modelde sayılabilir. Token, API çağrısı ve maliyet tahminleri eksik olabileceğinden burada gösterilmez; sağlayıcı faturası veya kalan kota değildir. Sayfa açılırken sorgulanmaz."),
+          !defaultTaskScope() && h("p", { className: "nexus-muted" },
+            "Kullanımı görmek için default profiline geçin."),
+          h("button", { type: "button", onClick: loadModelUsage,
+            disabled: modelUsageLoading || !defaultTaskScope() },
+            modelUsageLoading ? "Getiriliyor…" : "Oturumları getir"),
+          modelUsageError && h("p", { className: "nexus-error", role: "alert" }, modelUsageError),
+          modelUsage && providerRows.length === 0 && h("p", null,
+            "Bu dönemde Hermes model oturumu kaydedilmemiş."),
+          providerRows.map(function (row) {
+            return h("div", { key: row.name, className: "nexus-task-row" },
+              h("strong", null, row.name),
+              h("span", null, row.models + " model kaydı · " +
+                row.sessions.toLocaleString("tr-TR") + " model-oturum kaydı"));
+          }))));
     } else {
       const resultItems = results && results.items || [];
       const reviewItems = reviews && reviews.items || [];

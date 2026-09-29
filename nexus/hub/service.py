@@ -68,7 +68,8 @@ def overview(config: NexusConfig) -> dict[str, Any]:
         "apps": [
             {"name": "NEXUS / Obsidian", "status": "hazır" if index["ready"] else "erişilemiyor"},
             {"name": "Hermes", "status": "panel bağlı"},
-            {"name": "OpenRouter", "status": "Hub bağlantısı sonraki aşamada"},
+            {"name": "Model sağlayıcıları", "status": "Hermes kullanım kayıtları isteğe bağlı görüntülenir"},
+            {"name": "Antigravity", "status": "Uygulama kotası Hermes model kullanımından ayrıdır"},
         ],
         "generated_at": datetime.now(UTC).isoformat(),
         "read_only": True,
