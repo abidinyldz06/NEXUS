@@ -114,6 +114,9 @@
     const [providerConnections, setProviderConnections] = useState(null);
     const [providerConnectionError, setProviderConnectionError] = useState("");
     const [providerConnectionLoading, setProviderConnectionLoading] = useState(false);
+    const [quotaSnapshots, setQuotaSnapshots] = useState({});
+    const [quotaLoading, setQuotaLoading] = useState(false);
+    const [quotaError, setQuotaError] = useState("");
     const [savingTask, setSavingTask] = useState(false);
     const [draft, setDraft] = useState({ title: "", goal: "", expected_output: "",
       target_app: "Hermes", data_class: "undetermined", hermes_session_id: "" });
@@ -261,6 +264,28 @@
       }).catch(function () {
         setProviderConnectionError("Hermes bağlantı durumu alınamadı; durum bilinmiyor.");
       }).finally(function () { setProviderConnectionLoading(false); });
+    }
+
+    function loadProviderQuota() {
+      if (quotaLoading || !defaultTaskScope()) return;
+      setQuotaLoading(true);
+      setQuotaSnapshots({});
+      setQuotaError("");
+      Promise.all(providerCatalog.map(function (item) {
+        const slug = item[1] || "antigravity";
+        return SDK.fetchJSON(API + "/providers/" + slug + "/usage?profile=default", {
+          method: "POST"
+        }).then(function (data) {
+          if (!data || data.provider !== slug || data.inference_called !== false) {
+            throw new Error("geçersiz kullanım yanıtı");
+          }
+          return [slug, data];
+        });
+      })).then(function (rows) {
+        setQuotaSnapshots(Object.fromEntries(rows));
+      }).catch(function () {
+        setQuotaError("Sağlayıcı kullanım bilgisi alınamadı; eski veri gösterilmiyor.");
+      }).finally(function () { setQuotaLoading(false); });
     }
 
     function runSearch(event) {
@@ -413,12 +438,31 @@
             disabled: providerConnectionLoading || !defaultTaskScope() },
             providerConnectionLoading ? "Kontrol ediliyor…" : "Hermes bağlantılarını kontrol et"),
           providerConnectionError && h("p", { className: "nexus-error", role: "alert" },
-            providerConnectionError))),
+            providerConnectionError),
+          h("p", { className: "nexus-muted" },
+            "Kullanım sorgusu yalnız düğmeye basınca yapılır; modele içerik göndermez. Bilinmeyen limit sıfır veya sınırsız sayılmaz."),
+          h("button", { type: "button", onClick: loadProviderQuota,
+            disabled: quotaLoading || !defaultTaskScope() },
+            quotaLoading ? "Okunuyor…" : "Sağlayıcı kullanım/limit bilgisini oku"),
+          quotaError && h("p", { className: "nexus-error", role: "alert" }, quotaError))),
         h("div", { className: "nexus-grid" }, providerCatalog.map(function (item) {
+          const snapshot = quotaSnapshots[item[1] || "antigravity"];
+          const labels = { usage: "Toplam kullanım", usage_daily: "Günlük kullanım",
+            usage_weekly: "Haftalık kullanım", usage_monthly: "Aylık kullanım",
+            limit: "Anahtar limiti", limit_remaining: "Anahtar limitinden kalan" };
           return panel(item[0], h("div", null,
             h("p", { className: "nexus-muted" }, item[2]),
             h("p", null, providerConnections ?
-              providerConnection(providerConnections, item[1]) : "Bağlantı durumu kontrol edilmedi.")),
+              providerConnection(providerConnections, item[1]) : "Bağlantı durumu kontrol edilmedi."),
+            h("p", null, snapshot ? snapshot.reason : "Kullanım/limit henüz okunmadı."),
+            snapshot && snapshot.checked_at && h("p", { className: "nexus-muted" },
+              "Sağlayıcıdan okuma: " + new Date(snapshot.checked_at).toLocaleString("tr-TR")),
+            snapshot && snapshot.metrics && Object.keys(labels).map(function (field) {
+              const value = snapshot.metrics[field];
+              return h("p", { key: field }, labels[field] + ": " +
+                (typeof value === "number" && Number.isFinite(value) ?
+                  value.toLocaleString("tr-TR", { maximumFractionDigits: 6 }) + " USD" : "Bilinmiyor"));
+            })),
             "nexus-app", item[0]);
         })),
         panel("Hermes model-oturum kayıtları · son 30 gün", h("div", null,
