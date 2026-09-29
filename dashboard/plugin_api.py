@@ -44,12 +44,14 @@ class DraftRequest(BaseModel):
     goal: str
     expected_output: str
     target_app: str
+    data_class: str = "undetermined"
+    hermes_session_id: str | None = None
 
 
 def _default_profile_only(request: Request) -> None:
     # _settings reads only the default Hermes plugin entry. Never write a draft
     # to that store while the dashboard is managing another profile.
-    if request.query_params.get("profile", "default") != "default":
+    if request.query_params.get("profile") != "default":
         raise HTTPException(
             status_code=409,
             detail="görev taslakları bu profilde henüz desteklenmiyor",
@@ -138,6 +140,8 @@ def create_task(request: Request, draft: DraftRequest) -> dict[str, Any]:
                 "goal": draft.goal,
                 "expected_output": draft.expected_output,
                 "target_app": draft.target_app,
+                "data_class": draft.data_class,
+                "hermes_session_id": draft.hermes_session_id,
             },
             idempotency_key=draft.idempotency_key,
         )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import stat
 from contextlib import closing
@@ -45,31 +46,50 @@ def _validate_text(value: object, name: str, maximum: int) -> str:
     return value.strip()
 
 
-def _payload(fields: dict[str, object]) -> dict[str, str]:
+def _payload(fields: dict[str, object]) -> dict[str, str | None]:
     target = _validate_text(fields.get("target_app"), "hedef uygulama", 40)
     if target not in {"NEXUS", "Hermes", "GitHub", "Diğer"}:
         raise TaskDraftError("hedef uygulama desteklenmiyor")
+    data_class = fields.get("data_class", "undetermined")
+    if not isinstance(data_class, str) or data_class not in {
+        "undetermined", "local_only", "selected_external", "sensitive"
+    }:
+        raise TaskDraftError("veri kapsamı desteklenmiyor")
+    session_id = fields.get("hermes_session_id")
+    if session_id in (None, ""):
+        session_id = None
+    elif (
+        target != "Hermes"
+        or not isinstance(session_id, str)
+        or not re.fullmatch(r"[A-Za-z0-9_-]{8,128}", session_id)
+    ):
+        raise TaskDraftError("Hermes oturum kimliği geçersiz")
     return {
         "title": _validate_text(fields.get("title"), "başlık", 160),
         "goal": _validate_text(fields.get("goal"), "amaç", 2000),
         "expected_output": _validate_text(fields.get("expected_output"), "beklenen çıktı", 1000),
         "target_app": target,
+        "data_class": data_class,
+        "hermes_session_id": session_id,
     }
 
 
 def _record(row: sqlite3.Row) -> dict[str, object]:
-    fields = json.loads(row["payload_json"])
+    raw_fields = json.loads(row["payload_json"])
+    if not isinstance(raw_fields, dict):
+        raise TaskDraftError("görev taslağı bozuk")
+    fields = _payload(raw_fields)
     return {
         "id": row["id"],
         **fields,
         "status": "draft",
-        "data_class": "belirlenmedi",
         "selected_refs": [],
         "permission_scope": "onaylanmadı",
         "model_role": None,
         "time_limit_seconds": None,
         "spend_limit_usd": None,
         "hermes_run_id": None,
+        "hermes_reference_verified": False,
         "result_evidence": None,
         "created_at": row["created_at"],
         "updated_at": row["created_at"],
@@ -95,7 +115,7 @@ def list_drafts(config: NexusConfig, *, limit: int = 30) -> dict[str, object]:
         raise TaskDraftError("görev taslakları okunamadı") from exc
     try:
         items = [_record(row) for row in rows]
-    except (ValueError, TypeError, KeyError) as exc:
+    except (ValueError, TypeError, KeyError, TaskDraftError) as exc:
         raise TaskDraftError("görev taslakları bozuk") from exc
     return {"items": items, "total": total, "dispatch_enabled": False}
 
@@ -147,7 +167,13 @@ def create_draft(
                     (idempotency_key,),
                 ).fetchone()
                 if existing is not None:
-                    if existing["payload_json"] != payload:
+                    try:
+                        existing_fields = json.loads(existing["payload_json"])
+                    except (ValueError, TypeError) as exc:
+                        raise TaskDraftError("görev taslağı bozuk") from exc
+                    if not isinstance(existing_fields, dict):
+                        raise TaskDraftError("görev taslağı bozuk")
+                    if _payload(existing_fields) != json.loads(payload):
                         raise TaskDraftError(
                             "aynı işlem kimliği farklı bir taslak için kullanıldı"
                         )

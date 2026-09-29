@@ -95,11 +95,15 @@ class DashboardApiTests(unittest.TestCase):
                 "goal": "Seçili konuyu incele",
                 "expected_output": "Kaynaklı özet",
                 "target_app": "Hermes",
+                "data_class": "local_only",
+                "hermes_session_id": "session_12345678",
             }
             with patch.object(module, "_settings", return_value=config), TestClient(app) as client:
                 base = "/api/plugins/nexus/hub/tasks"
-                self.assertEqual([], client.get(base).json()["items"])
+                self.assertEqual(409, client.get(base).status_code)
+                self.assertEqual([], client.get(base + "?profile=default").json()["items"])
                 self.assertFalse(data.exists())
+                self.assertEqual(409, client.post(base, json=body).status_code)
                 self.assertEqual(
                     409, client.post(base + "?profile=research-agent", json=body).status_code
                 )
@@ -108,6 +112,9 @@ class DashboardApiTests(unittest.TestCase):
                 self.assertEqual(200, first.status_code)
                 self.assertTrue(first.json()["created"])
                 self.assertFalse(first.json()["dispatched"])
+                self.assertEqual("session_12345678", first.json()["task"]["hermes_session_id"])
+                self.assertEqual("local_only", first.json()["task"]["data_class"])
+                self.assertFalse(first.json()["task"]["hermes_reference_verified"])
                 second = client.post(base + "?profile=default", json=body)
                 self.assertEqual(200, second.status_code)
                 self.assertFalse(second.json()["created"])
