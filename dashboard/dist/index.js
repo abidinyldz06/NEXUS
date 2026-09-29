@@ -103,6 +103,11 @@
     const [tasks, setTasks] = useState(null);
     const [taskError, setTaskError] = useState("");
     const [sessionStatus, setSessionStatus] = useState({});
+    const [routeText, setRouteText] = useState("");
+    const [routeDataClass, setRouteDataClass] = useState("undetermined");
+    const [routeAdvice, setRouteAdvice] = useState(null);
+    const [routeError, setRouteError] = useState("");
+    const [routeLoading, setRouteLoading] = useState(false);
     const [modelUsage, setModelUsage] = useState(null);
     const [modelUsageError, setModelUsageError] = useState("");
     const [modelUsageLoading, setModelUsageLoading] = useState(false);
@@ -173,6 +178,25 @@
       }).catch(function (error) {
         setTaskError(errorText(error));
       }).finally(function () { setSavingTask(false); });
+    }
+
+    function suggestRoute(event) {
+      event.preventDefault();
+      if (routeLoading || !routeText.trim() || !defaultTaskScope()) return;
+      setRouteLoading(true);
+      setRouteAdvice(null);
+      setRouteError("");
+      SDK.fetchJSON(API + "/route-advice?profile=default", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request_text: routeText, data_class: routeDataClass }),
+      }).then(function (data) {
+        if (!data || data.execution_enabled !== false || typeof data.reason !== "string") {
+          throw new Error("geçersiz yönlendirme yanıtı");
+        }
+        setRouteAdvice(data);
+      }).catch(function (error) { setRouteError(errorText(error)); })
+        .finally(function () { setRouteLoading(false); });
     }
 
     function checkSession(item) {
@@ -290,6 +314,39 @@
       content = !defaultTaskScope() ? panel("Görev masası", h("p", null,
         "Görev taslakları yalnız default profilde kullanılabilir; profil seçimini değiştirin.")) :
         h("div", { className: "nexus-memory" },
+        panel("Nereye yönlendirelim? · yalnız öneri", h("div", null,
+          h("p", { className: "nexus-muted" },
+            "İstek bu cihazda kurallarla değerlendirilir. Model çağrısı, görev başlatma veya taslak kaydı yapılmaz."),
+          h("form", { className: "nexus-task-form", onSubmit: suggestRoute },
+            h("label", null, "Tek bir iş yazın",
+              h("textarea", { required: true, maxLength: 500, value: routeText,
+                disabled: routeLoading,
+                onChange: function (event) {
+                  setRouteText(event.target.value); setRouteAdvice(null);
+                } })),
+            h("label", null, "Veri kapsamı",
+              h("select", { value: routeDataClass, disabled: routeLoading,
+                onChange: function (event) {
+                  setRouteDataClass(event.target.value); setRouteAdvice(null);
+                } },
+                [["undetermined", "Henüz belirlenmedi"], ["local_only", "Yalnız yerel"],
+                  ["selected_external", "Seçili içerik dışarı çıkabilir"],
+                  ["sensitive", "Hassas; dışarı gönderilmez"]].map(function (item) {
+                  return h("option", { key: item[0], value: item[0] }, item[1]);
+                }))),
+            h("button", { type: "submit", disabled: routeLoading || !routeText.trim() },
+              routeLoading ? "Değerlendiriliyor…" : "Yönlendirme öner")),
+          routeError && h("p", { className: "nexus-error", role: "alert" }, routeError),
+          routeAdvice && h("div", { className: "nexus-task-row", role: "status" },
+            h("strong", null, routeAdvice.target_app || "Hedef belirsiz"),
+            h("span", { className: "nexus-muted" },
+              ({ suggested: "Yalnız öneri", requires_review: "İnsan incelemesi gerekli",
+                needs_clarification: "İstek belirsiz" }[routeAdvice.status] || "Durum bilinmiyor")),
+            h("span", null, routeAdvice.reason),
+            h("span", { className: "nexus-muted" },
+              "Model rolü: " + ({ none: "gerekmez", local_required: "yalnız yerel model gerekli",
+                summarizer: "özetleme adayı", researcher: "araştırma adayı" }[routeAdvice.model_role] ||
+                "belirlenmedi") + " · çalıştırma kapalı")))),
         panel("Yeni görev taslağı", h("div", null,
           h("p", { className: "nexus-muted" },
             "Yalnız default profiline kaydedilir; görev başlatmaz. Veri kapsamı, izin ve bütçe daha sonra belirlenir."),

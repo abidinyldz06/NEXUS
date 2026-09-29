@@ -34,6 +34,7 @@ _config_module = importlib.import_module(f"{_CORE_NAME}.config")
 _service = importlib.import_module(f"{_CORE_NAME}.hub.service")
 _errors = importlib.import_module(f"{_CORE_NAME}.errors")
 _tasks = importlib.import_module(f"{_CORE_NAME}.hub.tasks")
+_routing = importlib.import_module(f"{_CORE_NAME}.hub.routing")
 
 router = APIRouter()
 
@@ -46,6 +47,11 @@ class DraftRequest(BaseModel):
     target_app: str
     data_class: str = "undetermined"
     hermes_session_id: str | None = None
+
+
+class RouteAdviceRequest(BaseModel):
+    request_text: str
+    data_class: str = "undetermined"
 
 
 def _default_profile_only(request: Request) -> None:
@@ -127,6 +133,16 @@ def tasks(request: Request, limit: int = Query(30, ge=1, le=100)) -> dict[str, A
         return _tasks.list_drafts(_settings(), limit=limit)
     except _tasks.TaskDraftError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post("/hub/route-advice")
+def route_advice(request: Request, body: RouteAdviceRequest) -> dict[str, Any]:
+    if request.query_params.get("profile") != "default":
+        raise HTTPException(status_code=409, detail="yönlendirme bu profilde desteklenmiyor")
+    try:
+        return _routing.advise(body.request_text, data_class=body.data_class)
+    except _routing.RouteAdviceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/hub/tasks")
