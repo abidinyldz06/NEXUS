@@ -39,6 +39,11 @@
     const [searching, setSearching] = useState(false);
     const [detail, setDetail] = useState(null);
     const [detailError, setDetailError] = useState("");
+    const [tasks, setTasks] = useState(null);
+    const [taskError, setTaskError] = useState("");
+    const [savingTask, setSavingTask] = useState(false);
+    const [draft, setDraft] = useState({ title: "", goal: "", expected_output: "", target_app: "Hermes" });
+    const [draftKey, setDraftKey] = useState(function () { return crypto.randomUUID(); });
 
     useEffect(function () {
       let active = true;
@@ -52,8 +57,39 @@
       }).catch(function (error) {
         if (active) setReviewError(errorText(error));
       });
+      SDK.fetchJSON(API + "/tasks?limit=30").then(function (data) {
+        if (active) setTasks(data);
+      }).catch(function (error) {
+        if (active) setTaskError(errorText(error));
+      });
       return function () { active = false; };
     }, []);
+
+    function editDraft(field, value) {
+      setDraft(function (current) { return Object.assign({}, current, { [field]: value }); });
+      setDraftKey(crypto.randomUUID());
+      setTaskError("");
+    }
+
+    function saveDraft(event) {
+      event.preventDefault();
+      if (savingTask) return;
+      setSavingTask(true);
+      setTaskError("");
+      SDK.fetchJSON(API + "/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(Object.assign({ idempotency_key: draftKey }, draft)),
+      }).then(function () {
+        return SDK.fetchJSON(API + "/tasks?limit=30");
+      }).then(function (data) {
+        setTasks(data);
+        setDraft({ title: "", goal: "", expected_output: "", target_app: "Hermes" });
+        setDraftKey(crypto.randomUUID());
+      }).catch(function (error) {
+        setTaskError(errorText(error));
+      }).finally(function () { setSavingTask(false); });
+    }
 
     function runSearch(event) {
       event.preventDefault();
@@ -102,8 +138,41 @@
         }),
         !overview && panel("Bağlantılar", h("p", null, "Bağlantı durumları yükleniyor.")));
     } else if (tab === "tasks") {
-      content = panel("Görev masası", h("p", null,
-        "Görev taslakları ve Hermes koşu takibi H2 aşamasında açılacak."));
+      const taskItems = tasks && tasks.items || [];
+      content = h("div", { className: "nexus-memory" },
+        panel("Yeni görev taslağı", h("div", null,
+          h("p", { className: "nexus-muted" },
+            "Kaydetmek görevi başlatmaz. Veri kapsamı, izin ve bütçe daha sonra belirlenir."),
+          h("form", { className: "nexus-task-form", onSubmit: saveDraft },
+            h("label", null, "Başlık",
+              h("input", { required: true, maxLength: 160, value: draft.title,
+                onChange: function (event) { editDraft("title", event.target.value); } })),
+            h("label", null, "Amaç",
+              h("textarea", { required: true, maxLength: 2000, value: draft.goal,
+                onChange: function (event) { editDraft("goal", event.target.value); } })),
+            h("label", null, "Beklenen çıktı",
+              h("input", { required: true, maxLength: 1000, value: draft.expected_output,
+                onChange: function (event) { editDraft("expected_output", event.target.value); } })),
+            h("label", null, "Hedef uygulama (taslak)",
+              h("select", { value: draft.target_app,
+                onChange: function (event) { editDraft("target_app", event.target.value); } },
+                ["Hermes", "NEXUS", "GitHub", "Diğer"].map(function (name) {
+                  return h("option", { key: name, value: name }, name);
+                }))),
+            h("button", { type: "submit", disabled: savingTask ||
+              !draft.title.trim() || !draft.goal.trim() || !draft.expected_output.trim() },
+              savingTask ? "Kaydediliyor…" : "Taslak olarak kaydet")),
+          taskError && h("p", { className: "nexus-error", role: "alert" }, taskError))),
+        panel("Taslaklar", h("div", null,
+          tasks && h("p", { className: "nexus-muted" }, tasks.total + " taslak; ilk " +
+            taskItems.length + " gösteriliyor"),
+          tasks && taskItems.length === 0 && h("p", null, "Henüz görev taslağı yok."),
+          taskItems.map(function (item) {
+            return h("div", { key: item.id, className: "nexus-task-row" },
+              h("strong", null, item.title),
+              h("span", { className: "nexus-muted" }, item.target_app + " · taslak · çalıştırılmadı"),
+              h("span", null, item.expected_output));
+          }))));
     } else if (tab === "models") {
       content = panel("Modeller ve kullanım", h("p", null,
         "OpenRouter bağlantısı, veri sınırları ve harcama kontrolü H4 aşamasında açılacak."));
@@ -162,7 +231,7 @@
       h("header", { className: "nexus-header" },
         h("div", null, h("p", { className: "nexus-eyebrow" }, "Yerel yönetim alanı"),
           h("h1", null, "NEXUS Hub")),
-        h("span", { className: "nexus-badge" }, "Salt okunur · H0+H1")),
+        h("span", { className: "nexus-badge" }, "H2 taslak · çalıştırma kapalı")),
       h("nav", { className: "nexus-tabs", "aria-label": "NEXUS bölümleri" },
         tabs.map(function (item) {
           return h("button", { key: item[0], type: "button",
