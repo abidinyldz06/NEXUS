@@ -13,7 +13,7 @@
   ];
   const providerCatalog = [
     ["OpenRouter", "openrouter", "Model API · hesap bakiyesi burada okunmuyor"],
-    ["Gemini API", "google", "Model API · Antigravity abonelik kotasından ayrı"],
+    ["Gemini API", "gemini", "Model API · Antigravity abonelik kotasından ayrı"],
     ["NVIDIA NIM", "nvidia", "Model API · inference anahtarı NGC anahtarından ayrı"],
     ["Antigravity", null, "Ajan uygulaması · uygulama kotası burada okunmuyor"],
   ];
