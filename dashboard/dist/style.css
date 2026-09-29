@@ -23,4 +23,10 @@
 .nexus-row:hover, .nexus-card button:hover { border-color: var(--color-ring); }
 .nexus-row span { display: block; }
 .nexus-source { margin-top: .7rem; padding: .6rem; border-left: 2px solid var(--color-border); }
+.nexus-task-form { display: grid; gap: .75rem; margin-top: .8rem; }
+.nexus-task-form label { display: grid; gap: .3rem; font-size: .9rem; }
+.nexus-task-form input, .nexus-task-form textarea, .nexus-task-form select { width: 100%; border: 1px solid var(--color-border); border-radius: .5rem; padding: .55rem .7rem; background: var(--background-base); color: inherit; }
+.nexus-task-form textarea { min-height: 5rem; resize: vertical; }
+.nexus-task-form button:disabled { opacity: .55; cursor: not-allowed; }
+.nexus-task-row { display: grid; gap: .2rem; border-top: 1px solid var(--color-border); padding: .75rem 0; overflow-wrap: anywhere; }
 @media (max-width: 640px) { .nexus-header { align-items: flex-start; flex-direction: column; } .nexus-search { flex-direction: column; } }

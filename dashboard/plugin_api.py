@@ -9,7 +9,8 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel
 
 _CORE_DIR = Path(__file__).resolve().parents[1] / "nexus"
 _CORE_NAME = "_hermes_nexus_hub_" + sha256(str(_CORE_DIR).encode()).hexdigest()[:12]
@@ -32,8 +33,29 @@ if _CORE_NAME not in sys.modules:
 _config_module = importlib.import_module(f"{_CORE_NAME}.config")
 _service = importlib.import_module(f"{_CORE_NAME}.hub.service")
 _errors = importlib.import_module(f"{_CORE_NAME}.errors")
+_tasks = importlib.import_module(f"{_CORE_NAME}.hub.tasks")
 
 router = APIRouter()
+
+
+class DraftRequest(BaseModel):
+    idempotency_key: str
+    title: str
+    goal: str
+    expected_output: str
+    target_app: str
+    data_class: str = "undetermined"
+    hermes_session_id: str | None = None
+
+
+def _default_profile_only(request: Request) -> None:
+    # _settings reads only the default Hermes plugin entry. Never write a draft
+    # to that store while the dashboard is managing another profile.
+    if request.query_params.get("profile") != "default":
+        raise HTTPException(
+            status_code=409,
+            detail="görev taslakları bu profilde henüz desteklenmiyor",
+        )
 
 
 def _settings() -> Any:
@@ -96,3 +118,33 @@ def review(review_id: str) -> dict[str, Any]:
     except _errors.ReviewStoreError as exc:
         status = 404 if "bulunamadı" in str(exc) or "not found" in str(exc) else 400
         raise HTTPException(status_code=status, detail="İnceleme kaydı bulunamadı") from exc
+
+
+@router.get("/hub/tasks")
+def tasks(request: Request, limit: int = Query(30, ge=1, le=100)) -> dict[str, Any]:
+    _default_profile_only(request)
+    try:
+        return _tasks.list_drafts(_settings(), limit=limit)
+    except _tasks.TaskDraftError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post("/hub/tasks")
+def create_task(request: Request, draft: DraftRequest) -> dict[str, Any]:
+    _default_profile_only(request)
+    try:
+        return _tasks.create_draft(
+            _settings(),
+            {
+                "title": draft.title,
+                "goal": draft.goal,
+                "expected_output": draft.expected_output,
+                "target_app": draft.target_app,
+                "data_class": draft.data_class,
+                "hermes_session_id": draft.hermes_session_id,
+            },
+            idempotency_key=draft.idempotency_key,
+        )
+    except _tasks.TaskDraftError as exc:
+        status = 409 if "aynı işlem kimliği" in str(exc) else 400
+        raise HTTPException(status_code=status, detail=str(exc)) from exc

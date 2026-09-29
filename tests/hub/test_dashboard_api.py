@@ -7,6 +7,7 @@ import unittest
 from hashlib import sha256
 from pathlib import Path
 from unittest.mock import patch
+from uuid import uuid4
 
 from nexus.config import NexusConfig
 from nexus.contracts import Impact, Memory, MemoryType, ReviewStatus, SourceRef
@@ -73,6 +74,52 @@ class DashboardApiTests(unittest.TestCase):
                 self.assertEqual(405, client.post(base + "/overview").status_code)
             after = {path: path.stat().st_mtime_ns for path in root.rglob("*") if path.is_file()}
             self.assertEqual(before, after)
+
+    def test_task_routes_save_one_draft_without_dispatch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data = Path(directory) / "private"
+            config = NexusConfig.from_mapping({"data_path": str(data)})
+            module_name = "nexus_hub_dashboard_task_api_test"
+            api_path = Path(__file__).resolve().parents[2] / "dashboard" / "plugin_api.py"
+            spec = importlib.util.spec_from_file_location(module_name, api_path)
+            assert spec is not None and spec.loader is not None
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            self.addCleanup(sys.modules.pop, module_name, None)
+            spec.loader.exec_module(module)
+            app = FastAPI()
+            app.include_router(module.router, prefix="/api/plugins/nexus")
+            body = {
+                "idempotency_key": str(uuid4()),
+                "title": "Kaynakları araştır",
+                "goal": "Seçili konuyu incele",
+                "expected_output": "Kaynaklı özet",
+                "target_app": "Hermes",
+                "data_class": "local_only",
+                "hermes_session_id": "session_12345678",
+            }
+            with patch.object(module, "_settings", return_value=config), TestClient(app) as client:
+                base = "/api/plugins/nexus/hub/tasks"
+                self.assertEqual(409, client.get(base).status_code)
+                self.assertEqual([], client.get(base + "?profile=default").json()["items"])
+                self.assertFalse(data.exists())
+                self.assertEqual(409, client.post(base, json=body).status_code)
+                self.assertEqual(
+                    409, client.post(base + "?profile=research-agent", json=body).status_code
+                )
+                self.assertFalse(data.exists())
+                first = client.post(base + "?profile=default", json=body)
+                self.assertEqual(200, first.status_code)
+                self.assertTrue(first.json()["created"])
+                self.assertFalse(first.json()["dispatched"])
+                self.assertEqual("session_12345678", first.json()["task"]["hermes_session_id"])
+                self.assertEqual("local_only", first.json()["task"]["data_class"])
+                self.assertFalse(first.json()["task"]["hermes_reference_verified"])
+                second = client.post(base + "?profile=default", json=body)
+                self.assertEqual(200, second.status_code)
+                self.assertFalse(second.json()["created"])
+                self.assertEqual(first.json()["task"]["id"], second.json()["task"]["id"])
+                self.assertEqual(1, client.get(base + "?profile=default").json()["total"])
 
 
 if __name__ == "__main__":

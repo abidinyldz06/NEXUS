@@ -1,7 +1,7 @@
 {
   "name": "nexus",
   "label": "NEXUS",
-  "description": "Yerel hafıza ve bağlantılar için salt okunur yönetim paneli",
+  "description": "Yerel hafıza görünümü ve çalıştırılmayan görev taslakları",
   "icon": "Brain",
   "version": "0.1.0",
   "tab": {

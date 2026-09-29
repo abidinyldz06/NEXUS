@@ -6,6 +6,7 @@
   const h = SDK.React.createElement;
   const { useEffect, useState } = SDK.hooks;
   const API = "/api/plugins/nexus/hub";
+  const TASKS = API + "/tasks?profile=default";
   const tabs = [
     ["today", "Bugün"], ["apps", "Uygulamalar"], ["tasks", "Görevler"],
     ["memory", "Hafıza"], ["models", "Modeller ve kullanım"],
@@ -27,6 +28,33 @@
       h("h2", null, title), children);
   }
 
+  function defaultTaskScope() {
+    return new URLSearchParams(window.location.search).get("profile") === "default";
+  }
+
+  function dataClassLabel(value) {
+    return { undetermined: "belirlenmedi", local_only: "yalnız yerel",
+      selected_external: "seçili içerik dışarı çıkabilir",
+      sensitive: "hassas; dışarı gönderilmez" }[value] || "bilinmiyor";
+  }
+
+  function newDraftKey() {
+    if (!window.crypto || !window.crypto.getRandomValues) return "";
+    const bytes = new Uint8Array(16);
+    try {
+      window.crypto.getRandomValues(bytes);
+    } catch (_ignored) {
+      return "";
+    }
+    bytes[6] = (bytes[6] & 15) | 64;
+    bytes[8] = (bytes[8] & 63) | 128;
+    const hex = Array.from(bytes, function (byte) {
+      return byte.toString(16).padStart(2, "0");
+    }).join("");
+    return hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-" + hex.slice(12, 16) +
+      "-" + hex.slice(16, 20) + "-" + hex.slice(20);
+  }
+
   function HubPage() {
     const [tab, setTab] = useState("today");
     const [overview, setOverview] = useState(null);
@@ -39,6 +67,13 @@
     const [searching, setSearching] = useState(false);
     const [detail, setDetail] = useState(null);
     const [detailError, setDetailError] = useState("");
+    const [tasks, setTasks] = useState(null);
+    const [taskError, setTaskError] = useState("");
+    const [sessionStatus, setSessionStatus] = useState({});
+    const [savingTask, setSavingTask] = useState(false);
+    const [draft, setDraft] = useState({ title: "", goal: "", expected_output: "",
+      target_app: "Hermes", data_class: "undetermined", hermes_session_id: "" });
+    const [draftKey, setDraftKey] = useState(newDraftKey);
 
     useEffect(function () {
       let active = true;
@@ -52,8 +87,78 @@
       }).catch(function (error) {
         if (active) setReviewError(errorText(error));
       });
+      if (defaultTaskScope()) {
+        SDK.fetchJSON(TASKS + "&limit=30").then(function (data) {
+          if (active) setTasks(data);
+        }).catch(function (error) {
+          if (active) setTaskError(errorText(error));
+        });
+      }
       return function () { active = false; };
     }, []);
+
+    function editDraft(field, value) {
+      setDraft(function (current) {
+        const update = { [field]: value };
+        if (field === "target_app" && value !== "Hermes") update.hermes_session_id = "";
+        return Object.assign({}, current, update);
+      });
+      setDraftKey(newDraftKey());
+      setTaskError("");
+    }
+
+    function saveDraft(event) {
+      event.preventDefault();
+      if (!defaultTaskScope()) {
+        setTaskError("Görev taslakları yalnız default profilde kullanılabilir.");
+        return;
+      }
+      if (!draftKey) {
+        setTaskError("Güvenli işlem kimliği üretilemedi; taslak kaydedilmedi.");
+        return;
+      }
+      if (savingTask) return;
+      setSavingTask(true);
+      setTaskError("");
+      SDK.fetchJSON(TASKS, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(Object.assign({ idempotency_key: draftKey }, draft)),
+      }).then(function () {
+        return SDK.fetchJSON(TASKS + "&limit=30");
+      }).then(function (data) {
+        setTasks(data);
+        setDraft({ title: "", goal: "", expected_output: "",
+          target_app: "Hermes", data_class: "undetermined", hermes_session_id: "" });
+        setDraftKey(newDraftKey());
+      }).catch(function (error) {
+        setTaskError(errorText(error));
+      }).finally(function () { setSavingTask(false); });
+    }
+
+    function checkSession(item) {
+      if (!defaultTaskScope()) {
+        setTaskError("Hermes oturumu yalnız default profilde doğrulanabilir.");
+        return;
+      }
+      setSessionStatus(function (current) {
+        return Object.assign({}, current, { [item.id]: "Oturum kontrol ediliyor…" });
+      });
+      SDK.fetchJSON("/api/sessions/" + encodeURIComponent(item.hermes_session_id) +
+        "?profile=default").then(function (session) {
+        const message = session.id === item.hermes_session_id && session.profile === "default" ?
+          (session.ended_at == null ? "Oturum kaydı mevcut · henüz açık" :
+            "Oturum kaydı mevcut · sonlandı") + ". Görev sonucu doğrulanmadı." :
+          "Oturum kimliği veya profili eşleşmedi.";
+        setSessionStatus(function (current) {
+          return Object.assign({}, current, { [item.id]: message });
+        });
+      }).catch(function () {
+        setSessionStatus(function (current) {
+          return Object.assign({}, current, { [item.id]: "Oturum doğrulanamadı; durum bilinmiyor." });
+        });
+      });
+    }
 
     function runSearch(event) {
       event.preventDefault();
@@ -102,8 +207,65 @@
         }),
         !overview && panel("Bağlantılar", h("p", null, "Bağlantı durumları yükleniyor.")));
     } else if (tab === "tasks") {
-      content = panel("Görev masası", h("p", null,
-        "Görev taslakları ve Hermes koşu takibi H2 aşamasında açılacak."));
+      const taskItems = tasks && tasks.items || [];
+      content = !defaultTaskScope() ? panel("Görev masası", h("p", null,
+        "Görev taslakları yalnız default profilde kullanılabilir; profil seçimini değiştirin.")) :
+        h("div", { className: "nexus-memory" },
+        panel("Yeni görev taslağı", h("div", null,
+          h("p", { className: "nexus-muted" },
+            "Yalnız default profiline kaydedilir; görev başlatmaz. Veri kapsamı, izin ve bütçe daha sonra belirlenir."),
+          h("form", { className: "nexus-task-form", onSubmit: saveDraft },
+            h("label", null, "Başlık",
+              h("input", { required: true, maxLength: 160, value: draft.title,
+                onChange: function (event) { editDraft("title", event.target.value); } })),
+            h("label", null, "Amaç",
+              h("textarea", { required: true, maxLength: 2000, value: draft.goal,
+                onChange: function (event) { editDraft("goal", event.target.value); } })),
+            h("label", null, "Beklenen çıktı",
+              h("input", { required: true, maxLength: 1000, value: draft.expected_output,
+                onChange: function (event) { editDraft("expected_output", event.target.value); } })),
+            h("label", null, "Hedef uygulama (taslak)",
+              h("select", { value: draft.target_app,
+                onChange: function (event) { editDraft("target_app", event.target.value); } },
+                ["Hermes", "NEXUS", "GitHub", "Diğer"].map(function (name) {
+                  return h("option", { key: name, value: name }, name);
+                }))),
+            h("label", null, "Veri kapsamı (taslak)",
+              h("select", { value: draft.data_class,
+                onChange: function (event) { editDraft("data_class", event.target.value); } },
+                [["undetermined", "Henüz belirlenmedi"], ["local_only", "Yalnız yerel"],
+                  ["selected_external", "Seçili içerik dışarı çıkabilir"],
+                  ["sensitive", "Hassas; dışarı gönderilmez"]].map(function (item) {
+                    return h("option", { key: item[0], value: item[0] }, item[1]);
+                  }))),
+            draft.target_app === "Hermes" && h("label", null,
+              "Mevcut Hermes oturum kimliği (isteğe bağlı)",
+              h("input", { maxLength: 128, value: draft.hermes_session_id,
+                placeholder: "Yalnız tam oturum kimliği; yeni iş başlatmaz",
+                onChange: function (event) { editDraft("hermes_session_id", event.target.value); } })),
+            h("button", { type: "submit", disabled: savingTask ||
+              !draftKey || !draft.title.trim() || !draft.goal.trim() ||
+              !draft.expected_output.trim() },
+              savingTask ? "Kaydediliyor…" : "Taslak olarak kaydet")),
+          taskError && h("p", { className: "nexus-error", role: "alert" }, taskError))),
+        panel("Taslaklar", h("div", null,
+          tasks && h("p", { className: "nexus-muted" }, tasks.total + " taslak; ilk " +
+            taskItems.length + " gösteriliyor"),
+          tasks && taskItems.length === 0 && h("p", null, "Henüz görev taslağı yok."),
+          taskItems.map(function (item) {
+            return h("div", { key: item.id, className: "nexus-task-row" },
+              h("strong", null, item.title),
+              h("span", { className: "nexus-muted" }, item.target_app + " · taslak · çalıştırılmadı"),
+              h("span", { className: "nexus-muted" }, "Veri kapsamı: " + dataClassLabel(item.data_class)),
+              h("span", null, item.expected_output),
+              item.hermes_session_id && h("div", null,
+                h("span", { className: "nexus-muted" },
+                  "Hermes oturum referansı: " + item.hermes_session_id),
+                h("button", { type: "button", onClick: function () { checkSession(item); } },
+                  "Oturumu kontrol et"),
+                h("p", { className: "nexus-muted" },
+                  sessionStatus[item.id] || "Oturum henüz doğrulanmadı.")));
+          }))));
     } else if (tab === "models") {
       content = panel("Modeller ve kullanım", h("p", null,
         "OpenRouter bağlantısı, veri sınırları ve harcama kontrolü H4 aşamasında açılacak."));
@@ -162,7 +324,7 @@
       h("header", { className: "nexus-header" },
         h("div", null, h("p", { className: "nexus-eyebrow" }, "Yerel yönetim alanı"),
           h("h1", null, "NEXUS Hub")),
-        h("span", { className: "nexus-badge" }, "Salt okunur · H0+H1")),
+        h("span", { className: "nexus-badge" }, "H2 taslak · çalıştırma kapalı")),
       h("nav", { className: "nexus-tabs", "aria-label": "NEXUS bölümleri" },
         tabs.map(function (item) {
           return h("button", { key: item[0], type: "button",
