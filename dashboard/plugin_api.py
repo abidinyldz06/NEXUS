@@ -35,6 +35,7 @@ _service = importlib.import_module(f"{_CORE_NAME}.hub.service")
 _errors = importlib.import_module(f"{_CORE_NAME}.errors")
 _tasks = importlib.import_module(f"{_CORE_NAME}.hub.tasks")
 _routing = importlib.import_module(f"{_CORE_NAME}.hub.routing")
+_providers = importlib.import_module(f"{_CORE_NAME}.hub.providers")
 
 router = APIRouter()
 
@@ -164,3 +165,14 @@ def create_task(request: Request, draft: DraftRequest) -> dict[str, Any]:
     except _tasks.TaskDraftError as exc:
         status = 409 if "aynı işlem kimliği" in str(exc) else 400
         raise HTTPException(status_code=status, detail=str(exc)) from exc
+
+
+@router.post("/hub/providers/{provider}/usage")
+def provider_usage(request: Request, provider: str) -> dict[str, Any]:
+    # Explicit action only; host supplies authentication and profile secret scope.
+    if request.query_params.get("profile") != "default":
+        raise HTTPException(status_code=409, detail="kullanım bu profilde desteklenmiyor")
+    try:
+        return _providers.snapshot(provider)
+    except _providers.ProviderUsageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

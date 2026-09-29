@@ -121,6 +121,36 @@ class DashboardApiTests(unittest.TestCase):
                 self.assertEqual(first.json()["task"]["id"], second.json()["task"]["id"])
                 self.assertEqual(1, client.get(base + "?profile=default").json()["total"])
 
+    def test_provider_usage_requires_explicit_default_profile_action(self) -> None:
+        module_name = "nexus_hub_dashboard_provider_api_test"
+        api_path = Path(__file__).resolve().parents[2] / "dashboard" / "plugin_api.py"
+        spec = importlib.util.spec_from_file_location(module_name, api_path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        self.addCleanup(sys.modules.pop, module_name, None)
+        spec.loader.exec_module(module)
+        app = FastAPI()
+        app.include_router(module.router, prefix="/api/plugins/nexus")
+        path = "/api/plugins/nexus/hub/providers/openrouter/usage"
+        with patch.object(module, "_settings", side_effect=AssertionError("settings read")):
+            with patch.object(module._providers, "snapshot", return_value={
+                "provider": "openrouter", "status": "not_configured",
+                "metrics": None, "inference_called": False,
+            }) as usage, TestClient(app) as client:
+                self.assertEqual(405, client.get(path + "?profile=default").status_code)
+                self.assertEqual(409, client.post(path).status_code)
+                self.assertEqual(409, client.post(path + "?profile=other").status_code)
+                usage.assert_not_called()
+                result = client.post(path + "?profile=default")
+                self.assertEqual(200, result.status_code)
+                self.assertFalse(result.json()["inference_called"])
+                usage.assert_called_once_with("openrouter")
+            with TestClient(app) as client:
+                self.assertEqual(400, client.post(
+                    "/api/plugins/nexus/hub/providers/custom/usage?profile=default"
+                ).status_code)
+
     def test_route_advice_is_local_non_dispatching_and_profile_scoped(self) -> None:
         module_name = "nexus_hub_dashboard_route_api_test"
         api_path = Path(__file__).resolve().parents[2] / "dashboard" / "plugin_api.py"
