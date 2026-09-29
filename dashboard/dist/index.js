@@ -38,6 +38,23 @@
       sensitive: "hassas; dışarı gönderilmez" }[value] || "bilinmiyor";
   }
 
+  function newDraftKey() {
+    if (!window.crypto || !window.crypto.getRandomValues) return "";
+    const bytes = new Uint8Array(16);
+    try {
+      window.crypto.getRandomValues(bytes);
+    } catch (_ignored) {
+      return "";
+    }
+    bytes[6] = (bytes[6] & 15) | 64;
+    bytes[8] = (bytes[8] & 63) | 128;
+    const hex = Array.from(bytes, function (byte) {
+      return byte.toString(16).padStart(2, "0");
+    }).join("");
+    return hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-" + hex.slice(12, 16) +
+      "-" + hex.slice(16, 20) + "-" + hex.slice(20);
+  }
+
   function HubPage() {
     const [tab, setTab] = useState("today");
     const [overview, setOverview] = useState(null);
@@ -56,7 +73,7 @@
     const [savingTask, setSavingTask] = useState(false);
     const [draft, setDraft] = useState({ title: "", goal: "", expected_output: "",
       target_app: "Hermes", data_class: "undetermined", hermes_session_id: "" });
-    const [draftKey, setDraftKey] = useState(function () { return crypto.randomUUID(); });
+    const [draftKey, setDraftKey] = useState(newDraftKey);
 
     useEffect(function () {
       let active = true;
@@ -86,7 +103,7 @@
         if (field === "target_app" && value !== "Hermes") update.hermes_session_id = "";
         return Object.assign({}, current, update);
       });
-      setDraftKey(crypto.randomUUID());
+      setDraftKey(newDraftKey());
       setTaskError("");
     }
 
@@ -94,6 +111,10 @@
       event.preventDefault();
       if (!defaultTaskScope()) {
         setTaskError("Görev taslakları yalnız default profilde kullanılabilir.");
+        return;
+      }
+      if (!draftKey) {
+        setTaskError("Güvenli işlem kimliği üretilemedi; taslak kaydedilmedi.");
         return;
       }
       if (savingTask) return;
@@ -109,7 +130,7 @@
         setTasks(data);
         setDraft({ title: "", goal: "", expected_output: "",
           target_app: "Hermes", data_class: "undetermined", hermes_session_id: "" });
-        setDraftKey(crypto.randomUUID());
+        setDraftKey(newDraftKey());
       }).catch(function (error) {
         setTaskError(errorText(error));
       }).finally(function () { setSavingTask(false); });
@@ -223,7 +244,8 @@
                 placeholder: "Yalnız tam oturum kimliği; yeni iş başlatmaz",
                 onChange: function (event) { editDraft("hermes_session_id", event.target.value); } })),
             h("button", { type: "submit", disabled: savingTask ||
-              !draft.title.trim() || !draft.goal.trim() || !draft.expected_output.trim() },
+              !draftKey || !draft.title.trim() || !draft.goal.trim() ||
+              !draft.expected_output.trim() },
               savingTask ? "Kaydediliyor…" : "Taslak olarak kaydet")),
           taskError && h("p", { className: "nexus-error", role: "alert" }, taskError))),
         panel("Taslaklar", h("div", null,
