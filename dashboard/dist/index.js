@@ -18,25 +18,20 @@
     ["Antigravity", "Ajan uygulaması · uygulama kotası burada henüz okunmuyor"],
   ];
 
-  function usageNumber(value) {
-    return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
-  }
-
   function providerUsage(snapshot) {
     const groups = new Map();
     (snapshot && Array.isArray(snapshot.models) ? snapshot.models : []).forEach(function (row) {
       if (!row || typeof row !== "object") return;
       const name = typeof row.provider === "string" && row.provider.trim() ?
         row.provider.trim() : "Sağlayıcı atfı bilinmiyor";
-      const entry = groups.get(name) || { name: name, models: 0, tokens: 0,
-        calls: 0, estimatedCost: 0 };
+      const entry = groups.get(name) || { name: name, models: 0, sessions: 0 };
       entry.models += 1;
-      entry.tokens += usageNumber(row.input_tokens) + usageNumber(row.output_tokens);
-      entry.calls += usageNumber(row.api_calls);
-      entry.estimatedCost += usageNumber(row.estimated_cost);
+      if (typeof row.sessions === "number" && Number.isFinite(row.sessions) && row.sessions >= 0) {
+        entry.sessions += row.sessions;
+      }
       groups.set(name, entry);
     });
-    return Array.from(groups.values()).sort(function (a, b) { return b.tokens - a.tokens; });
+    return Array.from(groups.values()).sort(function (a, b) { return b.sessions - a.sessions; });
   }
 
   function errorText(error) {
@@ -326,28 +321,22 @@
           return panel(item[0], h("p", { className: "nexus-muted" }, item[1]),
             "nexus-app", item[0]);
         })),
-        panel("Hermes model kullanımı · son 30 gün", h("div", null,
+        panel("Hermes model-oturum kayıtları · son 30 gün", h("div", null,
           h("p", { className: "nexus-muted" },
-            "Yalnız Hermes'in default profilindeki kayıtlar; sağlayıcı hesabının tüm harcaması veya kalan kotası değildir. Sayfa açılırken sorgulanmaz."),
+            "Yalnız Hermes'in default profilindeki model-oturum kayıtlarıdır; tek bir oturum birden çok modelde sayılabilir. Token, API çağrısı ve maliyet tahminleri eksik olabileceğinden burada gösterilmez; sağlayıcı faturası veya kalan kota değildir. Sayfa açılırken sorgulanmaz."),
           !defaultTaskScope() && h("p", { className: "nexus-muted" },
             "Kullanımı görmek için default profiline geçin."),
           h("button", { type: "button", onClick: loadModelUsage,
             disabled: modelUsageLoading || !defaultTaskScope() },
-            modelUsageLoading ? "Getiriliyor…" : "Kullanımı getir"),
+            modelUsageLoading ? "Getiriliyor…" : "Oturumları getir"),
           modelUsageError && h("p", { className: "nexus-error", role: "alert" }, modelUsageError),
           modelUsage && providerRows.length === 0 && h("p", null,
-            "Bu dönemde Hermes model kullanımı kaydedilmemiş."),
+            "Bu dönemde Hermes model oturumu kaydedilmemiş."),
           providerRows.map(function (row) {
             return h("div", { key: row.name, className: "nexus-task-row" },
               h("strong", null, row.name),
               h("span", null, row.models + " model kaydı · " +
-                row.tokens.toLocaleString("tr-TR") + " giriş/çıkış tokenı · " +
-                (row.calls > 0 ? row.calls.toLocaleString("tr-TR") + " API çağrısı" :
-                  "çağrı sayısı raporlanmadı")),
-              h("span", { className: "nexus-muted" }, row.estimatedCost > 0 ?
-                "Tahmini maliyet: " + (row.estimatedCost < 0.0001 ? "<$0.0001" :
-                  "$" + row.estimatedCost.toFixed(4)) :
-                "Maliyet raporlanmadı"));
+                row.sessions.toLocaleString("tr-TR") + " model-oturum kaydı"));
           }))));
     } else {
       const resultItems = results && results.items || [];
