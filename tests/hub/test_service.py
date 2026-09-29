@@ -59,6 +59,8 @@ class HubServiceTests(unittest.TestCase):
 
             self.assertEqual(1, state["index"]["records"])
             self.assertEqual(1, state["review"]["pending"])
+            self.assertIn("Model sağlayıcıları", {app["name"] for app in state["apps"]})
+            self.assertIn("Antigravity", {app["name"] for app in state["apps"]})
             self.assertEqual(memory.id, found["items"][0]["id"])
             self.assertTrue(detail["canonical_verified"])
             self.assertFalse(detail["original_source_verified"])
