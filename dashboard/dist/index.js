@@ -12,11 +12,22 @@
     ["memory", "Hafıza"], ["models", "Modeller ve kullanım"],
   ];
   const providerCatalog = [
-    ["OpenRouter", "Model API · bağlantı ve hesap bakiyesi henüz doğrulanmadı"],
-    ["Gemini API", "Model API · Antigravity abonelik kotasından ayrı"],
-    ["NVIDIA NIM", "Model API · inference anahtarı NGC anahtarından ayrı"],
-    ["Antigravity", "Ajan uygulaması · uygulama kotası burada henüz okunmuyor"],
+    ["OpenRouter", "openrouter", "Model API · hesap bakiyesi burada okunmuyor"],
+    ["Gemini API", "gemini", "Model API · Antigravity abonelik kotasından ayrı"],
+    ["NVIDIA NIM", "nvidia", "Model API · inference anahtarı NGC anahtarından ayrı"],
+    ["Antigravity", null, "Ajan uygulaması · uygulama kotası burada okunmuyor"],
   ];
+
+  function providerConnection(rows, slug) {
+    if (!slug) return "Hermes model sağlayıcısı değil; bağlantı durumu bilinmiyor.";
+    const row = rows.find(function (item) {
+      return item && item.slug === slug;
+    });
+    if (!row) return "Hermes'te açıkça tanımlı bağlantı bulunmadı.";
+    return row.authenticated === true ?
+      "Hermes'te yetkili görünüyor; canlı API testi yapılmadı." :
+      "Hermes'te tanımlı, ancak yetki doğrulanmadı.";
+  }
 
   function providerUsage(snapshot) {
     const groups = new Map();
@@ -95,6 +106,9 @@
     const [modelUsage, setModelUsage] = useState(null);
     const [modelUsageError, setModelUsageError] = useState("");
     const [modelUsageLoading, setModelUsageLoading] = useState(false);
+    const [providerConnections, setProviderConnections] = useState(null);
+    const [providerConnectionError, setProviderConnectionError] = useState("");
+    const [providerConnectionLoading, setProviderConnectionLoading] = useState(false);
     const [savingTask, setSavingTask] = useState(false);
     const [draft, setDraft] = useState({ title: "", goal: "", expected_output: "",
       target_app: "Hermes", data_class: "undetermined", hermes_session_id: "" });
@@ -202,6 +216,27 @@
       }).catch(function () {
         setModelUsageError("Hermes kullanım verisi alınamadı; durum bilinmiyor.");
       }).finally(function () { setModelUsageLoading(false); });
+    }
+
+    function loadProviderConnections() {
+      if (providerConnectionLoading) return;
+      if (!defaultTaskScope()) {
+        setProviderConnectionError("Bağlantı durumu yalnız default profilde görüntülenebilir.");
+        return;
+      }
+      setProviderConnectionLoading(true);
+      setProviderConnections(null);
+      setProviderConnectionError("");
+      SDK.fetchJSON("/api/model/options?profile=default&explicit_only=true").then(function (data) {
+        if (!data || !Array.isArray(data.providers)) {
+          throw new Error("geçersiz sağlayıcı yanıtı");
+        }
+        setProviderConnections(data.providers.map(function (row) {
+          return { slug: row.slug, authenticated: row.authenticated === true };
+        }));
+      }).catch(function () {
+        setProviderConnectionError("Hermes bağlantı durumu alınamadı; durum bilinmiyor.");
+      }).finally(function () { setProviderConnectionLoading(false); });
     }
 
     function runSearch(event) {
@@ -316,9 +351,17 @@
         panel("Sağlayıcı Merkezi", h("div", null,
           h("p", null, "OpenRouter tek seçenek değil. Bağlantılar Hermes veya ilgili uygulamada yönetilir; NEXUS anahtar saklamaz."),
           h("p", { className: "nexus-muted" },
-            "Bağlı görünümü, hesap bakiyesi ve uygulama kotası henüz doğrulanmadı."))),
+            "Hermes bağlantı bilgisi hesap bakiyesi, kalan kota veya canlı erişim kanıtı değildir. Sayfa açılırken sorgulanmaz."),
+          h("button", { type: "button", onClick: loadProviderConnections,
+            disabled: providerConnectionLoading || !defaultTaskScope() },
+            providerConnectionLoading ? "Kontrol ediliyor…" : "Hermes bağlantılarını kontrol et"),
+          providerConnectionError && h("p", { className: "nexus-error", role: "alert" },
+            providerConnectionError))),
         h("div", { className: "nexus-grid" }, providerCatalog.map(function (item) {
-          return panel(item[0], h("p", { className: "nexus-muted" }, item[1]),
+          return panel(item[0], h("div", null,
+            h("p", { className: "nexus-muted" }, item[2]),
+            h("p", null, providerConnections ?
+              providerConnection(providerConnections, item[1]) : "Bağlantı durumu kontrol edilmedi.")),
             "nexus-app", item[0]);
         })),
         panel("Hermes model-oturum kayıtları · son 30 gün", h("div", null,
