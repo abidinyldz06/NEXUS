@@ -40,6 +40,7 @@ _providers = importlib.import_module(f"{_CORE_NAME}.hub.providers")
 _pilot = importlib.import_module(f"{_CORE_NAME}.hub.pilot")
 _budget = importlib.import_module(f"{_CORE_NAME}.hub.budget")
 _hermes_agents = importlib.import_module(f"{_CORE_NAME}.hub.hermes_agents")
+_github_status = importlib.import_module(f"{_CORE_NAME}.hub.github_status")
 
 router = APIRouter()
 
@@ -110,6 +111,12 @@ def overview() -> dict[str, Any]:
 def hermes_agents(request: Request) -> dict[str, Any]:
     _default_profile_only(request)
     return _hermes_agents.snapshot()
+
+
+@router.get("/hub/github-status")
+def github_status(request: Request) -> dict[str, Any]:
+    _default_profile_only(request)
+    return _github_status.snapshot()
 
 
 @router.get("/hub/search")

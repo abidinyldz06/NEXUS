@@ -164,3 +164,19 @@ test("apps list reads existing agent names only on click and cannot dispatch", (
   button.props.onClick();
   assert.equal(other.calls.length, 0);
 });
+
+test("GitHub is read only, explicit, and disabled outside default profile", () => {
+  const page = harness();
+  page.button(page.render(), "Uygulamalar").props.onClick();
+  assert.equal(page.calls.length, 0);
+  page.button(page.render(), "GitHub durumunu oku").props.onClick();
+  assert.equal(page.calls.length, 1);
+  assert.ok(page.calls[0].url.endsWith("/github-status?profile=default"));
+  assert.equal(page.calls[0].options, undefined);
+  const other = harness("other");
+  other.button(other.render(), "Uygulamalar").props.onClick();
+  const button = other.button(other.render(), "GitHub durumunu oku");
+  assert.equal(button.props.disabled, true);
+  button.props.onClick();
+  assert.equal(other.calls.length, 0);
+});

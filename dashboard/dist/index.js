@@ -132,6 +132,9 @@
     const [hermesAgents, setHermesAgents] = useState(null);
     const [agentsLoading, setAgentsLoading] = useState(false);
     const [agentsError, setAgentsError] = useState("");
+    const [githubStatus, setGithubStatus] = useState(null);
+    const [githubLoading, setGithubLoading] = useState(false);
+    const [githubError, setGithubError] = useState("");
     const [savingTask, setSavingTask] = useState(false);
     const [draft, setDraft] = useState({ title: "", goal: "", expected_output: "",
       target_app: "Hermes", data_class: "undetermined", hermes_session_id: "" });
@@ -281,6 +284,15 @@
       }).finally(function () { setProviderConnectionLoading(false); });
     }
 
+    function loadGithubStatus() {
+      if (githubLoading || !defaultTaskScope()) return;
+      setGithubLoading(true); setGithubStatus(null); setGithubError("");
+      SDK.fetchJSON(API + "/github-status?profile=default").then(function (data) {
+        setGithubStatus(data);
+      }).catch(function (error) { setGithubError(errorText(error));
+      }).finally(function () { setGithubLoading(false); });
+    }
+
     function loadHermesAgents() {
       if (agentsLoading || !defaultTaskScope()) return;
       setAgentsLoading(true); setAgentsError("");
@@ -385,6 +397,23 @@
             "İndeks: " + new Date(index.updated_at).toLocaleString("tr-TR") : "İndeks zamanı bilinmiyor"))));
     } else if (tab === "apps") {
       content = h("div", { className: "nexus-grid" },
+        panel("GitHub · NEXUS durumu", h("div", null,
+          h("p", null, "Yalnız abidinyldz06/NEXUS: main commit'i, en son main koşusu ve en fazla 10 açık PR. Okuma düğmeyle yapılır; merge, push veya yorum yok."),
+          h("button", { type: "button", onClick: loadGithubStatus,
+            disabled: githubLoading || !defaultTaskScope() },
+            githubLoading ? "GitHub okunuyor…" : "GitHub durumunu oku"),
+          githubError && h("p", { role: "alert" }, githubError),
+          githubStatus && !githubStatus.available && h("p", { role: "alert" }, githubStatus.reason),
+          githubStatus && githubStatus.available && h("div", null,
+            h("p", null, "Okuma: " + new Date(githubStatus.read_at).toLocaleString("tr-TR")),
+            h("p", null, "Main: " + githubStatus.main),
+            h("p", null, "Son main koşusu: " + githubStatus.main_run.status + " / " + (githubStatus.main_run.conclusion || "bilinmiyor")),
+            h("p", { className: "nexus-muted" }, "Bu sonuç kurulu eklenti veya canlı sistem sürümünü doğrulamaz. Son koşu tüm workflow'ların kabulü değildir."),
+            (githubStatus.items || []).length === 0 && h("p", null, "Açık PR bulunmadı."),
+            (githubStatus.items || []).map(function (pr) {
+              return h("div", { key: pr.number }, h("a", { href: "https://github.com/abidinyldz06/NEXUS/pull/" + pr.number }, "#" + pr.number + " " + pr.title),
+                h("p", null, "Commit: " + pr.head + " · Kontroller: " + pr.checks));
+            })))),
         panel("Hermes ajanları · mevcut profiller", h("div", null,
           h("p", null, "Bot oluşturma ve yönetme Hermes'te kalır. NEXUS yalnız mevcut profilleri listeler; sohbet açmak görev veya mesaj başlatmaz."),
           h("p", { className: "nexus-muted" }, "Profilin bulunması çalıştığı veya erişiminin doğrulandığı anlamına gelmez. Hermes sohbetlerinin model/maliyet ayarları ayrıdır; NEXUS'un ücretsiz sınırı bu sohbetlere uygulanmaz."),
