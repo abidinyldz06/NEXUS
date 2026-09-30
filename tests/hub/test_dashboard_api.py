@@ -169,6 +169,25 @@ class DashboardApiTests(unittest.TestCase):
                     self.assertEqual("no-store", response.headers["cache-control"])
                     run.assert_called_once()
 
+    def test_hermes_agent_listing_is_default_only_and_never_reads_plugin_settings(self) -> None:
+        path = Path(__file__).resolve().parents[2] / "dashboard" / "plugin_api.py"
+        spec = importlib.util.spec_from_file_location("nexus_agents_api_test", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        app = FastAPI()
+        app.include_router(module.router)
+        with patch.object(module, "_settings") as settings:
+            with patch.object(module._hermes_agents, "snapshot", return_value={"read_only": True}) as read:
+                with TestClient(app) as client:
+                    base = "/hub/hermes-agents"
+                    self.assertEqual(409, client.get(base).status_code)
+                    self.assertEqual(409, client.get(base + "?profile=other").status_code)
+                    self.assertEqual(405, client.post(base + "?profile=default").status_code)
+                    read.assert_not_called()
+                    self.assertEqual(200, client.get(base + "?profile=default").status_code)
+                    read.assert_called_once_with()
+                    settings.assert_not_called()
+
     def test_provider_usage_requires_explicit_default_profile_action(self) -> None:
         module_name = "nexus_hub_dashboard_provider_api_test"
         api_path = Path(__file__).resolve().parents[2] / "dashboard" / "plugin_api.py"

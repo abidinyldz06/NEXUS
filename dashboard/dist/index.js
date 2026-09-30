@@ -129,6 +129,9 @@
     const [summaryLoading, setSummaryLoading] = useState(false);
     const [summaryResult, setSummaryResult] = useState(null);
     const [summaryError, setSummaryError] = useState("");
+    const [hermesAgents, setHermesAgents] = useState(null);
+    const [agentsLoading, setAgentsLoading] = useState(false);
+    const [agentsError, setAgentsError] = useState("");
     const [savingTask, setSavingTask] = useState(false);
     const [draft, setDraft] = useState({ title: "", goal: "", expected_output: "",
       target_app: "Hermes", data_class: "undetermined", hermes_session_id: "" });
@@ -278,6 +281,16 @@
       }).finally(function () { setProviderConnectionLoading(false); });
     }
 
+    function loadHermesAgents() {
+      if (agentsLoading || !defaultTaskScope()) return;
+      setAgentsLoading(true); setAgentsError("");
+      SDK.fetchJSON(API + "/hermes-agents?profile=default").then(function (data) {
+        setHermesAgents(data);
+      }).catch(function (error) {
+        setHermesAgents(null); setAgentsError(errorText(error));
+      }).finally(function () { setAgentsLoading(false); });
+    }
+
     function runSummary() {
       if (summaryLoading || !summaryKey || !summaryConsent || !defaultTaskScope() ||
           !summaryPreview || summaryPreview !== summaryText || summaryText.length > 400) return;
@@ -372,6 +385,22 @@
             "İndeks: " + new Date(index.updated_at).toLocaleString("tr-TR") : "İndeks zamanı bilinmiyor"))));
     } else if (tab === "apps") {
       content = h("div", { className: "nexus-grid" },
+        panel("Hermes ajanları · mevcut profiller", h("div", null,
+          h("p", null, "Bot oluşturma ve yönetme Hermes'te kalır. NEXUS yalnız mevcut profilleri listeler; sohbet açmak görev veya mesaj başlatmaz."),
+          h("p", { className: "nexus-muted" }, "Profilin bulunması çalıştığı veya erişiminin doğrulandığı anlamına gelmez. Hermes sohbetlerinin model/maliyet ayarları ayrıdır; NEXUS'un ücretsiz sınırı bu sohbetlere uygulanmaz."),
+          h("button", { type: "button", onClick: loadHermesAgents,
+            disabled: agentsLoading || !defaultTaskScope() },
+            agentsLoading ? "Profiller okunuyor…" : "Mevcut Hermes ajanlarını göster"),
+          !defaultTaskScope() && h("p", null, "Profil listesi yalnız default profilde okunur."),
+          agentsError && h("p", { role: "alert", className: "nexus-error" }, agentsError),
+          hermesAgents && !hermesAgents.available && h("p", null, hermesAgents.reason),
+          hermesAgents && hermesAgents.available && (hermesAgents.items || []).map(function (agent) {
+            const knownProfiles = ["default", "writer-agent", "research-agent", "coder-agent", "scheduler-agent", "control-room"];
+            const safeLink = agent.present === true && knownProfiles.includes(agent.profile);
+            return h("div", { key: agent.profile }, h("h3", null, agent.name),
+              h("p", null, agent.role + " · " + (agent.present ? "Profil mevcut" : "Kurulu profil bulunmadı")),
+              safeLink && h("a", { href: "/chat?profile=" + agent.profile }, "Hermes sohbetini aç"));
+          }))),
         (overview && overview.apps || []).map(function (app) {
           return panel(app.name, h("p", null, app.status), "nexus-app", app.name);
         }),

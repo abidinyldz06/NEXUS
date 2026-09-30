@@ -39,6 +39,7 @@ _routing = importlib.import_module(f"{_CORE_NAME}.hub.routing")
 _providers = importlib.import_module(f"{_CORE_NAME}.hub.providers")
 _pilot = importlib.import_module(f"{_CORE_NAME}.hub.pilot")
 _budget = importlib.import_module(f"{_CORE_NAME}.hub.budget")
+_hermes_agents = importlib.import_module(f"{_CORE_NAME}.hub.hermes_agents")
 
 router = APIRouter()
 
@@ -103,6 +104,12 @@ def _settings() -> Any:
 @router.get("/hub/overview")
 def overview() -> dict[str, Any]:
     return _service.overview(_settings())
+
+
+@router.get("/hub/hermes-agents")
+def hermes_agents(request: Request) -> dict[str, Any]:
+    _default_profile_only(request)
+    return _hermes_agents.snapshot()
 
 
 @router.get("/hub/search")
