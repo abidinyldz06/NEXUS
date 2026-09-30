@@ -122,6 +122,13 @@
     const [pilotResult, setPilotResult] = useState(null);
     const [pilotError, setPilotError] = useState("");
     const [pilotLoading, setPilotLoading] = useState(false);
+    const [summaryText, setSummaryText] = useState("");
+    const [summaryPreview, setSummaryPreview] = useState(null);
+    const [summaryConsent, setSummaryConsent] = useState(false);
+    const [summaryKey, setSummaryKey] = useState(newDraftKey);
+    const [summaryLoading, setSummaryLoading] = useState(false);
+    const [summaryResult, setSummaryResult] = useState(null);
+    const [summaryError, setSummaryError] = useState("");
     const [savingTask, setSavingTask] = useState(false);
     const [draft, setDraft] = useState({ title: "", goal: "", expected_output: "",
       target_app: "Hermes", data_class: "undetermined", hermes_session_id: "" });
@@ -271,6 +278,22 @@
       }).finally(function () { setProviderConnectionLoading(false); });
     }
 
+    function runSummary() {
+      if (summaryLoading || !summaryKey || !summaryConsent || !defaultTaskScope() ||
+          !summaryPreview || summaryPreview !== summaryText || summaryText.length > 400) return;
+      setSummaryLoading(true); setSummaryConsent(false); setSummaryResult(null); setSummaryError("");
+      SDK.fetchJSON(API + "/selected-summary?profile=default", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request_id: summaryKey, model: "stealth/space-bunny-alpha",
+          text: summaryPreview, external_authorized: true, non_sensitive: true })
+      }).then(function (result) {
+        setSummaryResult(result);
+        if (result.cost_verified === true) setSummaryKey(newDraftKey());
+      }).catch(function (error) {
+        setSummaryError(errorText(error));
+      }).finally(function () { setSummaryLoading(false); });
+    }
+
     function runFreePilot() {
       if (pilotLoading || !pilotKey || !defaultTaskScope()) return;
       setPilotLoading(true); setPilotResult(null); setPilotError("");
@@ -380,6 +403,38 @@
             pilotResult.status === "completed" && pilotResult.expected_output === true ?
               "Bağlantı testi başarılı · doğrulanmış maliyet 0 USD · " + pilotResult.elapsed_seconds + " saniye" :
               "Test kabul edilmedi veya daha önce kaydedildi; otomatik tekrar yok. Durum: " + pilotResult.status))),
+        panel("Seçili metin özeti", h("div", null,
+          h("p", null, "Önizleme yereldir. Onaylayıp özetle düğmesine basınca yalnız aşağıdaki metin OpenRouter'a gönderilir. Vault okunmaz; metin ve sonuç diske kaydedilmez."),
+          h("label", null, "Özetlenecek metin (en fazla 400 karakter)",
+            h("textarea", { value: summaryText, maxLength: 400, disabled: summaryLoading,
+              onChange: function (event) {
+                setSummaryText(event.target.value); setSummaryPreview(null); setSummaryConsent(false);
+                setSummaryResult(null); setSummaryError(""); setSummaryKey(newDraftKey());
+              } })),
+          h("p", { className: "nexus-muted" }, "API anahtarı, kişisel veya hassas bilgi eklemeyin. Otomatik hassas veri tespiti yapılmaz."),
+          h("button", { type: "button", disabled: summaryLoading || !summaryText.trim() || summaryText.length > 400,
+            onClick: function () {
+              if (!summaryText.trim() || summaryText.length > 400) return;
+              setSummaryPreview(summaryText); setSummaryConsent(false);
+            } }, "Gönderim önizlemesini göster"),
+          summaryPreview && h("div", { role: "status" },
+            h("p", null, "Hedef: OpenRouter / Space Bunny Alpha · güncel fiyatı sıfır olan model · harcama sınırı 0 USD. Sağlayıcı içerik saklayabilir; hassas metin göndermeyin."),
+            h("p", null, "Yalnız aşağıdaki metin kullanılacak; başka dosya, not veya görev eklenmeyecek."),
+            h("pre", null, summaryPreview),
+            h("label", null, h("input", { type: "checkbox", checked: summaryConsent,
+              disabled: summaryLoading,
+              onChange: function (event) { setSummaryConsent(event.target.checked); } }),
+              "Bu metinden hassas bilgileri çıkardım; bu işlem için OpenRouter'a gönderilmesini onaylıyorum."),
+            h("button", { type: "button", onClick: runSummary,
+              disabled: summaryLoading || !summaryConsent || !summaryKey ||
+                (summaryResult && summaryResult.hold_status === "unknown") },
+              summaryLoading ? "Özet hazırlanıyor…" : "Onayladığım metni ücretsiz özetle")),
+          summaryError && h("p", { className: "nexus-error", role: "alert" }, summaryError),
+          summaryResult && h("div", { role: "status" },
+            summaryResult.status === "completed" && summaryResult.cost_verified === true ?
+              h("div", null, h("p", null, "Taslak özet · doğrulanmış maliyet 0 USD. Doğruluğunu kontrol edin."),
+                h("pre", null, summaryResult.output)) :
+              h("p", null, "Sonuç doğrulanamadı veya daha önce kaydedildi; otomatik tekrar yok. Durum: " + summaryResult.status)))),
         panel("Nereye yönlendirelim? · yalnız öneri", h("div", null,
           h("p", { className: "nexus-muted" },
             "İstek bu cihazda kurallarla değerlendirilir. Model çağrısı, görev başlatma veya taslak kaydı yapılmaz."),

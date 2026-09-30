@@ -84,3 +84,49 @@ class PilotTests(TestCase):
             self.run_pilot()
         self.transport.assert_not_called()
         self.assertFalse((self.root / "hub").exists())
+
+    def test_summary_requires_explicit_consent_and_bounded_text_before_network(self):
+        for consent, safe, text in ((False, True, "metin"), (True, False, "metin"),
+                                    ("true", True, "metin"), (True, True, ""),
+                                    (True, True, "a" * 401)):
+            with self.assertRaises(BudgetError):
+                pilot.summarize(self.config, request_id=str(uuid4()), model=self.model,
+                                text=text, external_authorized=consent, non_sensitive=safe)
+        self.reader.assert_not_called()
+        self.secret.assert_not_called()
+        self.transport.assert_not_called()
+        self.assertFalse((self.root / "hub").exists())
+
+    def test_summary_returns_transient_draft_and_never_saves_content(self):
+        text = "sentetik-secilen-metin"
+        output = "sentetik-ozet-yaniti"
+        self.transport.return_value[1]["choices"][0]["message"]["content"] = output
+        identifier = str(uuid4())
+        result = pilot.summarize(self.config, request_id=identifier, model=self.model,
+                                 text=text, external_authorized=True, non_sensitive=True)
+        self.assertEqual(output, result["output"])
+        body = self.transport.call_args.args[1]
+        self.assertTrue(body["messages"][0]["content"].endswith(text))
+        self.assertLessEqual(len(body["messages"][0]["content"]), 500)
+        self.assertFalse(body["provider"]["allow_fallbacks"])
+        for file in self.root.rglob("*"):
+            if file.is_file():
+                raw = file.read_bytes()
+                self.assertNotIn(text.encode(), raw)
+                self.assertNotIn(output.encode(), raw)
+        again = pilot.summarize(self.config, request_id=identifier, model=self.model,
+                                text=text, external_authorized=True, non_sensitive=True)
+        self.assertEqual("already_recorded", again["status"])
+        self.assertNotIn("output", again)
+        self.transport.assert_called_once()
+
+    def test_summary_unknown_cost_never_returns_output_or_retries(self):
+        self.transport.return_value[1]["usage"] = {}
+        result = pilot.summarize(self.config, request_id=str(uuid4()), model=self.model,
+                                 text="sentetik", external_authorized=True, non_sensitive=True)
+        self.assertEqual("unknown", result["hold_status"])
+        self.assertNotIn("output", result)
+        with self.assertRaises(BudgetError):
+            pilot.summarize(self.config, request_id=str(uuid4()), model=self.model,
+                            text="sentetik", external_authorized=True, non_sensitive=True)
+        self.transport.assert_called_once()

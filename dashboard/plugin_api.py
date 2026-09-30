@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, StrictBool
+from fastapi.responses import JSONResponse
 
 _CORE_DIR = Path(__file__).resolve().parents[1] / "nexus"
 _CORE_NAME = "_hermes_nexus_hub_" + sha256(str(_CORE_DIR).encode()).hexdigest()[:12]
@@ -62,6 +63,12 @@ class FreePilotRequest(BaseModel):
     model: str
 
     model_config = ConfigDict(extra="forbid")
+
+
+class SummaryRequest(FreePilotRequest):
+    text: str
+    external_authorized: StrictBool
+    non_sensitive: StrictBool
 
 
 def _default_profile_only(request: Request) -> None:
@@ -197,3 +204,16 @@ def free_pilot(request: Request, body: FreePilotRequest) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception:
         raise HTTPException(status_code=503, detail="pilot başlatılamadı; otomatik tekrar yok") from None
+
+
+@router.post("/hub/selected-summary")
+def selected_summary(request: Request, body: SummaryRequest) -> Any:
+    if request.query_params.get("profile") != "default":
+        raise HTTPException(status_code=409, detail="özet yalnız default profilde destekleniyor")
+    try:
+        result = _pilot.summarize(_settings(), **body.model_dump())
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+    except _budget.BudgetError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception:
+        raise HTTPException(status_code=503, detail="özet sonucu doğrulanamadı; otomatik tekrar yok") from None
