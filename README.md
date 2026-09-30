@@ -18,13 +18,15 @@ işleme teknik kabulü tamamlandı diye sunulmaz.
 | Seçili metin özeti | En fazla 400 karakter, önizleme ve her işlemde açık onay; kısa Türkçe taslak | Yalnız seçilen metin OpenRouter'a çıkar; Vault bağlamı eklenmez |
 | Hermes ajanları | Mevcut altı profil için salt okunur liste ve sohbet bağlantısı | Yeni bot, mesaj, scheduler veya otomatik dispatch oluşturmaz |
 | GitHub durumu | NEXUS main commit'i, son main koşusu ve en fazla 10 açık PR | Yalnız düğmeyle okur; merge/push yapmaz, kurulu sürümü ayrıca doğrulamak gerekir |
+| İşlem durumu | Ücretsiz test/özet için çalışan, doğrulanmış taslak ve belirsiz sonuç ayrımı | İçerik saklamaz; eski maliyet kaydı başarı sayılmaz, tekrar/resume başlatmaz |
 
 Seçili metin özeti çalışan panelde sentetik örnekle doğrulandı; sağlayıcının
 bildirdiği maliyet **0 USD** idi. Profil listesi ve sohbet bağlantısı PR #58'de
 main'e alındı, kurulu sürümde altı profil listelendi ve Writer sohbetine geçiş
 doğrulandı. Güncel teslim kanıtı [yol haritasında](docs/yol-haritasi.md) izlenir.
 PR #63 kurulu `431200e` sürümünde canlı GitHub paneliyle doğrulandı; #59 kapandı.
-335 yerel Python testi ve 9 panel testi bu kurulu sürüm üzerinde geçti. GitHub Python
+PR #65 kurulu `8f5f6af` sürümünde canlı işlem durumu paneliyle doğrulandı; #60 kapandı.
+341 yerel Python testi ve 10 panel testi bu kurulu sürüm üzerinde geçti. GitHub Python
 iş akışı, Hermes'in sağladığı FastAPI ortamı yoksa API testlerini atlayabilir;
 yerel tam suite kanıtıyla CI kanıtı ayrı değerlendirilir.
 
@@ -35,6 +37,7 @@ Hermes dashboard → **NEXUS**:
 1. **Hafıza:** kayıt ara, kaynağı ve bekleyen adayları görüntüle.
 2. **Görevler:** taslak oluştur veya **Seçili metin özeti** bölümünde metni
    yapıştır → önizlemeyi gör → o işlem için onayla → taslak özeti kontrol et.
+   **İşlem durumlarını oku:** mevcut işlem kayıtlarını model çağırmadan kontrol et.
 3. **Uygulamalar:** **GitHub durumunu oku** ile NEXUS ilerlemesini görüntüle;
    mevcut Hermes ajanlarını listele ve kendi sohbetlerine geç.
 4. **Modeller ve kullanım:** bağlantı ve kullanım bilgisini düğmeyle oku.

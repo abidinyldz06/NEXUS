@@ -29,5 +29,16 @@ Default profil dışında desteklenmez. Hata eski başarı sonucu olarak göster
 model çağrısı, timeout sonrası blokaj, restart sonrası belirsizlik, eski store'un
 değişmeden okunması ve default/read-only API sınırlarını sahte sağlayıcıyla ölçer.
 Gerçek sağlayıcı çağrısı yapılmadı; production verileri veya guard'lar değişmedi.
-Bu kanıt kurulu canlı panel kabulü değildir. #60 kurulum ve canlı akış kanıtı
-olmadan kapanmaz; #61 ve A8 teknik koşulları ayrı kalır.
+Bu geliştirme kanıtı tek başına kurulu canlı panel kabulü değildir.
+
+## Kurulum ve canlı görünüm kanıtı — 30 Eylül 2026
+
+PR #65 main'e `8f5f6afb9d5bc5b71276b2735525434182b19c04` ile birleşti.
+Temiz kurulu checkout ve Hermes pin'i aynı SHA; kurulu suite 341 Python ve
+10 arayüz testi geçti. Main CI `36690375311` başarılı.
+Canlı default panelde iki eski kaydın maliyeti doğrulanmış, sonucu belirsiz
+gösterildi; sayfa yenilemesi ve ikinci okuma aynı kayıtları korudu. Bu eski
+yalnız maliyet kayıtları yeni hata değildir; tamamlanma metadatası geçmişte
+saklanmadığı için sonuç başarısı varsayılmaz. Yeni model çağrısı yapılmadı.
+#60 dar görünürlük kapsamı kapandı. Gerçek sağlayıcı timeout/crash testi veya
+üretim restore yapılmış sayılmıyor; #61 ve A8 teknik koşulları ayrı açık kalır.

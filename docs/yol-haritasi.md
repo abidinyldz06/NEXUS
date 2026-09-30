@@ -15,19 +15,20 @@ teslimi ve gerçekten kalan işleri ayırır. Tahmini tarih veya yüzde, kabul k
 | H5 seçili kısa metin özeti | PR #57; çalışan panelde Türkçe sentetik özet | Kullanımda; 400 karakter, her işlemde onay, yalnız taslak sonuç |
 | Hermes mevcut ajan bağlantıları | PR #58; kurulu pin `074412a`; canlı listede altı profil, Writer sohbet geçişi | Kullanımda; yeni bot, mesaj veya dispatch yok |
 | H5 salt okunur GitHub durumu | PR #63; kurulu pin `431200e`; canlı panel main ve başarılı son koşuyu gösterdi, #59 kapandı | Kullanımda; yalnız NEXUS, en fazla 10 açık PR; merge/push yok |
+| H5 işlem sonucu ve kesinti görünürlüğü | PR #65; kurulu pin `8f5f6af`; canlı panel ve sayfa yenilemesi aynı iki eski kaydı gösterdi, #60 kapandı | Kullanımda; eski maliyet kaydı sonuç başarısı sayılmaz, içerik/yanıt saklanmaz, tekrar/resume yok |
 
 PR/CI ile kurulu checkout/pin ve canlı arayüz doğrulaması ayrı kanıtlardır.
-`431200e` kurulu sürümünün tam yerel suite'i 335 Python ve 9 panel testidir. CI ortamında
+`8f5f6af` kurulu sürümünün tam yerel suite'i 341 Python ve 10 panel testidir. CI ortamında
 Hermes/FastAPI eksikse API testleri atlanır; atlanan testler geçti sayılmaz.
 
 ## Öncelikli kalan işler
 
 | Öncelik | İş | Bağımlılık | Kapanış ölçütü |
 | --- | --- | --- | --- |
-| 1 | Görev sonucu ve kesinti görünürlüğü (#60) | Mevcut pasif taslak + dar ücretsiz özet akışı; Hermes yürütmesi incelenmeli | Taslak/başlamadı/çalışıyor/sonucu belirsiz/taslak sonuç ayrımı; model veya mesaj yan etkisi iki kez oluşmaz; bütçe belirsizliği açık görünür |
-| 2 | Gerçek kullanım ve toparlanma kabulü (#61) | Kullanılabilir akışlar, insan gözlemi, güvenli yedek/restore kapsamı | Kullanılan günler ve sonuçlar kanıtlı; hata/mükerrer/provenance incelemesi; kontrollü sentetik toparlanma kanıtı; açık sorunlar dürüstçe sınıflı |
+| 1 | Gerçek kullanım ve toparlanma kabulü (#61) | Kullanılabilir akışlar, insan gözlemi, güvenli yedek/restore kapsamı | Kullanılan günler ve sonuçlar kanıtlı; hata/mükerrer/provenance incelemesi; kontrollü sentetik toparlanma kanıtı; açık sorunlar dürüstçe sınıflı |
 
-Görev görünürlüğünü tamamlamadan yeni bir bot yöneticisi, scheduler veya genel proxy kurulmaz.
+H5'in tanımlı dar akışları teslim edildi; bu genel bir bot yöneticisi, scheduler
+veya proxy kurma izni değildir. Gerçek kullanım/toparlanma kabulü ayrı kalır.
 Hermes'in mevcut yeteneği tekrar geliştirilmez. Görev yürütmesinin asıl kaydı
 Hermes'te; NEXUS'taki taslak onu otomatik başlatmaz.
 
@@ -54,6 +55,6 @@ kanıtlandığında kapanır; tüm proje bitti veya A8 geçti anlamına gelmez.
 - [Teslim edilen dar akışlar](https://github.com/abidinyldz06/NEXUS/milestone/1): PR #54–58.
 - [H5 kalan iş yapan akışlar](https://github.com/abidinyldz06/NEXUS/milestone/2):
   [GitHub durum ekranı #59](https://github.com/abidinyldz06/NEXUS/issues/59) tamamlandı (PR #63);
-  [görev/kesinti görünürlüğü #60](https://github.com/abidinyldz06/NEXUS/issues/60).
+  [görev/kesinti görünürlüğü #60](https://github.com/abidinyldz06/NEXUS/issues/60) tamamlandı (PR #65).
 - [H6 gerçek kullanım/toparlanma](https://github.com/abidinyldz06/NEXUS/milestone/3):
   [kabul değerlendirmesi #61](https://github.com/abidinyldz06/NEXUS/issues/61).
