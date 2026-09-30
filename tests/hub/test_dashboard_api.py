@@ -205,6 +205,27 @@ class DashboardApiTests(unittest.TestCase):
                 self.assertEqual(200, client.get(base + "?profile=default").status_code)
                 read.assert_called_once_with()
 
+    def test_operation_status_is_default_only_read_only(self) -> None:
+        path = Path(__file__).resolve().parents[2] / "dashboard" / "plugin_api.py"
+        spec = importlib.util.spec_from_file_location("nexus_operation_api_test", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        app = FastAPI()
+        app.include_router(module.router)
+        with patch.object(module._operation_status, "snapshot", return_value={"read_only": True}) as read:
+            with patch.object(module, "_settings", return_value=object()) as settings:
+                with TestClient(app) as client:
+                    base = "/hub/operation-status"
+                    self.assertEqual(409, client.get(base).status_code)
+                    self.assertEqual(409, client.get(base + "?profile=other").status_code)
+                    self.assertEqual(405, client.post(base + "?profile=default").status_code)
+                    read.assert_not_called()
+                    settings.assert_not_called()
+                    response = client.get(base + "?profile=default")
+                    self.assertEqual(200, response.status_code)
+                    self.assertEqual("no-store", response.headers["cache-control"])
+                    self.assertEqual(1, read.call_count)
+
     def test_provider_usage_requires_explicit_default_profile_action(self) -> None:
         module_name = "nexus_hub_dashboard_provider_api_test"
         api_path = Path(__file__).resolve().parents[2] / "dashboard" / "plugin_api.py"

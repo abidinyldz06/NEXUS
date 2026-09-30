@@ -180,3 +180,18 @@ test("GitHub is read only, explicit, and disabled outside default profile", () =
   button.props.onClick();
   assert.equal(other.calls.length, 0);
 });
+
+test("operation status reads only on click, never dispatches and clears pending double click", () => {
+  const page = harness();
+  page.button(page.render(), "Görevler").props.onClick();
+  assert.equal(page.calls.length, 0);
+  page.button(page.render(), "İşlem durumlarını oku").props.onClick();
+  assert.equal(page.calls.length, 1);
+  assert.ok(page.calls[0].url.endsWith("/operation-status?profile=default"));
+  assert.equal(page.calls[0].options, undefined);
+  page.button(page.render(), "İşlemler okunuyor…").props.onClick();
+  assert.equal(page.calls.length, 1);
+  const other = harness("other");
+  other.button(other.render(), "Görevler").props.onClick();
+  assert.equal(other.button(other.render(), "İşlem durumlarını oku"), undefined);
+});

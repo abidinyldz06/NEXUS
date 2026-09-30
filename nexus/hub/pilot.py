@@ -5,12 +5,20 @@ from __future__ import annotations
 import stat
 import time
 from pathlib import Path
+from threading import Lock
 from uuid import UUID
 
 from . import free_model, providers
 from .budget import BudgetError, PilotBudget
 
 PROMPT = "This is a synthetic connectivity test. Reply exactly NEXUS_FREE_OK."
+_active_lock = Lock()
+_active: set[tuple[str, str]] = set()
+
+
+def is_active(path: Path, request_id: str) -> bool:
+    with _active_lock:
+        return (str(path), request_id) in _active
 
 
 def run(config, *, request_id: str, model: str) -> dict:
@@ -73,6 +81,10 @@ def _run(config, *, request_id: str, model: str, text: str,
         return free_model._transport(secret, body)
 
     start = time.monotonic()
+    flight = (str(ledger.path), request_id)
+    ledger.record_outcome(request_id, "running")
+    with _active_lock:
+        _active.add(flight)
     try:
         result = free_model.complete_free(
             text, key=key, data_class=data_class, external_authorized=True,
@@ -80,9 +92,15 @@ def _run(config, *, request_id: str, model: str, text: str,
         )
     except Exception:
         ledger.reconcile(request_id, verified_cost_usd=None if started else "0")
+        ledger.record_outcome(request_id, "unknown" if started else "failed")
         raise BudgetError("pilot sonucu doğrulanamadı; otomatik tekrar yapılmaz") from None
+    finally:
+        with _active_lock:
+            _active.discard(flight)
     verified = result.get("cost_verified") is True
     state = ledger.reconcile(request_id, verified_cost_usd="0" if verified else None)
+    ledger.record_outcome(request_id, "draft_result" if verified and result["status"] == "completed"
+                          else "unknown")
     # Store only cost metadata. Summary output is returned transiently, not saved.
     evidence = {"status": result["status"], "requested_model": model,
             "expected_output": result.get("output", "").strip() == "NEXUS_FREE_OK",
