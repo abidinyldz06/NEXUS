@@ -1,7 +1,9 @@
 # H4.2 — Pilot bütçe rezervasyon çekirdeği
 
-Bu dilim model çalıştırmaz, anahtar okumaz ve panel ayarlarını değiştirmez.
-Güncel çalışır kullanım panelinin yerine geçmez. H4 henüz tamamlanmış değildir.
+Rezervasyon çekirdeği kendi başına model çalıştırmaz. Bu dal ayrıca insanın açık
+düğme işlemiyle sabit sentetik ücretsiz bağlantı testini panelden çalıştırmaya
+hazırlar. Genel görev veya Vault özetleme çalıştırıcısı değildir. H4 henüz
+tamamlanmış değildir.
 
 ## Uygulananlar
 
@@ -66,7 +68,22 @@ eksik/geçersiz/pozitifse ya da katalog okunamazsa modele istek gönderilmez.
 Başka modele otomatik fallback yoktur; havuz üyelerinden biri açıkça seçilir.
 Space Bunny üçüncü taraf içerik saklama uyarısı taşır: data_collection=deny
 korunur; uyumlu endpoint yoksa rota durur, kişisel Vault verisi aktarılmaz.
-Bu değişiklikten sonra beş modele toplu canlı test yapılmadı.
+Beş modele toplu canlı test yapılmadı. Kullanıcının ayrıca yetkilendirdiği tek
+Space Bunny testi beklenen NEXUS_FREE_OK yanıtıyla 1,45 saniyede tamamlandı;
+sağlayıcı usage.cost=0 bildirdi. Bu doğrudan adapter testidir, panel teslimi değildir.
+
+## Panel bağlantısı — yayın hazırlığı
+
+Görevler'de beş model seçeneği ve "Sentetik ücretsiz testi çalıştır" düğmesi.
+POST `/hub/free-pilot?profile=default` yalnız request_id/model kabul eder;
+istemci prompt, key, tools, fiyat veya extra_body gönderemez. Sayfa açılışı ya da
+GET hiçbir model çağırmaz. Profil/kimlik doğrulaması host tarafından korunur.
+
+Güncel fiyat ve anahtar preflight'ı geçmeden defter veya inference oluşmaz.
+Özel mevcut data_path altında yalnız `hub/free-pilot.sqlite3` maliyet metadata'sı
+kullanılır; Vault/Inbox/review/index/eval/config yazılmaz. Aynı UUID tekrar
+çalıştırmaz; belirsiz maliyet yeni işleri bloke eder. API sağlayıcı metnini/ham
+hatasını değil yalnız sonuç kanıtını döner. Canlı panel pin güncellemesi henüz yok.
 
 ## 30 Eylül bağlantı kanıtı
 

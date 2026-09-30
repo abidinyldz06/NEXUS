@@ -27,7 +27,8 @@ function harness(profile = "default", fail = false) {
         metrics: provider === "openrouter" ? { usage: 0, limit_remaining: null } : null });
     },
   };
-  const window = { location: { search: "?profile=" + profile }, __HERMES_PLUGIN_SDK__: SDK,
+  const window = { location: { search: "?profile=" + profile },
+    crypto: { getRandomValues(bytes) { return bytes.fill(1); } }, __HERMES_PLUGIN_SDK__: SDK,
     __HERMES_PLUGINS__: { register(_name, value) { component = value; } } };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../../dashboard/dist/index.js"), "utf8"),
     { window, URLSearchParams });
@@ -67,6 +68,20 @@ test("non-default profile cannot trigger provider query", () => {
   assert.equal(button.props.disabled, true);
   button.props.onClick();
   assert.equal(page.calls.length, 0);
+});
+
+test("pilot is explicit and sends only selected model and id, never draft content", () => {
+  const page = harness();
+  page.button(page.render(), "Görevler").props.onClick();
+  page.render();
+  assert.equal(page.calls.length, 0);
+  page.button(page.render(), "Sentetik ücretsiz testi çalıştır").props.onClick();
+  const call = page.calls.find(item => item.url.includes("/free-pilot"));
+  assert.equal(call.options.method, "POST");
+  const body = JSON.parse(call.options.body);
+  assert.deepEqual(Object.keys(body).sort(), ["model", "request_id"]);
+  assert.equal(body.model, "stealth/space-bunny-alpha");
+  assert.equal(page.button(page.render(), "Test çalışıyor…").props.disabled, true);
 });
 
 test("failed fetch shows a generic error without leaking transport details", async () => {

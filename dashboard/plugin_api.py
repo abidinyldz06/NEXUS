@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 _CORE_DIR = Path(__file__).resolve().parents[1] / "nexus"
 _CORE_NAME = "_hermes_nexus_hub_" + sha256(str(_CORE_DIR).encode()).hexdigest()[:12]
@@ -36,6 +36,8 @@ _errors = importlib.import_module(f"{_CORE_NAME}.errors")
 _tasks = importlib.import_module(f"{_CORE_NAME}.hub.tasks")
 _routing = importlib.import_module(f"{_CORE_NAME}.hub.routing")
 _providers = importlib.import_module(f"{_CORE_NAME}.hub.providers")
+_pilot = importlib.import_module(f"{_CORE_NAME}.hub.pilot")
+_budget = importlib.import_module(f"{_CORE_NAME}.hub.budget")
 
 router = APIRouter()
 
@@ -53,6 +55,13 @@ class DraftRequest(BaseModel):
 class RouteAdviceRequest(BaseModel):
     request_text: str
     data_class: str = "undetermined"
+
+
+class FreePilotRequest(BaseModel):
+    request_id: str
+    model: str
+
+    model_config = ConfigDict(extra="forbid")
 
 
 def _default_profile_only(request: Request) -> None:
@@ -176,3 +185,15 @@ def provider_usage(request: Request, provider: str) -> dict[str, Any]:
         return _providers.snapshot(provider)
     except _providers.ProviderUsageError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/hub/free-pilot")
+def free_pilot(request: Request, body: FreePilotRequest) -> dict[str, Any]:
+    if request.query_params.get("profile") != "default":
+        raise HTTPException(status_code=409, detail="pilot yalnız default profilde destekleniyor")
+    try:
+        return _pilot.run(_settings(), request_id=body.request_id, model=body.model)
+    except _budget.BudgetError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception:
+        raise HTTPException(status_code=503, detail="pilot başlatılamadı; otomatik tekrar yok") from None
