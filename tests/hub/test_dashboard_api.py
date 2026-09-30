@@ -121,6 +121,27 @@ class DashboardApiTests(unittest.TestCase):
                 self.assertEqual(first.json()["task"]["id"], second.json()["task"]["id"])
                 self.assertEqual(1, client.get(base + "?profile=default").json()["total"])
 
+    def test_pilot_only_allows_explicit_default_profile_and_no_content_payload(self) -> None:
+        path = Path(__file__).resolve().parents[2] / "dashboard" / "plugin_api.py"
+        spec = importlib.util.spec_from_file_location("nexus_pilot_api_test", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        app = FastAPI()
+        app.include_router(module.router)
+        payload = {"request_id": str(uuid4()), "model": "stealth/space-bunny-alpha"}
+        with patch.object(module, "_settings", return_value=object()) as settings:
+            with patch.object(module._pilot, "run", return_value={"status": "completed"}) as run:
+                with TestClient(app) as client:
+                    self.assertEqual(405, client.get("/hub/free-pilot?profile=default").status_code)
+                    self.assertEqual(409, client.post("/hub/free-pilot", json=payload).status_code)
+                    self.assertEqual(409, client.post("/hub/free-pilot?profile=other", json=payload).status_code)
+                    self.assertEqual(422, client.post("/hub/free-pilot?profile=default",
+                                     json=payload | {"text": "private content"}).status_code)
+                    settings.assert_not_called()
+                    run.assert_not_called()
+                    self.assertEqual(200, client.post("/hub/free-pilot?profile=default", json=payload).status_code)
+                    run.assert_called_once()
+
     def test_provider_usage_requires_explicit_default_profile_action(self) -> None:
         module_name = "nexus_hub_dashboard_provider_api_test"
         api_path = Path(__file__).resolve().parents[2] / "dashboard" / "plugin_api.py"

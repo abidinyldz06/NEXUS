@@ -117,6 +117,11 @@
     const [quotaSnapshots, setQuotaSnapshots] = useState({});
     const [quotaLoading, setQuotaLoading] = useState(false);
     const [quotaError, setQuotaError] = useState("");
+    const [pilotModel, setPilotModel] = useState("stealth/space-bunny-alpha");
+    const [pilotKey, setPilotKey] = useState(newDraftKey);
+    const [pilotResult, setPilotResult] = useState(null);
+    const [pilotError, setPilotError] = useState("");
+    const [pilotLoading, setPilotLoading] = useState(false);
     const [savingTask, setSavingTask] = useState(false);
     const [draft, setDraft] = useState({ title: "", goal: "", expected_output: "",
       target_app: "Hermes", data_class: "undetermined", hermes_session_id: "" });
@@ -266,6 +271,20 @@
       }).finally(function () { setProviderConnectionLoading(false); });
     }
 
+    function runFreePilot() {
+      if (pilotLoading || !pilotKey || !defaultTaskScope()) return;
+      setPilotLoading(true); setPilotResult(null); setPilotError("");
+      SDK.fetchJSON(API + "/free-pilot?profile=default", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request_id: pilotKey, model: pilotModel })
+      }).then(function (result) {
+        setPilotResult(result);
+        if (result.cost_verified === true) setPilotKey(newDraftKey());
+      }).catch(function (error) {
+        setPilotError(errorText(error));
+      }).finally(function () { setPilotLoading(false); });
+    }
+
     function loadProviderQuota() {
       if (quotaLoading || !defaultTaskScope()) return;
       setQuotaLoading(true);
@@ -339,6 +358,28 @@
       content = !defaultTaskScope() ? panel("Görev masası", h("p", null,
         "Görev taslakları yalnız default profilde kullanılabilir; profil seçimini değiştirin.")) :
         h("div", { className: "nexus-memory" },
+        panel("Ücretsiz model bağlantı testi", h("div", null,
+          h("p", null, "Yalnız sabit sentetik test metni gönderilir; Vault, notlar veya taslaklar gönderilmez. Harcama sınırı 0 USD; otomatik tekrar ve başka modele geçiş yok."),
+          h("label", null, "Test modeli",
+            h("select", { value: pilotModel, disabled: pilotLoading,
+              onChange: function (event) { setPilotModel(event.target.value); } },
+              [["stealth/space-bunny-alpha", "Space Bunny Alpha"],
+                ["nvidia/nemotron-3-ultra-550b-a55b:free", "Nemotron 3 Ultra (free)"],
+                ["poolside/laguna-s-2.1:free", "Laguna S 2.1 (free)"],
+                ["dots-studio/dots-3-note-preview:free", "Dots3-Note Preview (free)"],
+                ["nvidia/nemotron-3.5-lightning:free", "Nemotron 3.5 Lightning (free)"]].map(function (row) {
+                return h("option", { key: row[0], value: row[0] }, row[1]);
+              }))),
+          h("p", { className: "nexus-muted" }, "Space Bunny sağlayıcısında içerik saklama uyarısı vardır. Veri koruması kapatılmaz; uygun ücretsiz rota yoksa durur."),
+          h("button", { type: "button", onClick: runFreePilot,
+            disabled: pilotLoading || !pilotKey || !defaultTaskScope() ||
+              (pilotResult && pilotResult.hold_status === "unknown") },
+            pilotLoading ? "Test çalışıyor…" : "Sentetik ücretsiz testi çalıştır"),
+          pilotError && h("p", { className: "nexus-error", role: "alert" }, pilotError),
+          pilotResult && h("p", { role: "status" },
+            pilotResult.status === "completed" && pilotResult.expected_output === true ?
+              "Bağlantı testi başarılı · doğrulanmış maliyet 0 USD · " + pilotResult.elapsed_seconds + " saniye" :
+              "Test kabul edilmedi veya daha önce kaydedildi; otomatik tekrar yok. Durum: " + pilotResult.status))),
         panel("Nereye yönlendirelim? · yalnız öneri", h("div", null,
           h("p", { className: "nexus-muted" },
             "İstek bu cihazda kurallarla değerlendirilir. Model çağrısı, görev başlatma veya taslak kaydı yapılmaz."),
