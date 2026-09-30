@@ -39,7 +39,7 @@ Anahtar Hermes'in desteklenen credential lifecycle mekanizmasıyla kaydedilir;
 chat, Git, test fixture ve bu dokümana kopyalanmaz. Canlı ücretsiz pilot sıfır USD
 sınırında kalır; ücretli çağrı yetkisi yoktur.
 
-`free_model.py` yalnız `openrouter/free` kabul eder. Sabit TLS endpoint'inde,
+`free_model.py` yalnız kullanıcının seçtiği aşağıdaki beş modeli kabul eder. Sabit TLS endpoint'inde,
 64 çıktı tokenı ve 500 karakter girdi sınırıyla istek kurar. Ücretli model listesi,
 otomatik retry, tool, plugin veya caller extra_body yoktur. Provider alanında
 prompt/completion/request/image max_price=0, allow_fallbacks=false,
@@ -50,6 +50,23 @@ Hermes'in diğer sohbet modellerini veya sağlayıcılarını değiştirmez.
 
 Kaynak: [OpenRouter Free Router](https://openrouter.ai/docs/guides/routing/routers/free-router),
 [provider fiyat ve veri kontrolü](https://openrouter.ai/docs/guides/routing/provider-selection).
+
+## Kullanıcının seçtiği ücretsiz model havuzu
+
+- `stealth/space-bunny-alpha`
+- `nvidia/nemotron-3-ultra-550b-a55b:free`
+- `poolside/laguna-s-2.1:free`
+- `dots-studio/dots-3-note-preview:free`
+- `nvidia/nemotron-3.5-lightning:free` (ilk deneme varsayılanı; kalite sıralaması değil)
+
+30 Eylül public `/api/v1/models` kataloğunda beşinin de prompt/completion fiyatı 0
+doğrulandı. Her gerçek çağrıdan önce katalog tekrar okunur; model yoksa, fiyat
+eksik/geçersiz/pozitifse ya da katalog okunamazsa modele istek gönderilmez.
+Ücretli adaşlar ve rastgele `openrouter/free` router'ı bu havuzda değildir.
+Başka modele otomatik fallback yoktur; havuz üyelerinden biri açıkça seçilir.
+Space Bunny üçüncü taraf içerik saklama uyarısı taşır: data_collection=deny
+korunur; uyumlu endpoint yoksa rota durur, kişisel Vault verisi aktarılmaz.
+Bu değişiklikten sonra beş modele toplu canlı test yapılmadı.
 
 ## 30 Eylül bağlantı kanıtı
 
