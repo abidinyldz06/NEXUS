@@ -1,10 +1,66 @@
 # NEXUS
 
-NEXUS, ATLAS kişisel asistanının local-first hafıza altyapısıdır. v0.1 kapsamı
-yalnız güvenilir ingestion, provenance, review, Obsidian canonical records,
-rebuild edilebilir SQLite indeks ve commitments hatırlatmalarını kapsar.
+NEXUS, ATLAS kişisel asistanının yerel öncelikli hafıza ve yönetim alanıdır.
+Obsidian kayıtları, kaynak referansları, arama ve insan incelemesini Hermes
+panelindeki görev ve model kontrolleriyle bir araya getirir.
 
-## Güncel durum
+## Güncel durum — 30 Eylül 2026
+
+NEXUS **insan denetimli, sınırlı kullanımda**. Bütün proje veya gözetimsiz
+işleme teknik kabulü tamamlandı diye sunulmaz.
+
+| Alan | Mevcut yetenek | Sınır |
+| --- | --- | --- |
+| Hafıza | Yerel arama, kayıt/kaynak referansı, bekleyen incelemeler | Panel inceleme görüntüler; toplu onay vermez |
+| Görevler | Pasif görev taslağı, mevcut Hermes oturum referansı, yerel yönlendirme önerisi | Taslak veya öneri otomatik görev başlatmaz |
+| Sağlayıcılar | Hermes bağlantı ve isteğe bağlı kullanım/limit görünümü | Bilinmeyen kota bakiye gibi gösterilmez; her sağlayıcının canlı erişimi doğrulanmış değildir |
+| Ücretsiz model | Beş izinli model için güncel sıfır fiyat kontrolü; Space Bunny sentetik testi | Ücretli fallback ve otomatik tekrar yok |
+| Seçili metin özeti | En fazla 400 karakter, önizleme ve her işlemde açık onay; kısa Türkçe taslak | Yalnız seçilen metin OpenRouter'a çıkar; Vault bağlamı eklenmez |
+| Hermes ajanları | Mevcut altı profil için salt okunur liste ve sohbet bağlantısı | Yeni bot, mesaj, scheduler veya otomatik dispatch oluşturmaz |
+
+Seçili metin özeti çalışan panelde sentetik örnekle doğrulandı; sağlayıcının
+bildirdiği maliyet **0 USD** idi. Profil listesi ve sohbet bağlantısı PR #58'de
+main'e alındı, kurulu sürümde altı profil listelendi ve Writer sohbetine geçiş
+doğrulandı. Güncel teslim kanıtı [yol haritasında](docs/yol-haritasi.md) izlenir.
+330 yerel Python testi ve 8 panel testi mevcut kod üzerinde geçti. GitHub Python
+iş akışı, Hermes'in sağladığı FastAPI ortamı yoksa API testlerini atlayabilir;
+yerel tam suite kanıtıyla CI kanıtı ayrı değerlendirilir.
+
+### Kullanım
+
+Hermes dashboard → **NEXUS**:
+
+1. **Hafıza:** kayıt ara, kaynağı ve bekleyen adayları görüntüle.
+2. **Görevler:** taslak oluştur veya **Seçili metin özeti** bölümünde metni
+   yapıştır → önizlemeyi gör → o işlem için onayla → taslak özeti kontrol et.
+3. **Uygulamalar:** mevcut Hermes ajanlarını listele ve kendi sohbetlerine geç.
+4. **Modeller ve kullanım:** bağlantı ve kullanım bilgisini düğmeyle oku.
+
+Bot oluşturma, sohbet, kanallar ve secret yönetimi **Hermes'te kalır**. NEXUS
+bunların ikinci bir kopyası değildir. NEXUS'un ücretsiz-model sınırı Hermes'in
+genel sohbetlerine otomatik uygulanmaz.
+
+### Güvenlik ve kabul
+
+- `auto_publish_enabled=false`; gözetimsiz gerçek-export bulk ingest kapalı.
+- Model anahtarı Hermes secret kaynağından alınır; Git'e veya prompt'a eklenmez.
+- Özet metni/yanıtı NEXUS tarafından diske kaydedilmez. İçerik yine dış
+  sağlayıcıda işlenir; içerik saklama uyarısı vardır. Hassas bilgi göndermeyin.
+- Timeout veya maliyet belirsizse yeni model işi durur; kör tekrar yapılmaz.
+- A8'de **51/57 konuşma** tamamlandı; bunlar başarısız unit test sayısı değildir.
+  Teknik A8 açık, insan denetimli sınırlı kullanım kabulü ayrıdır.
+- Telegram test teslimi, sürekli Telegram otomasyonu veya gerçek kullanım
+  pilotunun kabulü değildir. Mevcut hatırlatma canary'si local/no-agent kalır.
+
+**Kalan işler ve kapanış ölçütleri:** [Türkçe yol haritası](docs/yol-haritasi.md).
+İlerleme: [GitHub milestone'ları](https://github.com/abidinyldz06/NEXUS/milestones).
+Sorumluluklar: [Hermes ve NEXUS](docs/hermes-nexus-responsibilities.md).
+A8 kararı: [Sınırlı kullanım kabulü](docs/a8-limited-use-decision.md).
+
+## Tarihsel çekirdek faz kanıtları
+
+Aşağıdaki Phase 0–8 metinleri önceki teslimlerin kaydıdır. Buradaki eski pin,
+test sayıları ve o zamanki kapsam güncel runtime durumu sayılmamalıdır.
 
 Phase 7 ile Phase 8 retention, permission-audit, synthetic restore-drill ve
 synthetic external git-dir rollback dilimleri `main` dalına birleştirilmiş ve tam
@@ -147,11 +203,11 @@ Ayrıntılı kapsam: [NEXUS_V0_1_TEKNIK_PLAN.md](NEXUS_V0_1_TEKNIK_PLAN.md).
 ```bash
 python3 -m unittest discover -s tests -v
 python3 -m compileall -q __init__.py nexus tests
-hermes plugins doctor . --ci
 ```
 
-`hermes plugins doctor` plugin'i geçici ve izole bir `HERMES_HOME` ile yükler;
-aktif kullanıcı config'ini veya Vault'u değiştirmez.
+Testleri geçici test verisi ve mevcut Hermes Python ortamıyla çalıştırın.
+`hermes plugins doctor` sıradan salt okunur kontrol olarak kullanılmamalıdır:
+Hermes sürümüne göre kurulum/masaüstü hazırlama yan etkileri olabilir.
 
 Phase kanıtları: [`docs/phase-0-1-status.md`](docs/phase-0-1-status.md) ve
 [`docs/phase-2-status.md`](docs/phase-2-status.md),
