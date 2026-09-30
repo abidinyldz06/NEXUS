@@ -67,7 +67,7 @@ class PilotBudget:
     def __init__(self, path: Path, *, per_job_usd: str, daily_usd: str, monthly_usd: str):
         self.path = path
         self.caps = tuple(_money(v) for v in (per_job_usd, daily_usd, monthly_usd))
-        if not 0 < self.caps[0] <= self.caps[1] <= self.caps[2]:
+        if self.caps != (0, 0, 0) and not 0 < self.caps[0] <= self.caps[1] <= self.caps[2]:
             raise BudgetError("iş/gün/ay bütçeleri pozitif ve sıralı olmalı")
 
     def _connect(self) -> sqlite3.Connection:
@@ -111,7 +111,7 @@ class PilotBudget:
     def reserve(self, request_id: str, *, ceiling_usd: str, now: datetime | None = None) -> dict:
         request_id = _identifier(request_id)
         ceiling = _money(ceiling_usd)
-        if not 0 < ceiling <= self.caps[0]:
+        if not (ceiling == 0 and self.caps == (0, 0, 0)) and not 0 < ceiling <= self.caps[0]:
             raise BudgetError("iş rezervasyonu bütçe sınırını aşıyor")
         now = now or datetime.now(UTC)
         if now.tzinfo is None or now.utcoffset() is None:

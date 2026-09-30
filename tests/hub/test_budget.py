@@ -32,6 +32,18 @@ class PilotBudgetTests(unittest.TestCase):
     def test_constructor_does_not_create_a_ledger(self):
         self.assertFalse(self.path.exists())
 
+    def test_free_only_zero_caps_keep_single_flight_and_unknown_protection(self):
+        free = self.open_budget(per_job_usd="0", daily_usd="0", monthly_usd="0")
+        identifier = str(uuid4())
+        self.assertTrue(free.reserve(identifier, ceiling_usd="0")["created"])
+        free.reconcile(identifier, verified_cost_usd=None)
+        with self.assertRaises(BudgetError):
+            free.reserve(str(uuid4()), ceiling_usd="0")
+        with self.assertRaises(BudgetError):
+            free.reserve(str(uuid4()), ceiling_usd="0.000001")
+        free.reconcile(identifier, verified_cost_usd="0")
+        self.assertTrue(free.reserve(str(uuid4()), ceiling_usd="0")["created"])
+
     def test_invalid_budget_and_id_rejected_before_file_creation(self):
         for amount in (None, True, 1, "NaN", "Infinity", "-1", "0.0000001", "1001", "bad",
                        "0.100000000000000000000000000001"):

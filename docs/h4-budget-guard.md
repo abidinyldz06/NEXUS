@@ -6,6 +6,8 @@ Güncel çalışır kullanım panelinin yerine geçmez. H4 henüz tamamlanmış 
 ## Uygulananlar
 
 - İş/gün/ay USD sınırları açıkça verilir; varsayılan harcama izni yoktur.
+  Kullanıcının yalnız ücretsiz model talebiyle üç sınırın da sıfır olması desteklenir;
+  sıfır rezervasyonda bile tek uçuş ve unknown koruması korunur.
 - Tutarlar altı ondalık basamaklı tam micro-USD olarak tutulur; float kullanılmaz.
 - Özel SQLite dosyasında BEGIN IMMEDIATE ile eşzamanlı rezervasyonlar serileştirilir.
 - Pilot başına tek uzlaştırılmamış istek; aynı işlem kimliği tekrar rezervasyon açmaz.
@@ -32,8 +34,36 @@ doğrulamalı; rezervasyon `created=true` olduğunda yalnız bir kez dispatch et
 Gerçek maliyet kanıtı olmadan rezervasyon çözülmemelidir. Ücretli endpoint,
 fiyatlandırma adaptörü, içerik aktarımı veya panel çalıştır düğmesi bu dilimde yoktur.
 
-Canlı pilot için gerekenler: Hermes'te sağlayıcı anahtarı, seçilmiş model ve açık
-USD pilot sınırı. Bunlar kullanıcıdan alınmadan ücretli çağrı yapılmaz.
+Kullanıcı OpenRouter anahtarı kaydını ve yalnız ücretsiz modelleri açıkça yetkilendirdi.
+Anahtar Hermes'in desteklenen credential lifecycle mekanizmasıyla kaydedilir;
+chat, Git, test fixture ve bu dokümana kopyalanmaz. Canlı ücretsiz pilot sıfır USD
+sınırında kalır; ücretli çağrı yetkisi yoktur.
+
+`free_model.py` yalnız `openrouter/free` kabul eder. Sabit TLS endpoint'inde,
+64 çıktı tokenı ve 500 karakter girdi sınırıyla istek kurar. Ücretli model listesi,
+otomatik retry, tool, plugin veya caller extra_body yoktur. Provider alanında
+prompt/completion/request/image max_price=0, allow_fallbacks=false,
+require_parameters=true ve data_collection=deny korunur. İzinli ücretsiz rota
+yoksa işlem durur; kısıtlar gevşetilmez. Numeric cost=0 kanıtı yoksa harcama
+doğrulanmış sayılmaz. Bu adaptör henüz panel/gateway görev akışına bağlanmadı;
+Hermes'in diğer sohbet modellerini veya sağlayıcılarını değiştirmez.
+
+Kaynak: [OpenRouter Free Router](https://openrouter.ai/docs/guides/routing/routers/free-router),
+[provider fiyat ve veri kontrolü](https://openrouter.ai/docs/guides/routing/provider-selection).
+
+## 30 Eylül bağlantı kanıtı
+
+- Hermes anahtar kaydı tamamlandı; dosya izinleri 0600'a daraltıldı.
+- Canlı kullanım paneli sağlayıcıdan metrik okuyabildi; o anda kullanım 0 USD idi.
+  Bu hesap bakiyesi ya da tüm Hermes uygulamaları için ücretli model kilidi değildir.
+- Tek sentetik free-router isteği HTTP başarı yanıtı alamadan `stopped` döndü.
+  O koşunun adaptörü HTTP kodunu dışarı vermediği için kesin hata nedeni bilinmiyor;
+  sonrasında güvenli HTTP kodu raporlaması eklendi. Aynı model isteği tekrarlanmadı.
+- Maliyet kanıtı yok: bu istek kabul edilmiş veya kesin sıfır maliyetli sayılmadı.
+  Tanı defterindeki hold `unknown` kaldı; üretim defteri oluşturulmadı.
+- Anahtar geçerliliği ayrı salt okunur current-key sorgusuyla doğrulandı;
+  bu sorgu inference değildir. Ücretli fallback veya kısıt gevşetme yapılmadı.
+- Çalışan eklenti hâlâ 76276fea kullanım panelidir; bu yeni adaptör yereldir.
 
 ## Testler
 
