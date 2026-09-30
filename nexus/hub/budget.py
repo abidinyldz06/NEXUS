@@ -170,3 +170,17 @@ class PilotBudget:
                 "UPDATE holds SET status=?, actual=? WHERE id=?", (status, actual, request_id)
             )
             return {"status": status, "dispatch_enabled": False}
+
+    def record_outcome(self, request_id: str, phase: str) -> None:
+        """Only metadata from an explicit invocation; never save prompt or output."""
+        request_id = _identifier(request_id)
+        if phase not in {"running", "draft_result", "failed", "unknown"}:
+            raise BudgetError("işlem durumu geçersiz")
+        with closing(self._connect()) as connection, connection:
+            if not connection.execute("SELECT 1 FROM holds WHERE id=?", (request_id,)).fetchone():
+                raise BudgetError("rezervasyon bulunamadı")
+            connection.execute("CREATE TABLE IF NOT EXISTS outcomes "
+                               "(id TEXT PRIMARY KEY, phase TEXT NOT NULL, updated_at TEXT NOT NULL)")
+            connection.execute("INSERT INTO outcomes VALUES (?, ?, ?) "
+                               "ON CONFLICT(id) DO UPDATE SET phase=excluded.phase, updated_at=excluded.updated_at",
+                               (request_id, phase, datetime.now(UTC).isoformat()))

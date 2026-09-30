@@ -41,6 +41,7 @@ _pilot = importlib.import_module(f"{_CORE_NAME}.hub.pilot")
 _budget = importlib.import_module(f"{_CORE_NAME}.hub.budget")
 _hermes_agents = importlib.import_module(f"{_CORE_NAME}.hub.hermes_agents")
 _github_status = importlib.import_module(f"{_CORE_NAME}.hub.github_status")
+_operation_status = importlib.import_module(f"{_CORE_NAME}.hub.operation_status")
 
 router = APIRouter()
 
@@ -163,6 +164,16 @@ def tasks(request: Request, limit: int = Query(30, ge=1, le=100)) -> dict[str, A
     try:
         return _tasks.list_drafts(_settings(), limit=limit)
     except _tasks.TaskDraftError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/hub/operation-status")
+def operation_status(request: Request):
+    _default_profile_only(request)
+    try:
+        return JSONResponse(_operation_status.snapshot(_settings()),
+                            headers={"Cache-Control": "no-store"})
+    except _budget.BudgetError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 

@@ -5,7 +5,7 @@ from unittest import TestCase
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
-from nexus.hub import pilot
+from nexus.hub import pilot, operation_status
 from nexus.hub.budget import BudgetError
 
 
@@ -55,6 +55,9 @@ class PilotTests(TestCase):
         with self.assertRaises(BudgetError):
             self.run_pilot()
         self.transport.assert_called_once()
+        snapshot = operation_status.snapshot(self.config)
+        self.assertTrue(snapshot["blocked"])
+        self.assertEqual("unknown", snapshot["items"][0]["state"])
 
     def test_invalid_model_id_or_publish_setting_does_not_read_key_or_call_network(self):
         for identifier, model in (("bad", self.model), (str(uuid4()), "vendor/paid")):
@@ -119,6 +122,23 @@ class PilotTests(TestCase):
         self.assertEqual("already_recorded", again["status"])
         self.assertNotIn("output", again)
         self.transport.assert_called_once()
+
+    def test_inflight_and_duplicate_request_never_dispatch_twice(self):
+        identifier = str(uuid4())
+        response = self.transport.return_value
+
+        def observe(*args):
+            snapshot = operation_status.snapshot(self.config)
+            self.assertTrue(snapshot["blocked"])
+            self.assertEqual("running", snapshot["items"][0]["state"])
+            duplicate = self.run_pilot(identifier)
+            self.assertFalse(duplicate["inference_attempted"])
+            return response
+
+        self.transport.side_effect = observe
+        self.run_pilot(identifier)
+        self.transport.assert_called_once()
+        self.assertEqual("draft_result", operation_status.snapshot(self.config)["items"][0]["state"])
 
     def test_summary_unknown_cost_never_returns_output_or_retries(self):
         self.transport.return_value[1]["usage"] = {}

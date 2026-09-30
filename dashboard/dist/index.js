@@ -129,6 +129,9 @@
     const [summaryLoading, setSummaryLoading] = useState(false);
     const [summaryResult, setSummaryResult] = useState(null);
     const [summaryError, setSummaryError] = useState("");
+    const [operations, setOperations] = useState(null);
+    const [operationsLoading, setOperationsLoading] = useState(false);
+    const [operationsError, setOperationsError] = useState("");
     const [hermesAgents, setHermesAgents] = useState(null);
     const [agentsLoading, setAgentsLoading] = useState(false);
     const [agentsError, setAgentsError] = useState("");
@@ -315,8 +318,17 @@
         setSummaryResult(result);
         if (result.cost_verified === true) setSummaryKey(newDraftKey());
       }).catch(function (error) {
-        setSummaryError(errorText(error));
+        setSummaryError(errorText(error) + " Sonuç belirsiz olabilir; işlem durumlarını okuyun. Otomatik tekrar yok.");
       }).finally(function () { setSummaryLoading(false); });
+    }
+
+    function loadOperations() {
+      if (operationsLoading || !defaultTaskScope()) return;
+      setOperationsLoading(true); setOperations(null); setOperationsError("");
+      SDK.fetchJSON(API + "/operation-status?profile=default").then(function (data) {
+        setOperations(data);
+      }).catch(function (error) { setOperationsError(errorText(error));
+      }).finally(function () { setOperationsLoading(false); });
     }
 
     function runFreePilot() {
@@ -329,7 +341,7 @@
         setPilotResult(result);
         if (result.cost_verified === true) setPilotKey(newDraftKey());
       }).catch(function (error) {
-        setPilotError(errorText(error));
+        setPilotError(errorText(error) + " Sonuç belirsiz olabilir; işlem durumlarını okuyun. Otomatik tekrar yok.");
       }).finally(function () { setPilotLoading(false); });
     }
 
@@ -439,6 +451,21 @@
       content = !defaultTaskScope() ? panel("Görev masası", h("p", null,
         "Görev taslakları yalnız default profilde kullanılabilir; profil seçimini değiştirin.")) :
         h("div", { className: "nexus-memory" },
+        panel("İşlem sonucu ve kesinti durumu", h("div", null,
+          h("p", null, "Görev taslakları başlamadı. Aşağıdaki liste yalnız açıkça başlatılan ücretsiz test/özet işlemlerinin içeriksiz kayıtlarıdır; Hermes görevlerinin yürütme kaydı değildir."),
+          h("p", null, "Ağ kesilirse veya sayfa yenilenirse sonuç belirsiz olabilir. Durumu okuyun; bu düğme modeli tekrar çağırmaz. Eski maliyet kaydı tek başına başarılı sonuç değildir."),
+          h("button", { type: "button", onClick: loadOperations, disabled: operationsLoading },
+            operationsLoading ? "İşlemler okunuyor…" : "İşlem durumlarını oku"),
+          operationsError && h("p", { role: "alert" }, operationsError),
+          operations && h("p", { role: "status" }, operations.total + " işlem · " +
+            (operations.blocked ? "Yeni model işlemi durduruldu: uzlaştırılmamış kayıt var." : "Uzlaştırılmamış bütçe kaydı yok; bu çalıştırma izni değildir.")),
+          operations && (operations.items || []).map(function (item) {
+            const labels = { running: "Çalışıyor (bu süreçte gözlendi)", draft_result: "Taslak sonuç doğrulandı", failed: "Model çağrısı başlamadan hata", unknown: "Sonuç belirsiz" };
+            return h("div", { key: item.id, className: "nexus-task-row" },
+              h("p", null, item.id + " · " + (labels[item.state] || "Sonuç belirsiz")),
+              h("p", null, "Maliyet: " + (item.cost_verified ? "doğrulandı" : "belirsiz") + " · Kayıt: " + (item.updated_at || item.day)),
+              h("p", { className: "nexus-muted" }, "Metin/yanıt saklanmadı; sonuç geri getirilemez. Otomatik tekrar yok."));
+          }))),
         panel("Ücretsiz model bağlantı testi", h("div", null,
           h("p", null, "Yalnız sabit sentetik test metni gönderilir; Vault, notlar veya taslaklar gönderilmez. Harcama sınırı 0 USD; otomatik tekrar ve başka modele geçiş yok."),
           h("label", null, "Test modeli",
