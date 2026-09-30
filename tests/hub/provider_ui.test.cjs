@@ -148,3 +148,19 @@ test("summary dispatch requires current preview and fresh checkbox consent", () 
   assert.equal(page.button(page.render(), "Özet hazırlanıyor…").props.disabled, true);
   assert.equal(input().props.disabled, true);
 });
+
+test("apps list reads existing agent names only on click and cannot dispatch", () => {
+  const page = harness();
+  page.button(page.render(), "Uygulamalar").props.onClick();
+  assert.equal(page.calls.length, 0);
+  page.button(page.render(), "Mevcut Hermes ajanlarını göster").props.onClick();
+  assert.equal(page.calls.length, 1);
+  assert.ok(page.calls[0].url.endsWith("/hermes-agents?profile=default"));
+  assert.equal(page.calls[0].options, undefined);
+  const other = harness("other");
+  other.button(other.render(), "Uygulamalar").props.onClick();
+  const button = other.button(other.render(), "Mevcut Hermes ajanlarını göster");
+  assert.equal(button.props.disabled, true);
+  button.props.onClick();
+  assert.equal(other.calls.length, 0);
+});
