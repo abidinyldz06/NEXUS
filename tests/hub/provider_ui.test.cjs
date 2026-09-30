@@ -92,3 +92,59 @@ test("failed fetch shows a generic error without leaking transport details", asy
   assert.ok(text.includes("eski veri gösterilmiyor"));
   assert.ok(!text.includes("synthetic-private-error"));
 });
+
+test("selected summary preview stays local and clears when the selection changes", () => {
+  const page = harness();
+  page.button(page.render(), "Görevler").props.onClick();
+  const label = "Gönderim önizlemesini göster";
+  assert.equal(page.button(page.render(), label).props.disabled, true);
+  let input = page.walk(page.render()).find(node => node.tag === "textarea" && node.props.maxLength === 400);
+  const text = "<script>sentetik veri</script>";
+  input.props.onChange({ target: { value: text } });
+  page.button(page.render(), label).props.onClick();
+  assert.equal(page.calls.length, 0);
+  const preview = page.walk(page.render()).find(node => node.tag === "pre");
+  assert.equal(preview.children[0], text);
+  assert.ok(!preview.props.dangerouslySetInnerHTML);
+  input = page.walk(page.render()).find(node => node.tag === "textarea" && node.props.maxLength === 400);
+  input.props.onChange({ target: { value: "yeni metin" } });
+  assert.ok(!page.walk(page.render()).some(node => node.tag === "pre"));
+  input.props.onChange({ target: { value: "a".repeat(401) } });
+  assert.equal(page.button(page.render(), label).props.disabled, true);
+  page.button(page.render(), label).props.onClick();
+  assert.ok(!page.walk(page.render()).some(node => node.tag === "pre"));
+  assert.equal(page.calls.length, 0);
+});
+
+test("selected summary preview is unavailable outside the default profile", () => {
+  const page = harness("other");
+  page.button(page.render(), "Görevler").props.onClick();
+  assert.equal(page.button(page.render(), "Gönderim önizlemesini göster"), undefined);
+  assert.equal(page.calls.length, 0);
+});
+
+test("summary dispatch requires current preview and fresh checkbox consent", () => {
+  const page = harness();
+  page.button(page.render(), "Görevler").props.onClick();
+  const input = () => page.walk(page.render()).find(node => node.tag === "textarea" && node.props.maxLength === 400);
+  input().props.onChange({ target: { value: "sentetik metin" } });
+  page.button(page.render(), "Gönderim önizlemesini göster").props.onClick();
+  const send = "Onayladığım metni ücretsiz özetle";
+  assert.equal(page.button(page.render(), send).props.disabled, true);
+  page.button(page.render(), send).props.onClick();
+  assert.equal(page.calls.length, 0);
+  let checkbox = page.walk(page.render()).find(node => node.tag === "input" && node.props.type === "checkbox");
+  checkbox.props.onChange({ target: { checked: true } });
+  page.button(page.render(), send).props.onClick();
+  assert.equal(page.calls.length, 1);
+  const call = page.calls[0];
+  assert.ok(call.url.includes("/selected-summary?profile=default"));
+  assert.equal(call.options.method, "POST");
+  const body = JSON.parse(call.options.body);
+  assert.equal(body.text, "sentetik metin");
+  assert.equal(body.model, "stealth/space-bunny-alpha");
+  assert.equal(body.external_authorized, true);
+  assert.equal(body.non_sensitive, true);
+  assert.equal(page.button(page.render(), "Özet hazırlanıyor…").props.disabled, true);
+  assert.equal(input().props.disabled, true);
+});
