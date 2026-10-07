@@ -7,7 +7,7 @@ from unittest import TestCase
 from uuid import uuid4
 
 from nexus.hub import operation_status, pilot
-from nexus.hub.budget import PilotBudget
+from nexus.hub.budget import BudgetError, PilotBudget
 
 
 class OperationStatusTests(TestCase):
@@ -57,6 +57,22 @@ class OperationStatusTests(TestCase):
         self.assertEqual("unknown", result["items"][0]["state"])
         self.assertTrue(result["blocked"])
         self.assertFalse(result["items"][0]["retry"])
+
+    def test_accepted_empty_hold_blocks_and_read_does_not_change_it(self):
+        ledger = self.ledger()
+        identifier = str(uuid4())
+        ledger.reserve(identifier, ceiling_usd="0")
+        ledger.reconcile(identifier, verified_cost_usd=None)
+        ledger.accept_unknown(identifier)
+        before = hashlib.sha256(ledger.path.read_bytes()).digest()
+        result = operation_status.snapshot(self.config)
+        self.assertTrue(result["blocked"])
+        self.assertEqual("accepted", result["items"][0]["state"])
+        self.assertFalse(result["items"][0]["cost_verified"])
+        self.assertFalse(result["items"][0]["retry"])
+        self.assertEqual(before, hashlib.sha256(ledger.path.read_bytes()).digest())
+        with self.assertRaises(BudgetError):
+            ledger.reserve(str(uuid4()), ceiling_usd="0")
 
     def test_draft_result_requires_settled_cost(self):
         ledger = self.ledger()

@@ -73,7 +73,7 @@ def snapshot(
         result["scope"] = "project" if provider == "gemini" else "unverified"
         result["reason"] = {
             "gemini": "Kota proje bazlıdır; AI Studio üzerinden kontrol edin.",
-            "nvidia": "Kullanım/kota okuma bağlantısı henüz doğrulanmadı.",
+            "nvidia": "Kullanım/kota okuma bağlantısı henüz doğrulanmadı. Nemotron 3 Super seçilebilir; fiyat doğrulanmadan çağrı yok.",
             "antigravity": "Uygulama abonelik kotası model API kotasından ayrıdır.",
         }[provider]
         return result

@@ -12,6 +12,7 @@ from . import free_model, providers
 from .budget import BudgetError, PilotBudget
 
 PROMPT = "This is a synthetic connectivity test. Reply exactly NEXUS_FREE_OK."
+NVIDIA_SUPER = "nvidia/nemotron-3-super-120b-a12b"
 _active_lock = Lock()
 _active: set[tuple[str, str]] = set()
 
@@ -44,6 +45,14 @@ def _run(config, *, request_id: str, model: str, text: str,
         request_id = str(UUID(request_id))
     except (ValueError, TypeError, AttributeError) as exc:
         raise BudgetError("işlem kimliği geçersiz") from exc
+    if model == NVIDIA_SUPER:
+        if config.auto_publish_enabled:
+            raise BudgetError("pilot otomatik yayın kapalıyken kullanılabilir")
+        try:
+            catalog = free_model.read_catalog()
+        except Exception:
+            raise BudgetError("NVIDIA Nemotron 3 Super fiyatı doğrulanmadan çağrı yok") from None
+        raise BudgetError(free_model.public_price_block(model, catalog))
     if model not in free_model.SELECTED_MODELS:
         raise BudgetError("model ücretsiz izin listesinde değil")
     if config.auto_publish_enabled:

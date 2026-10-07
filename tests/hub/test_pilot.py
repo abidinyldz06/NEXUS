@@ -59,6 +59,34 @@ class PilotTests(TestCase):
         self.assertTrue(snapshot["blocked"])
         self.assertEqual("unknown", snapshot["items"][0]["state"])
 
+    def test_nvidia_super_reads_public_price_and_never_calls_the_model(self):
+        cases = (
+            {"data": []},
+            {"data": [{"id": pilot.NVIDIA_SUPER, "pricing": {"prompt": "0.00000008", "completion": "0.00000045"}}]},
+            {"data": [{"id": pilot.NVIDIA_SUPER, "pricing": {"prompt": "0", "completion": "0"}}]},
+            {"data": [{"id": pilot.NVIDIA_SUPER, "pricing": {"prompt": "0", "completion": "nope"}}]},
+        )
+        expected = (
+            "katalogda doğrulanamadı",
+            "sıfır fiyatlı değil",
+            "NVIDIA faturası doğrulanmadı",
+            "fiyatı okunamadı",
+        )
+        for catalog, phrase in zip(cases, expected):
+            self.reader.return_value = catalog
+            with self.assertRaises(BudgetError) as caught:
+                self.run_pilot(model=pilot.NVIDIA_SUPER)
+            self.assertIn(phrase, str(caught.exception))
+        self.reader.side_effect = TimeoutError("private-catalog")
+        with self.assertRaises(BudgetError) as caught:
+            pilot.summarize(self.config, request_id=str(uuid4()), model=pilot.NVIDIA_SUPER,
+                            text="sentetik", external_authorized=True, non_sensitive=True)
+        self.assertIn("fiyatı doğrulanmadan", str(caught.exception))
+        self.assertNotIn("private-catalog", str(caught.exception))
+        self.secret.assert_not_called()
+        self.transport.assert_not_called()
+        self.assertFalse((self.root / "hub").exists())
+
     def test_invalid_model_id_or_publish_setting_does_not_read_key_or_call_network(self):
         for identifier, model in (("bad", self.model), (str(uuid4()), "vendor/paid")):
             with self.assertRaises(BudgetError):
@@ -139,6 +167,23 @@ class PilotTests(TestCase):
         self.run_pilot(identifier)
         self.transport.assert_called_once()
         self.assertEqual("draft_result", operation_status.snapshot(self.config)["items"][0]["state"])
+
+    def test_zero_cost_with_unreadable_output_settles_and_allows_another_job(self):
+        good = self.transport.return_value
+        self.transport.side_effect = [
+            (200, {"model": self.model, "usage": {"cost": 0},
+                   "choices": [{"message": {"content": ["parça"]}}]}),
+            good,
+        ]
+        result = pilot.summarize(self.config, request_id=str(uuid4()), model=self.model,
+                                 text="sentetik", external_authorized=True, non_sensitive=True)
+        self.assertEqual("stopped", result["status"])
+        self.assertEqual("settled", result["hold_status"])
+        self.assertNotIn("output", result)
+        self.assertFalse(operation_status.snapshot(self.config)["blocked"])
+        again = self.run_pilot()
+        self.assertEqual("completed", again["status"])
+        self.assertEqual(2, self.transport.call_count)
 
     def test_summary_unknown_cost_never_returns_output_or_retries(self):
         self.transport.return_value[1]["usage"] = {}

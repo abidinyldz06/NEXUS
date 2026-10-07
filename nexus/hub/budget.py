@@ -20,6 +20,14 @@ class BudgetError(ValueError):
     """A budget operation was rejected without dispatching work."""
 
 
+def _blocking_hold_clause() -> str:
+    """Unknown cost keeps the ledger closed, including an accepted empty hold."""
+    return (
+        "status IN ('reserved', 'unknown', 'overrun') "
+        "OR (status = 'accepted' AND actual IS NULL)"
+    )
+
+
 def validate_pilot_scope(
     *, provider: str, model: str, data_class: str, external_authorized: bool,
 ) -> None:
@@ -127,7 +135,7 @@ class PilotBudget:
                     raise BudgetError("aynı işlem kimliği farklı rezervasyonla kullanılamaz")
                 return {"created": False, "status": existing[1], "dispatch_enabled": False}
             if connection.execute(
-                "SELECT 1 FROM holds WHERE status IN ('reserved', 'unknown', 'overrun') LIMIT 1"
+                "SELECT 1 FROM holds WHERE " + _blocking_hold_clause() + " LIMIT 1"
             ).fetchone():
                 raise BudgetError("önceki istek uzlaştırılmadan yeni iş başlayamaz")
             daily = connection.execute(
@@ -161,6 +169,8 @@ class PilotBudget:
             if row is None:
                 raise BudgetError("rezervasyon bulunamadı")
             ceiling, old_status, old_actual = row
+            if old_status == "accepted":
+                raise BudgetError("bırakılmış belirsiz kayıt sıfırlanmış gibi kapatılamaz")
             if old_status in ("settled", "overrun"):
                 if old_actual != actual:
                     raise BudgetError("uzlaştırılmış harcama değiştirilemez")
@@ -170,6 +180,23 @@ class PilotBudget:
                 "UPDATE holds SET status=?, actual=? WHERE id=?", (status, actual, request_id)
             )
             return {"status": status, "dispatch_enabled": False}
+
+    def accept_unknown(self, request_id: str) -> dict:
+        """Record that the cost is still unknown. This does not open a new job."""
+        request_id = _identifier(request_id)
+        with closing(self._connect()) as connection, connection:
+            row = connection.execute(
+                "SELECT status, actual FROM holds WHERE id=?", (request_id,)
+            ).fetchone()
+            if row is None:
+                raise BudgetError("rezervasyon bulunamadı")
+            status, actual = row
+            if status == "accepted" and actual is None:
+                return {"status": "accepted", "cost_verified": False, "dispatch_enabled": False}
+            if status != "unknown" or actual is not None:
+                raise BudgetError("yalnız tutarı boş belirsiz kayıt bırakılabilir")
+            connection.execute("UPDATE holds SET status='accepted' WHERE id=?", (request_id,))
+            return {"status": "accepted", "cost_verified": False, "dispatch_enabled": False}
 
     def record_outcome(self, request_id: str, phase: str) -> None:
         """Only metadata from an explicit invocation; never save prompt or output."""

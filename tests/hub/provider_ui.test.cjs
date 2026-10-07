@@ -195,3 +195,153 @@ test("operation status reads only on click, never dispatches and clears pending 
   other.button(other.render(), "Görevler").props.onClick();
   assert.equal(other.button(other.render(), "İşlem durumlarını oku"), undefined);
 });
+
+test("nvidia super is listed and never dispatched from the existing model control", () => {
+  const page = harness();
+  page.button(page.render(), "Görevler").props.onClick();
+  const select = page.walk(page.render()).find(node => node.tag === "select");
+  const options = page.walk(select).filter(node => node.tag === "option").map(node => node.props.value);
+  assert.ok(options.includes("nvidia/nemotron-3-super-120b-a12b"));
+  assert.ok(options.includes("stealth/space-bunny-alpha"));
+  select.props.onChange({ target: { value: "nvidia/nemotron-3-super-120b-a12b" } });
+  const blocked = page.button(page.render(), "Sentetik ücretsiz testi çalıştır");
+  assert.equal(blocked.props.disabled, true);
+  blocked.props.onClick();
+  assert.equal(page.calls.some(call => call.url.includes("/free-pilot")), false);
+  page.button(page.render(), "Görevler").props.onClick();
+  const input = page.walk(page.render()).find(node => node.tag === "textarea" && node.props.maxLength === 400);
+  input.props.onChange({ target: { value: "sentetik metin" } });
+  page.button(page.render(), "Gönderim önizlemesini göster").props.onClick();
+  page.walk(page.render()).find(node => node.tag === "input" && node.props.type === "checkbox")
+    .props.onChange({ target: { checked: true } });
+  const send = page.button(page.render(), "Onayladığım metni ücretsiz özetle");
+  assert.equal(send.props.disabled, true);
+  send.props.onClick();
+  assert.equal(page.calls.some(call => String(call.url).includes("/selected-summary")), false);
+  assert.ok(JSON.stringify(page.render()).includes("Fiyat doğrulanmadan"));
+});
+
+test("search text reaches a summary only after consent and a draft only after save", async () => {
+  const calls = [];
+  const states = [];
+  const effects = [];
+  let cursor = 0;
+  let component;
+  const snippet = "Sentetik arama parçası";
+  const saved = [];
+  const SDK = {
+    React: { createElement: (tag, props, ...children) => ({ tag, props: props || {}, children }) },
+    hooks: {
+      useState(initial) {
+        const index = cursor++;
+        if (!(index in states)) states[index] = typeof initial === "function" ? initial() : initial;
+        return [states[index], value => { states[index] = typeof value === "function" ? value(states[index]) : value; }];
+      },
+      useEffect(fn) { effects.push(fn); },
+    },
+    fetchJSON(url, options) {
+      calls.push({ url, options });
+      if (url.includes("/search")) {
+        return Promise.resolve({ items: [{ id: "mem_synthetic", kind: "memory", status: "active",
+          title: "Sentetik kayıt", snippet }] });
+      }
+      if (url.includes("/selected-summary")) {
+        return Promise.resolve({ status: "completed", cost_verified: true, output: "Kısa sentetik özet." });
+      }
+      if (url.includes("/tasks")) {
+        const method = options && options.method;
+        if (method === "POST") {
+          const body = JSON.parse(options.body);
+          const prior = saved.find(item => item.idempotency_key === body.idempotency_key);
+          if (prior) {
+            const same = ["title", "goal", "expected_output", "target_app", "data_class", "hermes_session_id"]
+              .every(field => prior[field] === body[field]);
+            if (!same) return Promise.reject(new Error("aynı işlem kimliği farklı bir taslak için kullanıldı"));
+            return Promise.resolve({ created: false, dispatched: false, task: prior });
+          }
+          const task = Object.assign({ id: "task_synthetic", dispatched: false }, body);
+          saved.push(task);
+          return Promise.resolve({ created: true, dispatched: false, task });
+        }
+        return Promise.resolve({
+          items: saved.map(item => ({ id: item.id, title: item.title, target_app: item.target_app,
+            data_class: item.data_class, expected_output: item.expected_output,
+            hermes_session_id: item.hermes_session_id })),
+          total: saved.length,
+        });
+      }
+      return Promise.resolve({ items: [], total: 0 });
+    },
+  };
+  const window = { location: { search: "?profile=default" },
+    crypto: { getRandomValues(bytes) { return bytes.fill(1); } }, __HERMES_PLUGIN_SDK__: SDK,
+    __HERMES_PLUGINS__: { register(_name, value) { component = value; } } };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../../dashboard/dist/index.js"), "utf8"),
+    { window, URLSearchParams });
+  function render() { cursor = 0; return component(); }
+  function walk(tree) {
+    if (Array.isArray(tree)) return tree.flatMap(walk);
+    if (!tree || typeof tree !== "object") return [];
+    return [tree, ...tree.children.flatMap(walk)];
+  }
+  function button(tree, label) {
+    return walk(tree).find(node => node.tag === "button" && node.children.includes(label));
+  }
+  button(render(), "Hafıza").props.onClick();
+  const search = walk(render()).find(node => node.tag === "input" && node.props.type === "search");
+  search.props.onChange({ target: { value: "sentetik" } });
+  const form = walk(render()).find(node => node.tag === "form" && node.props.className === "nexus-search");
+  form.props.onSubmit({ preventDefault() {} });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls.some(call => call.url.includes("/selected-summary")), false);
+  button(render(), "Özete aktar").props.onClick();
+  assert.equal(calls.some(call => call.url.includes("/selected-summary")), false);
+  const summary = walk(render()).find(node => node.tag === "textarea" && node.props.maxLength === 400);
+  assert.equal(summary.props.value, snippet);
+  button(render(), "Gönderim önizlemesini göster").props.onClick();
+  const consent = walk(render()).find(node => node.tag === "input" && node.props.type === "checkbox");
+  consent.props.onChange({ target: { checked: true } });
+  button(render(), "Onayladığım metni ücretsiz özetle").props.onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  const summaryCall = calls.find(call => call.url.includes("/selected-summary"));
+  assert.equal(JSON.parse(summaryCall.options.body).text, snippet);
+  assert.equal(calls.some(call => String(call.url).includes("/tasks") && call.options && call.options.method === "POST"), false);
+  button(render(), "Bunu görev taslağına yaz").props.onClick();
+  const title = walk(render()).find(node => node.tag === "input" && node.props.maxLength === 160);
+  const goal = walk(render()).find(node => node.tag === "textarea" && node.props.maxLength === 2000);
+  assert.equal(title.props.value, "Kısa sentetik özet.");
+  assert.equal(goal.props.value, "Kısa sentetik özet.");
+  assert.equal(calls.some(call => String(call.url).includes("/tasks") && call.options && call.options.method === "POST"), false);
+  const saveFormNode = walk(render()).find(node => node.tag === "form" && node.props.className === "nexus-task-form"
+    && node.props.onSubmit && node.props.onSubmit.name === "saveDraft");
+  saveFormNode.props.onSubmit({ preventDefault() {} });
+  await new Promise(resolve => setImmediate(resolve));
+  const posts = calls.filter(call => String(call.url).includes("/tasks") && call.options && call.options.method === "POST");
+  assert.equal(posts.length, 1);
+  const body = JSON.parse(posts[0].options.body);
+  assert.equal(body.title, "Kısa sentetik özet.");
+  assert.equal(body.goal, "Kısa sentetik özet.");
+  assert.equal(body.expected_output, "Onaylı kısa özete dayalı taslak; çalıştırılmadı.");
+  assert.equal(body.target_app, "NEXUS");
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].dispatched, false);
+  const shown = walk(render()).filter(node => node.tag === "strong" && node.children.includes("Kısa sentetik özet."));
+  assert.equal(shown.length, 1);
+  const saveForm = () => walk(render()).find(node => node.tag === "form" && node.props.onSubmit
+    && node.props.onSubmit.name === "saveDraft");
+  const refill = (max, value) => walk(saveForm()).find(node =>
+    (node.tag === "input" || node.tag === "textarea") && node.props.maxLength === max);
+  refill(160).props.onChange({ target: { value: "Kısa sentetik özet." } });
+  refill(2000).props.onChange({ target: { value: "Kısa sentetik özet." } });
+  refill(1000).props.onChange({ target: { value: "Onaylı kısa özete dayalı taslak; çalıştırılmadı." } });
+  const selects = walk(saveForm()).filter(node => node.tag === "select");
+  selects[0].props.onChange({ target: { value: "NEXUS" } });
+  selects[1].props.onChange({ target: { value: "selected_external" } });
+  saveForm().props.onSubmit({ preventDefault() {} });
+  await new Promise(resolve => setImmediate(resolve));
+  const postsAgain = calls.filter(call => String(call.url).includes("/tasks") && call.options && call.options.method === "POST");
+  assert.equal(postsAgain.length, 2);
+  assert.equal(JSON.parse(postsAgain[1].options.body).idempotency_key, body.idempotency_key);
+  assert.equal(saved.length, 1);
+  assert.equal(walk(render()).filter(node => node.tag === "strong" && node.children.includes("Kısa sentetik özet.")).length, 1);
+});
