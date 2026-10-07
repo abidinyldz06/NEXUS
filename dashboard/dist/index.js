@@ -307,12 +307,16 @@
     }
 
     function runSummary() {
+      if (pilotModel === "nvidia/nemotron-3-super-120b-a12b") {
+        setSummaryError("Nemotron 3 Super seçildi. Resmi USD fiyatı doğrulanmadı; çağrı yok.");
+        return;
+      }
       if (summaryLoading || !summaryKey || !summaryConsent || !defaultTaskScope() ||
           !summaryPreview || summaryPreview !== summaryText || summaryText.length > 400) return;
       setSummaryLoading(true); setSummaryConsent(false); setSummaryResult(null); setSummaryError("");
       SDK.fetchJSON(API + "/selected-summary?profile=default", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ request_id: summaryKey, model: "stealth/space-bunny-alpha",
+        body: JSON.stringify({ request_id: summaryKey, model: pilotModel,
           text: summaryPreview, external_authorized: true, non_sensitive: true })
       }).then(function (result) {
         setSummaryResult(result);
@@ -332,6 +336,10 @@
     }
 
     function runFreePilot() {
+      if (pilotModel === "nvidia/nemotron-3-super-120b-a12b") {
+        setPilotError("Nemotron 3 Super seçildi. Resmi USD fiyatı doğrulanmadı; 0 USD sınırında çağrı yok.");
+        return;
+      }
       if (pilotLoading || !pilotKey || !defaultTaskScope()) return;
       setPilotLoading(true); setPilotResult(null); setPilotError("");
       SDK.fetchJSON(API + "/free-pilot?profile=default", {
@@ -388,6 +396,33 @@
       SDK.fetchJSON(API + path + encodeURIComponent(id))
         .then(setDetail)
         .catch(function (error) { setDetailError(errorText(error)); });
+    }
+
+    function stageSummary(text) {
+      const clipped = String(text || "").trim().slice(0, 400);
+      if (!clipped || summaryLoading) return;
+      setTab("tasks");
+      setSummaryText(clipped);
+      setSummaryPreview(null);
+      setSummaryConsent(false);
+      setSummaryResult(null);
+      setSummaryError("");
+      setSummaryKey(newDraftKey());
+    }
+
+    function stageDraftFromSummary(output) {
+      const text = String(output || "").trim().slice(0, 2000);
+      if (!text || savingTask) return;
+      setDraft({
+        title: text.slice(0, 160),
+        goal: text,
+        expected_output: "Onaylı kısa özete dayalı taslak; çalıştırılmadı.",
+        target_app: "NEXUS",
+        data_class: "selected_external",
+        hermes_session_id: "",
+      });
+      setDraftKey(newDraftKey());
+      setTaskError("");
     }
 
     const index = overview && overview.index;
@@ -460,7 +495,7 @@
           operations && h("p", { role: "status" }, operations.total + " işlem · " +
             (operations.blocked ? "Yeni model işlemi durduruldu: uzlaştırılmamış kayıt var." : "Uzlaştırılmamış bütçe kaydı yok; bu çalıştırma izni değildir.")),
           operations && (operations.items || []).map(function (item) {
-            const labels = { running: "Çalışıyor (bu süreçte gözlendi)", draft_result: "Taslak sonuç doğrulandı", failed: "Model çağrısı başlamadan hata", unknown: "Sonuç belirsiz" };
+            const labels = { running: "Çalışıyor (bu süreçte gözlendi)", draft_result: "Taslak sonuç doğrulandı", failed: "Model çağrısı başlamadan hata", accepted: "Maliyet doğrulanmadı; yeni iş durur", unknown: "Sonuç belirsiz" };
             return h("div", { key: item.id, className: "nexus-task-row" },
               h("p", null, item.id + " · " + (labels[item.state] || "Sonuç belirsiz")),
               h("p", null, "Maliyet: " + (item.cost_verified ? "doğrulandı" : "belirsiz") + " · Kayıt: " + (item.updated_at || item.day)),
@@ -475,12 +510,16 @@
                 ["nvidia/nemotron-3-ultra-550b-a55b:free", "Nemotron 3 Ultra (free)"],
                 ["poolside/laguna-s-2.1:free", "Laguna S 2.1 (free)"],
                 ["dots-studio/dots-3-note-preview:free", "Dots3-Note Preview (free)"],
-                ["nvidia/nemotron-3.5-lightning:free", "Nemotron 3.5 Lightning (free)"]].map(function (row) {
+                ["nvidia/nemotron-3.5-lightning:free", "Nemotron 3.5 Lightning (free)"],
+                ["nvidia/nemotron-3-super-120b-a12b", "Nemotron 3 Super (NVIDIA NIM, ücret doğrulanmadı)"]].map(function (row) {
                 return h("option", { key: row[0], value: row[0] }, row[1]);
               }))),
           h("p", { className: "nexus-muted" }, "Space Bunny sağlayıcısında içerik saklama uyarısı vardır. Veri koruması kapatılmaz; uygun ücretsiz rota yoksa durur."),
+          pilotModel === "nvidia/nemotron-3-super-120b-a12b" && h("p", { className: "nexus-muted" },
+            "Bu seçim NVIDIA NIM uç noktasıdır. Katalog sıfır fiyat gösterse bile NVIDIA faturası doğrulanmadan çağrı yapılmaz."),
           h("button", { type: "button", onClick: runFreePilot,
             disabled: pilotLoading || !pilotKey || !defaultTaskScope() ||
+              pilotModel === "nvidia/nemotron-3-super-120b-a12b" ||
               (pilotResult && pilotResult.hold_status === "unknown") },
             pilotLoading ? "Test çalışıyor…" : "Sentetik ücretsiz testi çalıştır"),
           pilotError && h("p", { className: "nexus-error", role: "alert" }, pilotError),
@@ -489,7 +528,7 @@
               "Bağlantı testi başarılı · doğrulanmış maliyet 0 USD · " + pilotResult.elapsed_seconds + " saniye" :
               "Test kabul edilmedi veya daha önce kaydedildi; otomatik tekrar yok. Durum: " + pilotResult.status))),
         panel("Seçili metin özeti", h("div", null,
-          h("p", null, "Önizleme yereldir. Onaylayıp özetle düğmesine basınca yalnız aşağıdaki metin OpenRouter'a gönderilir. Vault okunmaz; metin ve sonuç diske kaydedilmez."),
+          h("p", null, "Önizleme yereldir. Arama parçası buraya aktarılabilir; onaylayıp özetle düğmesine basınca yalnız aşağıdaki metin OpenRouter'a gönderilir. Vault okunmaz; metin ve sonuç diske kaydedilmez."),
           h("label", null, "Özetlenecek metin (en fazla 400 karakter)",
             h("textarea", { value: summaryText, maxLength: 400, disabled: summaryLoading,
               onChange: function (event) {
@@ -510,16 +549,26 @@
               disabled: summaryLoading,
               onChange: function (event) { setSummaryConsent(event.target.checked); } }),
               "Bu metinden hassas bilgileri çıkardım; bu işlem için OpenRouter'a gönderilmesini onaylıyorum."),
+            pilotModel === "nvidia/nemotron-3-super-120b-a12b" && h("p", { className: "nexus-muted" },
+              "Özet modeli Nemotron 3 Super. Fiyat doğrulanmadan metin gönderilmez."),
             h("button", { type: "button", onClick: runSummary,
               disabled: summaryLoading || !summaryConsent || !summaryKey ||
+                pilotModel === "nvidia/nemotron-3-super-120b-a12b" ||
                 (summaryResult && summaryResult.hold_status === "unknown") },
               summaryLoading ? "Özet hazırlanıyor…" : "Onayladığım metni ücretsiz özetle")),
           summaryError && h("p", { className: "nexus-error", role: "alert" }, summaryError),
           summaryResult && h("div", { role: "status" },
             summaryResult.status === "completed" && summaryResult.cost_verified === true ?
               h("div", null, h("p", null, "Taslak özet · doğrulanmış maliyet 0 USD. Doğruluğunu kontrol edin."),
-                h("pre", null, summaryResult.output)) :
-              h("p", null, "Sonuç doğrulanamadı veya daha önce kaydedildi; otomatik tekrar yok. Durum: " + summaryResult.status)))),
+                h("pre", null, summaryResult.output),
+                h("button", { type: "button", onClick: function () {
+                  stageDraftFromSummary(summaryResult.output);
+                } }, "Bunu görev taslağına yaz"),
+                h("p", { className: "nexus-muted" },
+                  "Taslak alanları dolar; kayıt ve çalıştırma ayrı düğmelerdedir.")) :
+              h("p", null, "Sonuç doğrulanamadı veya daha önce kaydedildi; otomatik tekrar yok. Durum: " +
+                summaryResult.status + (summaryResult.hold_status === "unknown"
+                  ? " Yeni model işlemi durduruldu: uzlaştırılmamış kayıt var." : ""))))),
         panel("Nereye yönlendirelim? · yalnız öneri", h("div", null,
           h("p", { className: "nexus-muted" },
             "İstek bu cihazda kurallarla değerlendirilir. Model çağrısı, görev başlatma veya taslak kaydı yapılmaz."),
@@ -678,11 +727,16 @@
           results && h("p", { className: "nexus-muted" }, resultItems.length + " sonuç"),
           results && resultItems.length === 0 && h("p", null, "Eşleşen kayıt bulunamadı."),
           resultItems.map(function (item) {
-            return h("button", { key: item.id, type: "button", className: "nexus-row",
-              onClick: function () { openDetail("record", item.id); } },
-              h("strong", null, item.title),
-              h("span", { className: "nexus-muted" }, item.kind + " · " + item.status),
-              h("span", null, item.snippet));
+            const snippet = typeof item.snippet === "string" ? item.snippet.trim() : "";
+            return h("div", { key: item.id, className: "nexus-hit" },
+              h("button", { type: "button", className: "nexus-row",
+                onClick: function () { openDetail("record", item.id); } },
+                h("strong", null, item.title),
+                h("span", { className: "nexus-muted" }, item.kind + " · " + item.status),
+                h("span", null, item.snippet)),
+              h("button", { type: "button", disabled: !snippet || summaryLoading,
+                onClick: function () { stageSummary(snippet); } },
+                "Özete aktar"));
           }))),
         panel("Bekleyen incelemeler", h("div", null,
           reviewError && h("p", { className: "nexus-error", role: "alert" }, reviewError),
@@ -710,8 +764,11 @@
                 h("strong", null, "Kaynak alıntısı"),
                 h("p", null, ref.excerpt || "Alıntı yok"));
             }),
+            detail.excerpt && h("button", { type: "button", disabled: summaryLoading,
+              onClick: function () { stageSummary(detail.excerpt); } },
+              "Bu alıntıyı özete aktar"),
             h("p", { className: "nexus-muted" },
-              "Özgün konuşma bu panelde ayrıca doğrulanmadı.")))));
+              "Özgün konuşma bu panelde ayrıca doğrulanmadı. Aktarma model çağırmaz.")))));
     }
 
     return h("main", { className: "nexus-hub" },

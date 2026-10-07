@@ -38,6 +38,32 @@ def read_catalog() -> dict[str, Any]:
         connection.close()
 
 
+def public_price_block(model: str, catalog: dict[str, Any] | None) -> str:
+    """Refuse a call. A public zero price is not an NVIDIA invoice."""
+    rows = catalog.get("data") if isinstance(catalog, dict) else None
+    matches = [row for row in rows if isinstance(row, dict) and row.get("id") == model] \
+        if isinstance(rows, list) else []
+    if len(matches) != 1:
+        return "NVIDIA Nemotron 3 Super katalogda doğrulanamadı; çağrı yok"
+    pricing = matches[0].get("pricing")
+    if not isinstance(pricing, dict) or not {"prompt", "completion"}.issubset(pricing):
+        return "NVIDIA Nemotron 3 Super fiyatı katalogda yok; çağrı yok"
+    amounts: list[Decimal] = []
+    for value in pricing.values():
+        try:
+            if type(value) not in (str, int, float):
+                return "NVIDIA Nemotron 3 Super fiyatı okunamadı; çağrı yok"
+            amount = Decimal(str(value))
+            if not amount.is_finite() or amount < 0:
+                return "NVIDIA Nemotron 3 Super fiyatı okunamadı; çağrı yok"
+        except InvalidOperation:
+            return "NVIDIA Nemotron 3 Super fiyatı okunamadı; çağrı yok"
+        amounts.append(amount)
+    if any(amount != 0 for amount in amounts):
+        return "NVIDIA Nemotron 3 Super OpenRouter kataloğunda sıfır fiyatlı değil; NVIDIA çağrısı yok"
+    return "NVIDIA Nemotron 3 Super katalog fiyatı sıfır görünse de NVIDIA faturası doğrulanmadı; çağrı yok"
+
+
 def _verify_zero_price(model: str, catalog: dict[str, Any] | None) -> None:
     rows = catalog.get("data") if isinstance(catalog, dict) else None
     matches = [row for row in rows if isinstance(row, dict) and row.get("id") == model] \
@@ -134,13 +160,17 @@ def complete_free(
         cost = usage.get("cost") if isinstance(usage, dict) else None
         if type(cost) not in (int, float) or cost != 0:
             return {"status": "needs_reconciliation", "cost_verified": False, "retry": False}
-        chosen = payload.get("model")
-        if not isinstance(chosen, str) or len(chosen) > 200:
-            raise ValueError("invalid model evidence")
-        choices = payload.get("choices")
-        content = choices[0]["message"]["content"]
-        if not isinstance(content, str) or len(content) > 4000:
-            raise ValueError("invalid output")
+        try:
+            chosen = payload.get("model")
+            choices = payload.get("choices")
+            content = choices[0]["message"]["content"]
+            if (not isinstance(chosen, str) or len(chosen) > 200
+                    or not isinstance(content, str) or len(content) > 4000):
+                raise ValueError("invalid output")
+        except Exception:
+            # Cost was already numeric zero. A bad output must not look like an unknown charge.
+            return {"status": "stopped", "reason": "yanıt metni doğrulanamadı",
+                    "cost_verified": True, "cost_usd": 0, "retry": False}
         return {"status": "completed", "model": chosen, "output": content,
                 "cost_verified": True, "cost_usd": 0, "retry": False}
     except Exception:

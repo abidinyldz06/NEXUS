@@ -19,7 +19,8 @@
 .nexus-memory { display: grid; gap: .8rem; }
 .nexus-search { display: flex; gap: .5rem; }
 .nexus-search input { flex: 1; min-width: 0; border: 1px solid var(--color-border); border-radius: .5rem; padding: .55rem .7rem; background: var(--background-base); color: inherit; }
-.nexus-row { display: flex; flex-direction: column; gap: .2rem; width: 100%; text-align: left; margin: .45rem 0; overflow-wrap: anywhere; }
+.nexus-hit { display: grid; gap: .35rem; margin: .45rem 0; }
+.nexus-row { display: flex; flex-direction: column; gap: .2rem; width: 100%; text-align: left; margin: 0; overflow-wrap: anywhere; }
 .nexus-row:hover, .nexus-card button:hover { border-color: var(--color-ring); }
 .nexus-row span { display: block; }
 .nexus-source { margin-top: .7rem; padding: .6rem; border-left: 2px solid var(--color-border); }

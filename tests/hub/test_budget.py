@@ -4,6 +4,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
@@ -94,6 +95,34 @@ class PilotBudgetTests(unittest.TestCase):
         self.budget.reconcile(identifier, verified_cost_usd="0.1")
         with self.assertRaises(BudgetError):
             self.reserve(ceiling="0.000001")
+
+    def test_empty_unknown_stays_blocking_after_accept_restart_and_same_id(self):
+        identifier, _ = self.reserve()
+        self.budget.reconcile(identifier, verified_cost_usd=None)
+        released = self.budget.accept_unknown(identifier)
+        self.assertEqual("accepted", released["status"])
+        self.assertFalse(released["cost_verified"])
+        self.assertFalse(released["dispatch_enabled"])
+        with closing(self.budget._connect()) as connection:
+            row = connection.execute(
+                "SELECT status, actual FROM holds WHERE id=?", (identifier,)
+            ).fetchone()
+            connection.rollback()
+        self.assertEqual(("accepted", None), row)
+        with self.assertRaises(BudgetError):
+            self.budget.reserve(str(uuid4()), ceiling_usd="0.1")
+        reopened = self.open_budget()
+        with self.assertRaises(BudgetError):
+            reopened.reserve(str(uuid4()), ceiling_usd="0.1")
+        again = reopened.reserve(identifier, ceiling_usd="0.1")
+        self.assertFalse(again["created"])
+        self.assertEqual("accepted", again["status"])
+        self.assertFalse(again["dispatch_enabled"])
+        with sqlite3.connect(self.path) as connection:
+            self.assertEqual(1, connection.execute("SELECT COUNT(*) FROM holds").fetchone()[0])
+            self.assertIsNone(connection.execute("SELECT actual FROM holds").fetchone()[0])
+        with self.assertRaises(BudgetError):
+            reopened.reconcile(identifier, verified_cost_usd="0")
 
     def test_unknown_never_clears_verified_cost_and_zero_can_be_verified(self):
         identifier, _ = self.reserve()

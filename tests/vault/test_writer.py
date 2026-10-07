@@ -140,7 +140,10 @@ class VaultWriterTests(unittest.TestCase):
 
             self.assertEqual(1, len(result.written_paths))
             self.assertIn("# No ping after 22:00.", restyled)
-            self.assertIn("date: 2026-09-", restyled)
+            original_date = next(
+                line for line in original.splitlines() if line.startswith("date: ")
+            )
+            self.assertIn(original_date, restyled)
             self.assertNotIn("# NEXUS Memory —", restyled)
             self.assertEqual(
                 extract_record_payload(original)["summary"],

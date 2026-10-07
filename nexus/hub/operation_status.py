@@ -5,7 +5,7 @@ from contextlib import closing
 from pathlib import Path
 
 from . import pilot
-from .budget import BudgetError
+from .budget import BudgetError, _blocking_hold_clause
 
 
 def snapshot(config) -> dict:
@@ -24,7 +24,7 @@ def snapshot(config) -> dict:
             connection.execute("BEGIN")
             total = connection.execute("SELECT COUNT(*) FROM holds").fetchone()[0]
             blocked = bool(connection.execute(
-                "SELECT 1 FROM holds WHERE status IN ('reserved', 'unknown', 'overrun') LIMIT 1"
+                "SELECT 1 FROM holds WHERE " + _blocking_hold_clause() + " LIMIT 1"
             ).fetchone())
             has_outcomes = bool(connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='outcomes'"
@@ -39,7 +39,8 @@ def snapshot(config) -> dict:
     items = []
     for identifier, hold, actual, day, phase, updated in rows:
         active = hold == "reserved" and pilot.is_active(path, identifier)
-        state = ("running" if active else "draft_result"
+        state = ("running" if active else "accepted"
+                 if hold == "accepted" and actual is None else "draft_result"
                  if phase == "draft_result" and hold == "settled" else "failed"
                  if phase == "failed" and hold == "settled" else "unknown")
         items.append({"id": identifier, "state": state, "hold_status": hold,
