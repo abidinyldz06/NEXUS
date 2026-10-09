@@ -122,6 +122,9 @@ def _run(config, *, request_id: str, model: str, text: str,
             "elapsed_seconds": round(time.monotonic() - start, 2), "retry": False}
     if isinstance(generation_id, str):
         evidence["generation_id"] = generation_id
+    if isinstance(result.get("reason"), str):
+        # Only the fixed, sanitized messages from free_model; never a raw HTTP body.
+        evidence["reason"] = result["reason"]
     if return_output and result["status"] == "completed" and verified:
         evidence["output"] = result["output"]
     return evidence
