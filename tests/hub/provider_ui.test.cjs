@@ -153,6 +153,48 @@ test("summary dispatch requires current preview and fresh checkbox consent", () 
   assert.equal(input().props.disabled, true);
 });
 
+test("summary consent is bound to the selected model and changing it requires a new preview", () => {
+  const page = harness();
+  page.button(page.render(), "Görevler").props.onClick();
+  page.walk(page.render()).find(node => node.tag === "textarea" && node.props.maxLength === 400)
+    .props.onChange({ target: { value: "sentetik metin" } });
+  page.button(page.render(), "Gönderim önizlemesini göster").props.onClick();
+  page.walk(page.render()).find(node => node.tag === "input" && node.props.type === "checkbox")
+    .props.onChange({ target: { checked: true } });
+  page.walk(page.render()).find(node => node.tag === "select")
+    .props.onChange({ target: { value: "poolside/laguna-s-2.1:free" } });
+  assert.equal(page.button(page.render(), "Onayladığım metni ücretsiz özetle"), undefined);
+  assert.equal(page.calls.length, 0);
+  page.button(page.render(), "Gönderim önizlemesini göster").props.onClick();
+  assert.ok(JSON.stringify(page.render()).includes("Hedef: OpenRouter / poolside/laguna-s-2.1:free"));
+  assert.equal(page.button(page.render(), "Onayladığım metni ücretsiz özetle").props.disabled, true);
+  page.walk(page.render()).find(node => node.tag === "input" && node.props.type === "checkbox")
+    .props.onChange({ target: { checked: true } });
+  page.button(page.render(), "Onayladığım metni ücretsiz özetle").props.onClick();
+  assert.equal(JSON.parse(page.calls[0].options.body).model, "poolside/laguna-s-2.1:free");
+  assert.equal(page.walk(page.render()).find(node => node.tag === "select").props.disabled, true);
+});
+
+test("failed summary exposes safe HTTP status and reason without retrying", async () => {
+  const page = harness("default", false, url => url.includes("/selected-summary")
+    ? Promise.resolve({ status: "stopped", http_status: 404,
+      reason: "ücretsiz rota yanıt vermedi", cost_verified: false, hold_status: "unknown" })
+    : undefined);
+  page.button(page.render(), "Görevler").props.onClick();
+  page.walk(page.render()).find(node => node.tag === "textarea" && node.props.maxLength === 400)
+    .props.onChange({ target: { value: "sentetik metin" } });
+  page.button(page.render(), "Gönderim önizlemesini göster").props.onClick();
+  page.walk(page.render()).find(node => node.tag === "input" && node.props.type === "checkbox")
+    .props.onChange({ target: { checked: true } });
+  page.button(page.render(), "Onayladığım metni ücretsiz özetle").props.onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  const view = JSON.stringify(page.render());
+  assert.ok(view.includes("HTTP 404"));
+  assert.ok(view.includes("ücretsiz rota yanıt vermedi"));
+  assert.ok(view.includes("uzlaştırılmamış kayıt var"));
+  assert.equal(page.calls.filter(call => call.url.includes("/selected-summary")).length, 1);
+});
+
 test("apps list reads existing agent names only on click and cannot dispatch", () => {
   const page = harness();
   page.button(page.render(), "Uygulamalar").props.onClick();

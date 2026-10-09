@@ -39,6 +39,17 @@ class PilotTests(TestCase):
         self.assertEqual(pilot.PROMPT, body["messages"][0]["content"])
         self.assertFalse(body["provider"]["allow_fallbacks"])
 
+    def test_http_rejection_reports_status_and_safe_reason_without_exposing_body(self):
+        self.transport.return_value = (404, {"error": "private-response-body"})
+        result = self.run_pilot()
+        self.assertEqual("stopped", result["status"])
+        self.assertEqual(404, result["http_status"])
+        self.assertEqual("ücretsiz rota yanıt vermedi", result["reason"])
+        self.assertFalse(result["cost_verified"])
+        self.assertEqual("unknown", result["hold_status"])
+        self.assertNotIn("private-response-body", str(result))
+        self.transport.assert_called_once()
+
     def test_same_id_never_dispatches_twice(self):
         identifier = str(uuid4())
         self.run_pilot(identifier)

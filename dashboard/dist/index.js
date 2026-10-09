@@ -578,8 +578,12 @@
         panel("Ücretsiz model bağlantı testi", h("div", null,
           h("p", null, "Yalnız sabit sentetik test metni gönderilir; Vault, notlar veya taslaklar gönderilmez. Harcama sınırı 0 USD; otomatik tekrar ve başka modele geçiş yok."),
           h("label", null, "Test modeli",
-            h("select", { value: pilotModel, disabled: pilotLoading,
-              onChange: function (event) { setPilotModel(event.target.value); } },
+            h("select", { value: pilotModel, disabled: pilotLoading || summaryLoading,
+              onChange: function (event) {
+                setPilotModel(event.target.value);
+                setSummaryPreview(null); setSummaryConsent(false);
+                setSummaryResult(null); setSummaryError("");
+              } },
               [["stealth/space-bunny-alpha", "Space Bunny Alpha"],
                 ["nvidia/nemotron-3-ultra-550b-a55b:free", "Nemotron 3 Ultra (free)"],
                 ["poolside/laguna-s-2.1:free", "Laguna S 2.1 (free)"],
@@ -616,7 +620,7 @@
               setSummaryPreview(summaryText); setSummaryConsent(false);
             } }, "Gönderim önizlemesini göster"),
           summaryPreview && h("div", { role: "status" },
-            h("p", null, "Hedef: OpenRouter / Space Bunny Alpha · güncel fiyatı sıfır olan model · harcama sınırı 0 USD. Sağlayıcı içerik saklayabilir; hassas metin göndermeyin."),
+            h("p", null, "Hedef: OpenRouter / " + pilotModel + " · güncel sıfır fiyat çağrı öncesinde doğrulanır · harcama sınırı 0 USD. Sağlayıcı içerik saklayabilir; hassas metin göndermeyin."),
             h("p", null, "Yalnız aşağıdaki metin kullanılacak; başka dosya, not veya görev eklenmeyecek."),
             h("pre", null, summaryPreview),
             h("label", null, h("input", { type: "checkbox", checked: summaryConsent,
@@ -641,7 +645,10 @@
                 h("p", { className: "nexus-muted" },
                   "Taslak alanları dolar; kayıt ve çalıştırma ayrı düğmelerdedir.")) :
               h("p", null, "Sonuç doğrulanamadı veya daha önce kaydedildi; otomatik tekrar yok. Durum: " +
-                summaryResult.status + (summaryResult.hold_status === "unknown"
+                summaryResult.status +
+                (Number.isInteger(summaryResult.http_status) ? " · HTTP " + summaryResult.http_status : "") +
+                (summaryResult.reason ? " · " + summaryResult.reason : "") +
+                (summaryResult.hold_status === "unknown"
                   ? " Yeni model işlemi durduruldu: uzlaştırılmamış kayıt var." : ""))))),
         panel("Nereye yönlendirelim? · yalnız öneri", h("div", null,
           h("p", { className: "nexus-muted" },
