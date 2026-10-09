@@ -142,6 +142,10 @@
     const [draft, setDraft] = useState({ title: "", goal: "", expected_output: "",
       target_app: "Hermes", data_class: "undetermined", hermes_session_id: "" });
     const [draftKey, setDraftKey] = useState(newDraftKey);
+    const [generationDrafts, setGenerationDrafts] = useState({});
+    const [generationMatches, setGenerationMatches] = useState({});
+    const [reconcilingId, setReconcilingId] = useState("");
+    const [reconcileNote, setReconcileNote] = useState("");
 
     useEffect(function () {
       let active = true;
@@ -335,6 +339,43 @@
       }).finally(function () { setOperationsLoading(false); });
     }
 
+    function confirmGenerationCost(item) {
+      if (reconcilingId || !defaultTaskScope() || !item || typeof item.id !== "string") return;
+      const body = { request_id: item.id };
+      if (item.generation_id) {
+        if (item.state === "running") return;
+      } else if (item.state === "accepted" || item.state === "unknown") {
+        const typed = generationDrafts[item.id];
+        if (typeof typed !== "string" || !/^gen-[A-Za-z0-9_-]{8,80}$/.test(typed)) return;
+        if (generationMatches[item.id] !== true) return;
+        body.generation_id = typed;
+        body.evidence_confirmed = true;
+      } else {
+        return;
+      }
+      setReconcilingId(item.id);
+      setReconcileNote("");
+      SDK.fetchJSON(API + "/generation-cost?profile=default", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      }).then(function (result) {
+        if (result && result.confirmed_now === true && result.status === "settled") {
+          setReconcileNote("Maliyet sağlayıcı kaydından doğrulandı.");
+        } else if (result && result.confirmed_now === true) {
+          setReconcileNote("Sağlayıcı ücreti doğrulandı; sıfır kabul edilmedi. Yeni iş durur.");
+        } else if (result && result.cost_verified === true) {
+          setReconcileNote("Bu deneme doğrulanamadı; önceki kayıt değiştirilmedi. Otomatik tekrar yok.");
+        } else {
+          setReconcileNote("Maliyet doğrulanamadı; kayıt belirsiz kaldı. Otomatik tekrar yok.");
+        }
+        setReconcilingId("");
+        if (result && result.confirmed_now === true) loadOperations();
+      }).catch(function () {
+        setReconcileNote("Maliyet doğrulanamadı; kayıt belirsiz kaldı. Otomatik tekrar yok.");
+        setReconcilingId("");
+      });
+    }
+
     function runFreePilot() {
       if (pilotModel === "nvidia/nemotron-3-super-120b-a12b") {
         setPilotError("Nemotron 3 Super seçildi. Resmi USD fiyatı doğrulanmadı; 0 USD sınırında çağrı yok.");
@@ -489,9 +530,11 @@
         panel("İşlem sonucu ve kesinti durumu", h("div", null,
           h("p", null, "Görev taslakları başlamadı. Aşağıdaki liste yalnız açıkça başlatılan ücretsiz test/özet işlemlerinin içeriksiz kayıtlarıdır; Hermes görevlerinin yürütme kaydı değildir."),
           h("p", null, "Ağ kesilirse veya sayfa yenilenirse sonuç belirsiz olabilir. Durumu okuyun; bu düğme modeli tekrar çağırmaz. Eski maliyet kaydı tek başına başarılı sonuç değildir."),
+          h("p", null, "Maliyet doğrulama ayrı bir düğmedir. Modeli yeniden çağırmaz. Kimliği olmayan veya doğrulanamayan kayıt sıfır sayılmaz."),
           h("button", { type: "button", onClick: loadOperations, disabled: operationsLoading },
             operationsLoading ? "İşlemler okunuyor…" : "İşlem durumlarını oku"),
           operationsError && h("p", { role: "alert" }, operationsError),
+          reconcileNote && h("p", { role: "status" }, reconcileNote),
           operations && h("p", { role: "status" }, operations.total + " işlem · " +
             (operations.blocked ? "Yeni model işlemi durduruldu: uzlaştırılmamış kayıt var." : "Uzlaştırılmamış bütçe kaydı yok; bu çalıştırma izni değildir.")),
           operations && (operations.items || []).map(function (item) {
@@ -499,6 +542,37 @@
             return h("div", { key: item.id, className: "nexus-task-row" },
               h("p", null, item.id + " · " + (labels[item.state] || "Sonuç belirsiz")),
               h("p", null, "Maliyet: " + (item.cost_verified ? "doğrulandı" : "belirsiz") + " · Kayıt: " + (item.updated_at || item.day)),
+              item.generation_id && h("p", null, "Sağlayıcı kimliği: " + item.generation_id),
+              item.generation_id && item.state !== "running" && h("button", {
+                type: "button",
+                onClick: function () { confirmGenerationCost(item); },
+                disabled: reconcilingId === item.id
+              }, reconcilingId === item.id ? "Maliyet okunuyor…" : "Maliyeti doğrula"),
+              (item.state === "accepted" || item.state === "unknown") && !item.generation_id && h("input", {
+                name: "generation-evidence",
+                value: generationDrafts[item.id] || "",
+                maxLength: 84,
+                onChange: function (event) {
+                  const next = Object.assign({}, generationDrafts);
+                  next[item.id] = event.target.value;
+                  setGenerationDrafts(next);
+                  setGenerationMatches(Object.assign({}, generationMatches, { [item.id]: false }));
+                }
+              }),
+              (item.state === "accepted" || item.state === "unknown") && !item.generation_id && h("label", null,
+                h("input", { type: "checkbox", name: "generation-match-confirmed",
+                  checked: generationMatches[item.id] === true,
+                  onChange: function (event) {
+                    setGenerationMatches(Object.assign({}, generationMatches, { [item.id]: event.target.checked === true }));
+                  } }),
+                "OpenRouter Activity kaydındaki kimliğin bu NEXUS işlemiyle eşleştiğini doğruladım; yalnız zaman yakınlığı yeterli değildir."),
+              (item.state === "accepted" || item.state === "unknown") && !item.generation_id && h("button", {
+                type: "button",
+                onClick: function () { confirmGenerationCost(item); },
+                disabled: reconcilingId === item.id || generationMatches[item.id] !== true
+              }, "Sağlayıcı kanıtıyla uzlaştır"),
+              !item.generation_id && !item.cost_verified && item.state !== "accepted" && h("p", { className: "nexus-muted" },
+                "Generation kimliği yok; kayıt belirsiz kalır."),
               h("p", { className: "nexus-muted" }, "Metin/yanıt saklanmadı; sonuç geri getirilemez. Otomatik tekrar yok."));
           }))),
         panel("Ücretsiz model bağlantı testi", h("div", null,

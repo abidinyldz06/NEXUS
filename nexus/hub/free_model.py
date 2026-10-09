@@ -7,7 +7,7 @@ import json
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
 
-from .budget import BudgetError, validate_pilot_scope
+from .budget import BudgetError, _generation_id, _money, validate_pilot_scope
 
 FREE_MODEL = "nvidia/nemotron-3.5-lightning:free"
 SELECTED_MODELS = frozenset({
@@ -122,6 +122,80 @@ def _transport(key: str, body: dict[str, Any]) -> tuple[int, Any]:
         connection.close()
 
 
+def _response_generation_id(payload: Any) -> str | None:
+    """Chat completion id only. Content fields are ignored."""
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return _generation_id(payload.get("id"))
+    except BudgetError:
+        return None
+
+
+def _with_generation_id(result: dict[str, Any], payload: Any) -> dict[str, Any]:
+    generation_id = _response_generation_id(payload)
+    if generation_id:
+        result["generation_id"] = generation_id
+    return result
+
+
+def read_generation(key: str, generation_id: str) -> tuple[int, Any]:
+    """Official cost lookup. Never calls the generation content endpoint."""
+    generation_id = _generation_id(generation_id)
+    if (not isinstance(key, str) or not key.startswith("sk-or-")
+            or not key.isascii() or any(ord(c) < 33 for c in key)):
+        raise BudgetError("OpenRouter anahtarı kullanılamıyor")
+    connection = http.client.HTTPSConnection("openrouter.ai", timeout=8)
+    try:
+        connection.request(
+            "GET", "/api/v1/generation?id=" + generation_id,
+            headers={"Authorization": "Bearer " + key, "Accept": "application/json"},
+        )
+        response = connection.getresponse()
+        if response.status != 200:
+            return response.status, None
+        raw = response.read(32769)
+        if len(raw) > 32768:
+            return response.status, None
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            return response.status, None
+        return response.status, payload
+    finally:
+        connection.close()
+
+
+def verified_generation_cost(status: int, payload: Any, generation_id: str) -> str | None:
+    """Numeric total_cost for this id only. Unreadable cost is not zero."""
+    if status != 200 or not isinstance(payload, dict):
+        return None
+    data = payload.get("data")
+    if not isinstance(data, dict) or data.get("id") != generation_id:
+        return None
+    cost = data.get("total_cost")
+    if type(cost) not in (int, float):
+        return None
+    try:
+        number = Decimal(str(cost))
+    except InvalidOperation:
+        return None
+    if not number.is_finite() or number < 0:
+        return None
+    if number == 0:
+        return "0"
+    text = format(number, "f")
+    if "." in text:
+        whole, fraction = text.split(".", 1)
+        fraction = fraction.rstrip("0")
+        text = whole if fraction == "" else whole + "." + fraction
+    try:
+        _money(text)
+    except BudgetError:
+        return None
+    return text
+
+
 def complete_free(
     text: str, *, key: str, data_class: str, external_authorized: bool,
     model: str = FREE_MODEL,
@@ -159,7 +233,8 @@ def complete_free(
         usage = payload.get("usage")
         cost = usage.get("cost") if isinstance(usage, dict) else None
         if type(cost) not in (int, float) or cost != 0:
-            return {"status": "needs_reconciliation", "cost_verified": False, "retry": False}
+            return _with_generation_id(
+                {"status": "needs_reconciliation", "cost_verified": False, "retry": False}, payload)
         try:
             chosen = payload.get("model")
             choices = payload.get("choices")
@@ -169,10 +244,12 @@ def complete_free(
                 raise ValueError("invalid output")
         except Exception:
             # Cost was already numeric zero. A bad output must not look like an unknown charge.
-            return {"status": "stopped", "reason": "yanıt metni doğrulanamadı",
-                    "cost_verified": True, "cost_usd": 0, "retry": False}
-        return {"status": "completed", "model": chosen, "output": content,
-                "cost_verified": True, "cost_usd": 0, "retry": False}
+            return _with_generation_id(
+                {"status": "stopped", "reason": "yanıt metni doğrulanamadı",
+                 "cost_verified": True, "cost_usd": 0, "retry": False}, payload)
+        return _with_generation_id(
+            {"status": "completed", "model": chosen, "output": content,
+             "cost_verified": True, "cost_usd": 0, "retry": False}, payload)
     except Exception:
         # No raw HTTP/SDK error or potentially credential-bearing content.
         return {"status": "unknown", "reason": "yanıt güvenle doğrulanamadı",

@@ -9,7 +9,7 @@ from threading import Lock
 from uuid import UUID
 
 from . import free_model, providers
-from .budget import BudgetError, PilotBudget
+from .budget import BudgetError, PilotBudget, _generation_id
 
 PROMPT = "This is a synthetic connectivity test. Reply exactly NEXUS_FREE_OK."
 NVIDIA_SUPER = "nvidia/nemotron-3-super-120b-a12b"
@@ -106,6 +106,9 @@ def _run(config, *, request_id: str, model: str, text: str,
     finally:
         with _active_lock:
             _active.discard(flight)
+    generation_id = result.get("generation_id")
+    if isinstance(generation_id, str):
+        ledger.record_generation_id(request_id, generation_id, source="response")
     verified = result.get("cost_verified") is True
     state = ledger.reconcile(request_id, verified_cost_usd="0" if verified else None)
     ledger.record_outcome(request_id, "draft_result" if verified and result["status"] == "completed"
@@ -117,6 +120,81 @@ def _run(config, *, request_id: str, model: str, text: str,
             "hold_status": state["status"], "inference_attempted": started,
             "http_status": result.get("http_status"),
             "elapsed_seconds": round(time.monotonic() - start, 2), "retry": False}
+    if isinstance(generation_id, str):
+        evidence["generation_id"] = generation_id
     if return_output and result["status"] == "completed" and verified:
         evidence["output"] = result["output"]
     return evidence
+
+
+def _existing_ledger(config) -> PilotBudget:
+    """Open the current zero-cap ledger. Never create one to skip a block."""
+    if config.auto_publish_enabled:
+        raise BudgetError("pilot otomatik yayın kapalıyken kullanılabilir")
+    data = Path(config.data_path)
+    if (not data.is_absolute() or not data.is_dir() or data.is_symlink()
+            or any(parent.is_symlink() for parent in data.parents)
+            or stat.S_IMODE(data.stat().st_mode) & 0o077):
+        raise BudgetError("mevcut özel NEXUS veri dizini gerekli")
+    folder = data / "hub"
+    ledger_path = folder / "free-pilot.sqlite3"
+    if (folder.is_symlink() or not folder.is_dir()
+            or stat.S_IMODE(folder.stat().st_mode) & 0o077
+            or ledger_path.is_symlink() or not ledger_path.is_file()):
+        raise BudgetError("rezervasyon bulunamadı")
+    return PilotBudget(ledger_path, per_job_usd="0", daily_usd="0", monthly_usd="0")
+
+
+def _cost_view(status: str, actual: int | None) -> dict:
+    return {"status": status, "cost_verified": actual is not None, "changed": False,
+            "confirmed_now": False, "retry": False, "dispatch_enabled": False}
+
+
+def confirm_generation_cost(config, *, request_id: str, generation_id: str | None = None,
+                            evidence_confirmed: bool = False, reader=None) -> dict:
+    """Explicit cost check for one stored or named generation id. No retry."""
+    try:
+        request_id = str(UUID(request_id))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise BudgetError("işlem kimliği geçersiz") from exc
+    ledger = _existing_ledger(config)
+    current = ledger.hold(request_id)
+    if current is None:
+        raise BudgetError("rezervasyon bulunamadı")
+    status, actual = current
+    stored = ledger.generation_ref(request_id)
+    if generation_id is not None:
+        chosen = _generation_id(generation_id)
+        if stored and stored != chosen:
+            raise BudgetError("kayıtlı generation kimliği değiştirilemez")
+        if not stored:
+            if status not in {"unknown", "accepted"} or actual is not None:
+                raise BudgetError("açık generation kimliği yalnız belirsiz kayda bağlanabilir")
+            if evidence_confirmed is not True:
+                raise BudgetError("sağlayıcı kimliğinin bu işlemle eşleştiği açıkça onaylanmalı")
+        source = "evidence" if stored is None else "response"
+    elif stored:
+        chosen = stored
+        source = "response"
+    else:
+        return _cost_view(status, actual)
+    try:
+        key = providers._credentials("openrouter").get("api_key")
+    except Exception:
+        raise BudgetError("OpenRouter anahtarı Hermes'te kullanılamıyor") from None
+    if (not isinstance(key, str) or not key.startswith("sk-or-") or not key.isascii()
+            or any(ord(c) < 33 for c in key)):
+        raise BudgetError("OpenRouter anahtarı Hermes'te kullanılamıyor")
+    lookup = reader or free_model.read_generation
+    try:
+        http_status, payload = lookup(key, chosen)
+    except Exception:
+        return _cost_view(status, actual)
+    verified = free_model.verified_generation_cost(http_status, payload, chosen)
+    if verified is None:
+        return _cost_view(status, actual)
+    result = ledger.settle_from_evidence(
+        request_id, verified_cost_usd=verified, generation_id=chosen, source=source,
+    )
+    result["retry"] = False
+    return result

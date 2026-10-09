@@ -19,3 +19,29 @@ jobs:
         run: scripts/run_tests.sh
       - name: Compile bytecode
         run: python3 -m compileall -q nexus tests
+
+  http:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install HTTP test dependencies
+        run: python3 -m pip install fastapi==0.133.1 httpx==0.28.1
+      - name: Require HTTP dependencies and run API tests
+        run: |
+          python3 -c 'from fastapi import FastAPI; from fastapi.testclient import TestClient'
+          python3 -m unittest tests.hub.test_generation_cost tests.hub.test_dashboard_api -v
+
+  panel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Panel syntax and behavior tests
+        run: |
+          node --check dashboard/dist/index.js
+          node --test tests/hub/provider_ui.test.cjs
