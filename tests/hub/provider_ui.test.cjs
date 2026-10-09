@@ -285,6 +285,35 @@ test("generation cost is an explicit click and does not invent an id", async () 
   });
 });
 
+test("operation refresh shows safe HTTP evidence and does not call a model", async () => {
+  const page = harness("default", false, url => {
+    if (!url.includes("/operation-status")) return undefined;
+    return Promise.resolve({
+      total: 1, blocked: true, read_only: true,
+      items: [{
+        id: "33333333-3333-4333-8333-333333333333", state: "unknown", cost_verified: false,
+        generation_id: null, http_status: 404, error_class: "http_rejected",
+        requested_model: "poolside/laguna-s-2.1:free",
+        updated_at: "2026-10-09T13:00:00+00:00", day: "2026-10-09",
+      }],
+    });
+  });
+  page.button(page.render(), "Görevler").props.onClick();
+  assert.equal(page.calls.length, 0);
+  page.button(page.render(), "İşlem durumlarını oku").props.onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  const view = JSON.stringify(page.render());
+  assert.ok(view.includes("HTTP: 404"));
+  assert.ok(view.includes("HTTP reddi"));
+  assert.ok(view.includes("poolside/laguna-s-2.1:free"));
+  assert.equal(view.includes("Bunu görev taslağına yaz"), false);
+  page.button(page.render(), "İşlem durumlarını oku").props.onClick();
+  assert.ok(page.calls.every(call => String(call.url).includes("/operation-status")));
+  assert.equal(page.calls.some(call => String(call.url).includes("/free-pilot")
+    || String(call.url).includes("/selected-summary")
+    || String(call.url).includes("/generation-cost")), false);
+});
+
 test("nvidia super is listed and never dispatched from the existing model control", () => {
   const page = harness();
   page.button(page.render(), "Görevler").props.onClick();

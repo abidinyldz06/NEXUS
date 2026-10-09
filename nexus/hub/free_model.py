@@ -225,16 +225,23 @@ def complete_free(
                          external_authorized=external_authorized, model=model, catalog=catalog)
     try:
         status, payload = transport(key, body)
-        if status != 200:
+        code = status if type(status) is int and 100 <= status <= 599 else None
+        if code != 200:
             return {"status": "stopped", "reason": "ücretsiz rota yanıt vermedi",
-                    "http_status": status, "cost_verified": False, "retry": False}
+                    "http_status": code,
+                    "error_class": "http_rejected" if code else "invalid_response",
+                    "cost_verified": False, "retry": False}
         if not isinstance(payload, dict):
-            raise ValueError("invalid response")
+            return {"status": "unknown", "reason": "yanıt güvenle doğrulanamadı",
+                    "http_status": 200, "error_class": "invalid_response",
+                    "cost_verified": False, "retry": False}
         usage = payload.get("usage")
         cost = usage.get("cost") if isinstance(usage, dict) else None
         if type(cost) not in (int, float) or cost != 0:
             return _with_generation_id(
-                {"status": "needs_reconciliation", "cost_verified": False, "retry": False}, payload)
+                {"status": "needs_reconciliation", "http_status": 200,
+                 "error_class": "unverified_cost", "cost_verified": False, "retry": False},
+                payload)
         try:
             chosen = payload.get("model")
             choices = payload.get("choices")
@@ -246,11 +253,16 @@ def complete_free(
             # Cost was already numeric zero. A bad output must not look like an unknown charge.
             return _with_generation_id(
                 {"status": "stopped", "reason": "yanıt metni doğrulanamadı",
+                 "http_status": 200, "error_class": "invalid_output",
                  "cost_verified": True, "cost_usd": 0, "retry": False}, payload)
         return _with_generation_id(
             {"status": "completed", "model": chosen, "output": content,
+             "http_status": 200, "error_class": "verified_zero",
              "cost_verified": True, "cost_usd": 0, "retry": False}, payload)
+    except TimeoutError:
+        return {"status": "unknown", "reason": "yanıt güvenle doğrulanamadı",
+                "error_class": "timeout", "cost_verified": False, "retry": False}
     except Exception:
         # No raw HTTP/SDK error or potentially credential-bearing content.
         return {"status": "unknown", "reason": "yanıt güvenle doğrulanamadı",
-                "cost_verified": False, "retry": False}
+                "error_class": "invalid_response", "cost_verified": False, "retry": False}
