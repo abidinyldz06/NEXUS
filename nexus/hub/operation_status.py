@@ -5,7 +5,7 @@ from contextlib import closing
 from pathlib import Path
 
 from . import pilot
-from .budget import BudgetError, _blocking_hold_clause
+from .budget import BudgetError, _blocking_hold_clause, _generation_id
 
 
 def snapshot(config) -> dict:
@@ -29,21 +29,35 @@ def snapshot(config) -> dict:
             has_outcomes = bool(connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='outcomes'"
             ).fetchone())
-            query = ("SELECT h.id, h.status, h.actual, h.day, o.phase, o.updated_at FROM holds h "
-                     "LEFT JOIN outcomes o ON o.id=h.id" if has_outcomes else
-                     "SELECT id, status, actual, day, NULL, NULL FROM holds")
-            ordering = " ORDER BY COALESCE(o.updated_at, h.day) DESC, h.id DESC LIMIT 30" if has_outcomes else " ORDER BY day DESC, id DESC LIMIT 30"
-            rows = connection.execute(query + ordering).fetchall()
+            has_refs = bool(connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='generation_refs'"
+            ).fetchone())
+            phase = "o.phase, o.updated_at" if has_outcomes else "NULL, NULL"
+            ref = "g.generation_id" if has_refs else "NULL"
+            joins = " FROM holds h"
+            if has_outcomes:
+                joins += " LEFT JOIN outcomes o ON o.id=h.id"
+            if has_refs:
+                joins += " LEFT JOIN generation_refs g ON g.id=h.id"
+            ordering = (" ORDER BY COALESCE(o.updated_at, h.day) DESC, h.id DESC LIMIT 30"
+                        if has_outcomes else " ORDER BY h.day DESC, h.id DESC LIMIT 30")
+            rows = connection.execute(
+                "SELECT h.id, h.status, h.actual, h.day, " + phase + ", " + ref + joins + ordering
+            ).fetchall()
     except sqlite3.Error:
         raise BudgetError("işlem kayıtları okunamadı; başarı varsayılmadı") from None
     items = []
-    for identifier, hold, actual, day, phase, updated in rows:
+    for identifier, hold, actual, day, phase, updated, generation_id in rows:
         active = hold == "reserved" and pilot.is_active(path, identifier)
         state = ("running" if active else "accepted"
                  if hold == "accepted" and actual is None else "draft_result"
                  if phase == "draft_result" and hold == "settled" else "failed"
                  if phase == "failed" and hold == "settled" else "unknown")
+        try:
+            shown_id = None if generation_id is None else _generation_id(generation_id)
+        except BudgetError:
+            shown_id = None
         items.append({"id": identifier, "state": state, "hold_status": hold,
-                      "cost_verified": actual is not None, "day": day,
-                      "updated_at": updated, "output_saved": False, "retry": False})
+                      "cost_verified": actual is not None, "generation_id": shown_id,
+                      "day": day, "updated_at": updated, "output_saved": False, "retry": False})
     return {"items": items, "total": total, "blocked": blocked, "read_only": True}

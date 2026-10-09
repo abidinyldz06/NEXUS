@@ -7,6 +7,7 @@ verify credentials, prices, token bounds and policy, and dispatch only once.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import stat
 from contextlib import closing
@@ -14,6 +15,8 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation, localcontext
 from pathlib import Path
 from uuid import UUID
+
+_GENERATION_ID = re.compile(r"^gen-[A-Za-z0-9_-]{8,80}$")
 
 
 class BudgetError(ValueError):
@@ -62,6 +65,12 @@ def _identifier(value: str) -> str:
         return str(UUID(value))
     except (ValueError, TypeError, AttributeError) as exc:
         raise BudgetError("işlem kimliği geçersiz") from exc
+
+
+def _generation_id(value: str) -> str:
+    if not isinstance(value, str) or _GENERATION_ID.fullmatch(value) is None:
+        raise BudgetError("generation kimliği geçersiz")
+    return value
 
 
 class PilotBudget:
@@ -197,6 +206,126 @@ class PilotBudget:
                 raise BudgetError("yalnız tutarı boş belirsiz kayıt bırakılabilir")
             connection.execute("UPDATE holds SET status='accepted' WHERE id=?", (request_id,))
             return {"status": "accepted", "cost_verified": False, "dispatch_enabled": False}
+
+    def hold(self, request_id: str) -> tuple[str, int | None] | None:
+        """Read one hold. A missing ledger is not created."""
+        request_id = _identifier(request_id)
+        if not self.path.is_file():
+            return None
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT status, actual FROM holds WHERE id=?", (request_id,)
+            ).fetchone()
+            connection.rollback()
+            return None if row is None else (row[0], row[1])
+
+    def generation_ref(self, request_id: str) -> str | None:
+        """Return the stored provider id, or None. Does not create the table."""
+        request_id = _identifier(request_id)
+        if not self.path.is_file():
+            return None
+        with closing(self._connect()) as connection:
+            exists = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='generation_refs'"
+            ).fetchone()
+            row = connection.execute(
+                "SELECT generation_id FROM generation_refs WHERE id=?", (request_id,)
+            ).fetchone() if exists else None
+            connection.rollback()
+            return None if row is None else row[0]
+
+    def record_generation_id(self, request_id: str, generation_id: str, *, source: str) -> None:
+        """Store the provider id only. Prompt and output never belong here."""
+        request_id = _identifier(request_id)
+        generation_id = _generation_id(generation_id)
+        if source not in {"response", "evidence"}:
+            raise BudgetError("generation kaydı kaynağı geçersiz")
+        with closing(self._connect()) as connection, connection:
+            if not connection.execute("SELECT 1 FROM holds WHERE id=?", (request_id,)).fetchone():
+                raise BudgetError("rezervasyon bulunamadı")
+            self._ensure_generation_refs(connection)
+            stored = connection.execute(
+                "SELECT generation_id FROM generation_refs WHERE id=?", (request_id,)
+            ).fetchone()
+            if stored:
+                if stored[0] != generation_id:
+                    raise BudgetError("kayıtlı generation kimliği değiştirilemez")
+                return
+            try:
+                connection.execute(
+                    "INSERT INTO generation_refs VALUES (?, ?, ?, ?)",
+                    (request_id, generation_id, source, datetime.now(UTC).isoformat()),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise BudgetError("bu generation kimliği başka bir kayda bağlı") from exc
+
+    def settle_from_evidence(
+        self, request_id: str, *, verified_cost_usd: str, generation_id: str, source: str,
+    ) -> dict:
+        """Settle only with a numeric provider cost and its generation id.
+
+        An accepted empty hold can move here. ``reconcile`` still refuses to
+        close that hold, including with an unverified zero. Unknown stays
+        unknown unless this call supplies a representable cost.
+        """
+        request_id = _identifier(request_id)
+        generation_id = _generation_id(generation_id)
+        if source not in {"response", "evidence"}:
+            raise BudgetError("generation kaydı kaynağı geçersiz")
+        actual = _money(verified_cost_usd)
+        with closing(self._connect()) as connection, connection:
+            row = connection.execute(
+                "SELECT ceiling, status, actual FROM holds WHERE id=?", (request_id,)
+            ).fetchone()
+            if row is None:
+                raise BudgetError("rezervasyon bulunamadı")
+            ceiling, old_status, old_actual = row
+            self._ensure_generation_refs(connection)
+            stored = connection.execute(
+                "SELECT generation_id FROM generation_refs WHERE id=?", (request_id,)
+            ).fetchone()
+            if stored and stored[0] != generation_id:
+                raise BudgetError("kayıtlı generation kimliği değiştirilemez")
+            if old_status in ("settled", "overrun"):
+                if old_actual != actual:
+                    raise BudgetError("uzlaştırılmış harcama değiştirilemez")
+                if not stored:
+                    self._insert_generation_ref(connection, request_id, generation_id, source)
+                return {"status": old_status, "cost_verified": True, "changed": False,
+                        "confirmed_now": True, "dispatch_enabled": False}
+            if old_status not in ("unknown", "accepted") or old_actual is not None:
+                raise BudgetError("bu kayıt sağlayıcı kanıtıyla kapatılamaz")
+            status = "overrun" if actual > ceiling else "settled"
+            connection.execute(
+                "UPDATE holds SET status=?, actual=? WHERE id=? AND status=? AND actual IS NULL",
+                (status, actual, request_id, old_status),
+            )
+            if connection.execute("SELECT changes()").fetchone()[0] != 1:
+                raise BudgetError("bu kayıt sağlayıcı kanıtıyla kapatılamaz")
+            if not stored:
+                self._insert_generation_ref(connection, request_id, generation_id, source)
+            return {"status": status, "cost_verified": True, "changed": True,
+                    "confirmed_now": True, "dispatch_enabled": False}
+
+    @staticmethod
+    def _insert_generation_ref(connection: sqlite3.Connection, request_id: str,
+                               generation_id: str, source: str) -> None:
+        try:
+            connection.execute(
+                "INSERT INTO generation_refs VALUES (?, ?, ?, ?)",
+                (request_id, generation_id, source, datetime.now(UTC).isoformat()),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise BudgetError("bu generation kimliği başka bir kayda bağlı") from exc
+
+    @staticmethod
+    def _ensure_generation_refs(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS generation_refs ("
+            "id TEXT PRIMARY KEY, generation_id TEXT NOT NULL UNIQUE, "
+            "source TEXT NOT NULL CHECK (source IN ('response', 'evidence')), "
+            "recorded_at TEXT NOT NULL)"
+        )
 
     def record_outcome(self, request_id: str, phase: str) -> None:
         """Only metadata from an explicit invocation; never save prompt or output."""

@@ -74,6 +74,14 @@ class SummaryRequest(FreePilotRequest):
     non_sensitive: StrictBool
 
 
+class GenerationCostRequest(BaseModel):
+    request_id: str
+    generation_id: str | None = None
+    evidence_confirmed: StrictBool = False
+
+    model_config = ConfigDict(extra="forbid")
+
+
 def _default_profile_only(request: Request) -> None:
     # _settings reads only the default Hermes plugin entry. Never write a draft
     # to that store while the dashboard is managing another profile.
@@ -229,6 +237,23 @@ def free_pilot(request: Request, body: FreePilotRequest) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception:
         raise HTTPException(status_code=503, detail="pilot başlatılamadı; otomatik tekrar yok") from None
+
+
+@router.post("/hub/generation-cost")
+def generation_cost(request: Request, body: GenerationCostRequest) -> JSONResponse:
+    # Explicit action only. Does not start a model call or open another ledger.
+    if request.query_params.get("profile") != "default":
+        raise HTTPException(status_code=409, detail="maliyet doğrulama yalnız default profilde destekleniyor")
+    try:
+        result = _pilot.confirm_generation_cost(
+            _settings(), request_id=body.request_id, generation_id=body.generation_id,
+            evidence_confirmed=body.evidence_confirmed,
+        )
+        return JSONResponse(result, headers={"Cache-Control": "no-store"})
+    except _budget.BudgetError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception:
+        raise HTTPException(status_code=503, detail="maliyet doğrulanamadı; otomatik tekrar yok") from None
 
 
 @router.post("/hub/selected-summary")

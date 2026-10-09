@@ -5,7 +5,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const test = require("node:test");
 
-function harness(profile = "default", fail = false) {
+function harness(profile = "default", fail = false, extraFetch) {
   const states = [], effects = [], calls = [];
   let cursor = 0, component;
   const SDK = {
@@ -20,6 +20,10 @@ function harness(profile = "default", fail = false) {
     },
     fetchJSON(url, options) {
       calls.push({ url, options });
+      if (extraFetch) {
+        const handled = extraFetch(url, options);
+        if (handled !== undefined) return handled;
+      }
       if (!url.includes("/providers/")) return Promise.resolve({});
       if (fail) return Promise.reject(new Error("synthetic-private-error"));
       const provider = url.split("/providers/")[1].split("/")[0];
@@ -194,6 +198,49 @@ test("operation status reads only on click, never dispatches and clears pending 
   const other = harness("other");
   other.button(other.render(), "Görevler").props.onClick();
   assert.equal(other.button(other.render(), "İşlem durumlarını oku"), undefined);
+});
+
+test("generation cost is an explicit click and does not invent an id", async () => {
+  const stored = "11111111-1111-4111-8111-111111111111";
+  const accepted = "22222222-2222-4222-8222-222222222222";
+  const page = harness("default", false, url => {
+    if (!url.includes("/operation-status")) return undefined;
+    return Promise.resolve({
+      total: 2, blocked: true, read_only: true,
+      items: [
+        { id: stored, state: "unknown", cost_verified: false, generation_id: "gen-aaaaaaaa",
+          updated_at: "2026-10-09", day: "2026-10-09" },
+        { id: accepted, state: "accepted", cost_verified: false, generation_id: null,
+          updated_at: "2026-10-02", day: "2026-10-02" },
+      ],
+    });
+  });
+  page.button(page.render(), "Görevler").props.onClick();
+  assert.equal(page.calls.some(call => String(call.url).includes("/generation-cost")), false);
+  page.button(page.render(), "İşlem durumlarını oku").props.onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(page.calls.some(call => String(call.url).includes("/generation-cost")), false);
+  page.button(page.render(), "Maliyeti doğrula").props.onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  const storedCall = page.calls.find(call => String(call.url).includes("/generation-cost"));
+  assert.equal(storedCall.options.method, "POST");
+  assert.ok(storedCall.url.endsWith("/generation-cost?profile=default"));
+  assert.deepEqual(JSON.parse(storedCall.options.body), { request_id: stored });
+  const before = page.calls.length;
+  page.button(page.render(), "Sağlayıcı kanıtıyla uzlaştır").props.onClick();
+  assert.equal(page.calls.length, before);
+  page.walk(page.render()).find(node => node.tag === "input" && node.props.name === "generation-evidence")
+    .props.onChange({ target: { value: "gen-bbbbbbbb" } });
+  page.button(page.render(), "Sağlayıcı kanıtıyla uzlaştır").props.onClick();
+  assert.equal(page.calls.filter(call => String(call.url).includes("/generation-cost")).length, 1);
+  page.walk(page.render()).find(node => node.tag === "input" && node.props.name === "generation-match-confirmed")
+    .props.onChange({ target: { checked: true } });
+  page.button(page.render(), "Sağlayıcı kanıtıyla uzlaştır").props.onClick();
+  const evidence = page.calls.filter(call => String(call.url).includes("/generation-cost"));
+  assert.equal(evidence.length, 2);
+  assert.deepEqual(JSON.parse(evidence[1].options.body), {
+    request_id: accepted, generation_id: "gen-bbbbbbbb", evidence_confirmed: true,
+  });
 });
 
 test("nvidia super is listed and never dispatched from the existing model control", () => {
