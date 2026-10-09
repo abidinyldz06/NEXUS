@@ -9,7 +9,7 @@ from threading import Lock
 from uuid import UUID
 
 from . import free_model, providers
-from .budget import BudgetError, PilotBudget, _generation_id
+from .budget import BudgetError, PilotBudget, _DIAGNOSTIC_CLASSES, _generation_id, _http_status
 
 PROMPT = "This is a synthetic connectivity test. Reply exactly NEXUS_FREE_OK."
 NVIDIA_SUPER = "nvidia/nemotron-3-super-120b-a12b"
@@ -92,6 +92,12 @@ def _run(config, *, request_id: str, model: str, text: str,
     start = time.monotonic()
     flight = (str(ledger.path), request_id)
     ledger.record_outcome(request_id, "running")
+    try:
+        ledger.begin_diagnostic(request_id, model=model)
+    except BudgetError:
+        ledger.reconcile(request_id, verified_cost_usd=None)
+        ledger.record_outcome(request_id, "unknown")
+        raise BudgetError("pilot sonucu doğrulanamadı; otomatik tekrar yapılmaz") from None
     with _active_lock:
         _active.add(flight)
     try:
@@ -100,26 +106,38 @@ def _run(config, *, request_id: str, model: str, text: str,
             model=model, transport=transport, catalog_reader=lambda: catalog,
         )
     except Exception:
-        ledger.reconcile(request_id, verified_cost_usd=None if started else "0")
-        ledger.record_outcome(request_id, "unknown" if started else "failed")
+        _fail_closed(ledger, request_id, started=started)
         raise BudgetError("pilot sonucu doğrulanamadı; otomatik tekrar yapılmaz") from None
     finally:
         with _active_lock:
             _active.discard(flight)
-    generation_id = result.get("generation_id")
-    if isinstance(generation_id, str):
-        ledger.record_generation_id(request_id, generation_id, source="response")
-    verified = result.get("cost_verified") is True
-    state = ledger.reconcile(request_id, verified_cost_usd="0" if verified else None)
-    ledger.record_outcome(request_id, "draft_result" if verified and result["status"] == "completed"
-                          else "unknown")
+    verified = result.get("cost_verified") is True and result.get("status") == "completed"
+    # A verified zero that is not a completed output still settles its known zero
+    # cost, but it is not a draft result. HTTP rejection never settles as zero.
+    cost = "0" if result.get("cost_verified") is True else None
+    phase = "draft_result" if verified else "unknown"
+    try:
+        generation_id = result.get("generation_id")
+        if isinstance(generation_id, str):
+            ledger.record_generation_id(request_id, generation_id, source="response")
+        state = ledger.finish_diagnostic(
+            request_id, phase=phase, http_status=result.get("http_status"),
+            error_class=result.get("error_class"), verified_cost_usd=cost,
+        )
+    except BudgetError:
+        _fail_closed(ledger, request_id, started=True)
+        raise BudgetError("pilot sonucu doğrulanamadı; otomatik tekrar yapılmaz") from None
     # Store only cost metadata. Summary output is returned transiently, not saved.
+    http_status = _http_status(result.get("http_status"))
+    error_class = result.get("error_class")
     evidence = {"status": result["status"], "requested_model": model,
             "expected_output": result.get("output", "").strip() == "NEXUS_FREE_OK",
-            "cost_verified": verified, "cost_usd": 0 if verified else None,
+            "cost_verified": result.get("cost_verified") is True, "cost_usd": 0 if result.get("cost_verified") is True else None,
             "hold_status": state["status"], "inference_attempted": started,
-            "http_status": result.get("http_status"),
+            "http_status": http_status,
             "elapsed_seconds": round(time.monotonic() - start, 2), "retry": False}
+    if error_class in _DIAGNOSTIC_CLASSES:
+        evidence["error_class"] = error_class
     if isinstance(generation_id, str):
         evidence["generation_id"] = generation_id
     if isinstance(result.get("reason"), str):
@@ -128,6 +146,27 @@ def _run(config, *, request_id: str, model: str, text: str,
     if return_output and result["status"] == "completed" and verified:
         evidence["output"] = result["output"]
     return evidence
+
+
+def _fail_closed(ledger: PilotBudget, request_id: str, *, started: bool) -> None:
+    """A diagnostic failure is uncertain. It is not success and not a zero cost."""
+    try:
+        if started:
+            try:
+                ledger.finish_diagnostic(
+                    request_id, phase="unknown", http_status=None, error_class=None,
+                    verified_cost_usd=None,
+                )
+            except BudgetError:
+                ledger.reconcile(request_id, verified_cost_usd=None)
+                ledger.record_outcome(request_id, "unknown")
+        else:
+            ledger.finish_diagnostic(
+                request_id, phase="failed", http_status=None, error_class=None,
+                verified_cost_usd="0",
+            )
+    except BudgetError:
+        return
 
 
 def _existing_ledger(config) -> PilotBudget:

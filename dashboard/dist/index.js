@@ -542,6 +542,9 @@
             return h("div", { key: item.id, className: "nexus-task-row" },
               h("p", null, item.id + " · " + (labels[item.state] || "Sonuç belirsiz")),
               h("p", null, "Maliyet: " + (item.cost_verified ? "doğrulandı" : "belirsiz") + " · Kayıt: " + (item.updated_at || item.day)),
+              h("p", null, "HTTP: " + (Number.isInteger(item.http_status) && item.http_status >= 100 && item.http_status <= 599 ? String(item.http_status) : "bilinmiyor")
+                + " · Sınıf: " + ({ http_rejected: "HTTP reddi", timeout: "Ağ zaman aşımı", invalid_output: "Çıktı doğrulanamadı", invalid_response: "Yanıt doğrulanamadı", unverified_cost: "Maliyet doğrulanamadı", verified_zero: "Doğrulanmış sıfır maliyet" }[item.error_class] || "bilinmiyor")),
+              typeof item.requested_model === "string" && /^[A-Za-z0-9_.:/+-]{1,200}$/.test(item.requested_model) && h("p", null, "İstenen model: " + item.requested_model),
               item.generation_id && h("p", null, "Sağlayıcı kimliği: " + item.generation_id),
               item.generation_id && item.state !== "running" && h("button", {
                 type: "button",
