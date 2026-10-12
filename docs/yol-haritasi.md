@@ -1,6 +1,6 @@
 # NEXUS — güncel Türkçe yol haritası
 
-Son değerlendirme: 30 Eylül 2026. Bu belge eski faz notlarını silmez; mevcut
+Son değerlendirme: 12 Ekim 2026. Bu belge eski faz notlarını silmez; mevcut
 teslimi ve gerçekten kalan işleri ayırır. Tahmini tarih veya yüzde, kabul kanıtı değildir.
 
 ## Teslim edilen dilimler
@@ -23,8 +23,32 @@ Hermes/FastAPI eksikse API testleri atlanır; atlanan testler geçti sayılmaz.
 
 ## Öncelikli kalan işler
 
+### H6 güncellemesi — 12 Ekim
+
+- PR #70 birleşti: main `5994e678`. Kurulu checkout aynı commit'te ve temiz.
+- 9 Ekim teslim kanıtı: 366 Python + 16 panel testi, atlanan yok; main CI
+  `37939220788` unit/HTTP/panel başarılı. Bu ölçüm canlı kullanım kabulü değildir.
+- Yerel görev kaydetme, sayfa yenilemesinde geri okuma ve aynı işlem kimliğiyle
+  mükerrer oluşturmama kanıtlandı. Model çağrısı ve görev yürütme yapılmadı.
+- Süreç kesintisi/toparlanma testi sahte sağlayıcı ve geçici veriyle mevcut;
+  production restore veya canlı sağlayıcı kesintisi kabulü değildir.
+- 12 Ekim hedefli yeniden ölçüm: sentetik restore, Git rollback, süreç
+  kesintisi ve yerel görev testlerinde 16/16 geçti. Yalnız geçici test verisi
+  kullanıldı; production verisi ve canlı model çağrısı kullanılmadı.
+- Dört maliyet kaydı doğrulanmış, bir Laguna kaydı belirsizdir. Eski kayıtta
+  sağlayıcı kimliği ve HTTP kodu yok; yeni teşhis paketi geçmiş kanıtı üretmez.
+- Kullanıcı 10 Ekim destek başvurusunu gönderdiğini bildirdi. Gönderim/talep
+  kimliği ve yanıt bağımsız doğrulanmadı; yeni başvuru açılmaz.
+- NVIDIA ertelenmiş, otomatik yayın ve gözetimsiz ingest kapalı kalır.
+
+Destek yanıtı bütün yerel geliştirmeyi durdurmaz. Yalnız maliyeti belirsiz yeni
+dış model çağrıları durur; salt okunur hafıza ve pasif yerel taslaklar kullanılabilir.
+
 | Öncelik | İş | Bağımlılık | Kapanış ölçütü |
 | --- | --- | --- | --- |
+| 1a | Laguna maliyet kanıtı | Mevcut destek başvurusunun yanıtı | İstekle eşleşen sağlayıcı kimliği veya resmi işlem/ücret teyidi; bilinmeyen kayıt silinmez veya sıfır varsayılmaz |
+| 1b | Yerel toparlanma regresyonu | Mevcut geçici-veri testleri | Kaydetme/geri okuma/mükerrer engeli ve sentetik restore/kesinti testleri; canlı pilot yerine geçmez |
+| 1c | Seçili metin → özet → kalıcı taslak canlı kabulü | 1a, güncel ücretsiz katalog, her çağrı için onay | Tek sınırlı sentetik akış, doğrulanmış maliyet, taslağın geri okunması ve mükerrer oluşturmama |
 | 1 | Gerçek kullanım ve toparlanma kabulü (#61) | Kullanılabilir akışlar, insan gözlemi, güvenli yedek/restore kapsamı | Kullanılan günler ve sonuçlar kanıtlı; hata/mükerrer/provenance incelemesi; kontrollü sentetik toparlanma kanıtı; açık sorunlar dürüstçe sınıflı |
 
 H5'in tanımlı dar akışları teslim edildi; bu genel bir bot yöneticisi, scheduler
