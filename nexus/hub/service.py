@@ -18,7 +18,7 @@ from ..vault import extract_record_payload
 
 def _preview(item: ReviewItem) -> str:
     candidate = item.candidate
-    for field in ("summary", "display_name", "predicate", "literal"):
+    for field in ("summary", "statement", "display_name", "predicate", "literal"):
         value = candidate.get(field)
         if isinstance(value, str) and value.strip():
             return value[:240]
