@@ -512,7 +512,7 @@
           agentsError && h("p", { role: "alert", className: "nexus-error" }, agentsError),
           hermesAgents && !hermesAgents.available && h("p", null, hermesAgents.reason),
           hermesAgents && hermesAgents.available && (hermesAgents.items || []).map(function (agent) {
-            const knownProfiles = ["default", "writer-agent", "research-agent", "coder-agent", "scheduler-agent", "control-room"];
+            const knownProfiles = ["default", "writer-agent", "research-agent", "coder-agent", "scheduler-agent", "control-room", "yazar", "arastirmaci", "kodcu"];
             const safeLink = agent.present === true && knownProfiles.includes(agent.profile);
             return h("div", { key: agent.profile }, h("h3", null, agent.name),
               h("p", null, agent.role + " · " + (agent.present ? "Profil mevcut" : "Kurulu profil bulunmadı")),

@@ -49,6 +49,30 @@ function harness(profile = "default", fail = false, extraFetch) {
   return { render, calls, effects, button, walk };
 }
 
+test("Turkish profile links stay bounded and never dispatch a message", async () => {
+  const page = harness("default", false, url => {
+    if (!url.includes("/hermes-agents")) return undefined;
+    return Promise.resolve({ available: true, items: [
+      ...["yazar", "arastirmaci", "kodcu"].map(profile => ({
+        profile, name: profile, role: "sentetik", present: true,
+      })),
+      { profile: "../private", name: "sentetik", role: "sentetik", present: true },
+      { profile: "https://other.example", name: "sentetik", role: "sentetik", present: true },
+    ] });
+  });
+  page.button(page.render(), "Uygulamalar").props.onClick();
+  assert.equal(page.calls.length, 0);
+  page.button(page.render(), "Mevcut Hermes ajanlarını göster").props.onClick();
+  await new Promise(resolve => setImmediate(resolve));
+  const links = page.walk(page.render()).filter(node => node.tag === "a");
+  assert.deepEqual(links.map(node => node.props.href), [
+    "/chat?profile=yazar", "/chat?profile=arastirmaci", "/chat?profile=kodcu",
+  ]);
+  assert.equal(page.calls.length, 1);
+  assert.ok(page.calls[0].url.includes("/hermes-agents?profile=default"));
+  assert.ok(!page.calls[0].options || page.calls[0].options.method !== "POST");
+});
+
 test("panel opening and effects do not fetch provider usage; explicit click uses POST", async () => {
   const page = harness();
   page.render();
