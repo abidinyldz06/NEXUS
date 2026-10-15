@@ -4,7 +4,7 @@ NEXUS, ATLAS kişisel asistanının yerel öncelikli hafıza ve yönetim alanıd
 Obsidian kayıtları, kaynak referansları, arama ve insan incelemesini Hermes
 panelindeki görev ve model kontrolleriyle bir araya getirir.
 
-## Güncel durum — 30 Eylül 2026
+## Güncel durum — 12 Ekim 2026
 
 NEXUS **insan denetimli, sınırlı kullanımda**. Bütün proje veya gözetimsiz
 işleme teknik kabulü tamamlandı diye sunulmaz.
@@ -26,16 +26,25 @@ main'e alındı, kurulu sürümde altı profil listelendi ve Writer sohbetine ge
 doğrulandı. Güncel teslim kanıtı [yol haritasında](docs/yol-haritasi.md) izlenir.
 PR #63 kurulu `431200e` sürümünde canlı GitHub paneliyle doğrulandı; #59 kapandı.
 PR #65 kurulu `8f5f6af` sürümünde canlı işlem durumu paneliyle doğrulandı; #60 kapandı.
-341 yerel Python testi ve 10 panel testi bu kurulu sürüm üzerinde geçti. GitHub Python
-iş akışı, Hermes'in sağladığı FastAPI ortamı yoksa API testlerini atlayabilir;
-yerel tam suite kanıtıyla CI kanıtı ayrı değerlendirilir.
+PR #70 main'e alındı; 9 Ekim tesliminde main ve temiz kurulu eklenti
+`5994e678` sürümünde doğrulandı. 12 Ekim yeniden kontrolünde kurulu checkout
+aynı commit'te ve temizdir. Bu teslimde 366 Python ve 16 panel testi atlanmadan
+geçti; main CI'ın unit, HTTP ve panel işleri başarılıydı. Bunlar 9 Ekim
+ölçümüdür, yeni bir canlı model kabulü değildir.
+
+Yeni test/özet işlemleri içeriksiz hata teşhisi saklar; eski kayıtlara olmayan
+HTTP kodu eklenmez. Dört eski maliyet kaydı doğrulandı; bir Laguna kaydı hâlâ
+belirsizdir. Bu nedenle yeni dış model test/özet çağrıları kapalıdır. Yerel
+arama, kayıtları okuma ve pasif görev taslakları kullanılabilir. Kullanıcı,
+OpenRouter destek başvurusunu 10 Ekim'de gönderdiğini bildirdi; talep numarası
+ve sağlayıcı yanıtı henüz doğrulanmadı. İkinci başvuru gönderilmez.
 
 ### Kullanım
 
 Hermes dashboard → **NEXUS**:
 
 1. **Hafıza:** kayıt ara, kaynağı ve bekleyen adayları görüntüle.
-2. **Görevler:** taslak oluştur veya **Seçili metin özeti** bölümünde metni
+2. **Görevler:** yerel taslak oluştur. Maliyet engeli çözüldükten sonra **Seçili metin özeti** bölümünde metni
    yapıştır → önizlemeyi gör → o işlem için onayla → taslak özeti kontrol et.
    **İşlem durumlarını oku:** mevcut işlem kayıtlarını model çağırmadan kontrol et.
 3. **Uygulamalar:** **GitHub durumunu oku** ile NEXUS ilerlemesini görüntüle;
