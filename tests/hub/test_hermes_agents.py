@@ -39,6 +39,26 @@ class HermesAgentTests(TestCase):
         self.assertEqual([], result["items"])
         self.assertNotIn("private-path-and-secret", str(result))
 
+    def test_bounded_turkish_alternatives_without_private_profile_disclosure(self):
+        context, profiles = self.host(["default", "yazar", "arastirmaci", "kodcu", "private-person"])
+        with context:
+            result = hermes_agents.snapshot()
+        self.assertEqual(6, len(result["items"]))
+        links = {row["chat_url"] for row in result["items"] if row["present"]}
+        self.assertEqual({"/chat?profile=default", "/chat?profile=yazar",
+                          "/chat?profile=arastirmaci", "/chat?profile=kodcu"}, links)
+        self.assertNotIn("private-person", str(result))
+        self.assertFalse(result["dispatch_enabled"])
+        profiles.list_profiles.assert_not_called()
+
+    def test_original_profile_wins_if_both_names_exist(self):
+        context, _ = self.host(["writer-agent", "yazar"])
+        with context:
+            result = hermes_agents.snapshot()
+        writer = next(row for row in result["items"] if row["profile"] == "writer-agent")
+        self.assertEqual("/chat?profile=writer-agent", writer["chat_url"])
+        self.assertNotIn("/chat?profile=yazar", str(result))
+
     def test_invalid_names_cannot_create_external_links(self):
         context, profiles = self.host([None])
         with context:

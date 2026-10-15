@@ -9,6 +9,13 @@ ROLES = (
     ("control-room", "Control Room", "Koordinasyon"),
 )
 
+# Bounded alternatives only: never expose arbitrary private profile names.
+PROFILE_ALTERNATIVES = {
+    "writer-agent": "yazar",
+    "research-agent": "arastirmaci",
+    "coder-agent": "kodcu",
+}
+
 
 def snapshot() -> dict:
     try:
@@ -21,8 +28,16 @@ def snapshot() -> dict:
         return {"available": False, "items": [], "read_only": True,
                 "dispatch_enabled": False, "reason": "Hermes profilleri okunamadı"}
     existing = set(names)
+    items = []
+    for profile, name, role in ROLES:
+        alternative = PROFILE_ALTERNATIVES.get(profile)
+        selected = profile if profile in existing else (
+            alternative if alternative in existing else profile
+        )
+        present = selected in existing
+        items.append({"profile": selected,
+                      "name": name if selected == profile else f"{name} ({selected})",
+                      "role": role, "present": present,
+                      "chat_url": "/chat?profile=" + selected if present else None})
     return {"available": True, "read_only": True, "dispatch_enabled": False,
-            "items": [{"profile": profile, "name": name, "role": role,
-                       "present": profile in existing,
-                       "chat_url": "/chat?profile=" + profile if profile in existing else None}
-                      for profile, name, role in ROLES]}
+            "items": items}
