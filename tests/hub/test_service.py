@@ -16,6 +16,52 @@ from nexus.vault import VaultRepository
 
 
 class HubServiceTests(unittest.TestCase):
+    def _review_source(self) -> SourceRef:
+        return SourceRef(
+            source_id=new_id(IdPrefix.SOURCE), conversation_id="sentetik-inceleme",
+            span_ids=("msg-1",), span_sha256=sha256(b"msg-1").hexdigest(),
+        )
+
+    def test_ingest_statement_preview_is_bounded_and_read_only(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            data = Path(directory)
+            statement = "Sentetik inceleme adayı. " * 30
+            item = create_review_item(
+                candidate_kind="memory",
+                candidate={"statement": statement, "memory_type": "fact"},
+                reason_codes=("review_gate",),
+                source_refs=(self._review_source(),),
+            )
+            store = ReviewStore(data)
+            store.enqueue(item)
+            before = store.path.read_bytes()
+            config = NexusConfig.from_mapping({"data_path": str(data)})
+
+            listed = pending_reviews(config)
+            detail = review_detail(config, item.id)
+
+            self.assertEqual(statement[:240], listed["items"][0]["preview"])
+            self.assertEqual(statement[:240], detail["preview"])
+            self.assertTrue(listed["read_only"])
+            self.assertTrue(detail["read_only"])
+            self.assertEqual(before, store.path.read_bytes())
+
+    def test_review_statement_fallback_preserves_existing_previews(self) -> None:
+        from nexus.hub.service import _preview
+
+        for candidate, expected in (
+            ({"summary": "Eski özet", "statement": "Yeni ifade"}, "Eski özet"),
+            ({"statement": "  ", "display_name": "Ad"}, "Ad"),
+            ({"statement": None}, "Önizleme yok"),
+            ({"statement": ["metin değil"]}, "Önizleme yok"),
+        ):
+            with self.subTest(candidate=candidate):
+                item = create_review_item(
+                    candidate_kind="memory", candidate=candidate,
+                    reason_codes=("review_gate",), source_refs=(self._review_source(),),
+                )
+                self.assertEqual(expected, _preview(item))
+
     def test_search_record_and_review_are_read_only(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
