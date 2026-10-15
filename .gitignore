@@ -13,6 +13,7 @@ build/
 eval/private/
 .nexus/
 nexus.db*
+Inbox/
 
 # Local editor/OS files.
 .DS_Store
