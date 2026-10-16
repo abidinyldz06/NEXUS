@@ -40,6 +40,14 @@ The existing `--long-unit-budget` lane (default 300s, logged, only when `split_f
 
 A8 GO remains unmet: completion 89.5% versus 95%, and `p95_lt_60` is false. `docs/a8-limited-use-decision.md` still governs unsupervised bulk ingest: limited human use is accepted, technical GO is not.
 
+## Known edge: source-missing
+
+Checkpoint `f017ea27f71a72d65803023821ab5dba` is conversation `677d36c3-24d8-8002-946b-cd51dff52591`, segment `28a4523dcb9d`, span 0–3. The row is `FAILED_SEGMENT` / `failure_class=timeout`, with 3 attempts, 3 timeouts, `completed_at` null, and `started_at` 2026-09-23T05:30:49Z. That stamp is the failed attempt, not an export filename. The id prefix `677d36c3` is a Unix time of 2025-01-07T14:14:27Z; no `live-mirror-inbox` filename contains `677d36c3`, so the export file is absent and no source hash exists.
+
+The scan cannot run it. An unmatched open checkpoint is skipped instead of becoming a job, and a substitute file must not be forced. On the 16 October 2026 read-only rollup this is the only non-completed conversation: 56/57 = 98.2% complete, and the acceptance scan reports `unmatched` 1 as `source_missing`.
+
+If that same export later appears in `live-mirror-inbox` and parses to this conversation id, a human-approved rerun may include it. `reprocess_failed` only resets this checkpoint row to incomplete; it does not call the model. Shadow ingest still requires the confirmed source hash. Until that file exists, leave the row unmatched.
+
 ## Rerun
 
 `scripts/a8_timeout_leftover_rerun.py` prints this diagnosis and the job list. It does not call Hermes, the extractor, or the vault. A later approved run would follow `a8-pr48-remaining.py` (`hermes nexus ingest --shadow`) only for the five sourced turns, with the budget change accepted first. That command is not executed by this change.
