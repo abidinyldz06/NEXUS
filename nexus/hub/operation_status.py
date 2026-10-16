@@ -5,6 +5,8 @@ import stat
 from contextlib import closing
 from pathlib import Path
 
+from ..index.store import configure_sqlite
+
 _STAMP = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
     r"(?:\.[0-9]+)?(?:Z|[+-][0-9]{2}:[0-9]{2})$"
@@ -36,6 +38,7 @@ def snapshot(config) -> dict:
         raise BudgetError("işlem kayıt dosyası güvenli değil")
     try:
         with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
+            configure_sqlite(connection, writable=False)
             connection.execute("BEGIN")
             total = connection.execute("SELECT COUNT(*) FROM holds").fetchone()[0]
             blocked = bool(connection.execute(

@@ -13,6 +13,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from ..config import NexusConfig
+from ..index.store import closing_writable, configure_sqlite
 
 
 class TaskDraftError(Exception):
@@ -105,6 +106,7 @@ def list_drafts(config: NexusConfig, *, limit: int = 30) -> dict[str, object]:
         return {"items": [], "total": 0, "dispatch_enabled": False}
     try:
         with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)) as connection:
+            configure_sqlite(connection, writable=False)
             connection.row_factory = sqlite3.Row
             total = connection.execute("SELECT COUNT(*) FROM drafts").fetchone()[0]
             rows = connection.execute(
@@ -153,7 +155,9 @@ def create_draft(
     if stat.S_IMODE(path.stat().st_mode) & 0o077:
         raise TaskDraftError("görev veritabanı yalnız kullanıcıya açık olmalı")
     try:
-        with closing(sqlite3.connect(path, timeout=10)) as connection:
+        connection = sqlite3.connect(path, timeout=10)
+        with closing_writable(connection) as connection:
+            configure_sqlite(connection, writable=True)
             with connection:
                 connection.row_factory = sqlite3.Row
                 connection.execute("BEGIN IMMEDIATE")

@@ -14,6 +14,7 @@ from ..errors import NexusIndexError, PulseError, VaultError
 from ..ids import IdPrefix, new_id
 from ..index import IndexStore, rebuild_index
 from ..vault import VaultRepository, VaultTransaction, VaultWrite
+from ..vault.paths import resolve_safe_vault_path
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,7 +111,7 @@ def emit_due_reminders(
         expected_path = repository.record_path(item.commitment).as_posix()
         if item.relative_path != expected_path:
             raise PulseError("indexed commitment path does not match its canonical id")
-        canonical_path = vault_path / expected_path
+        canonical_path = resolve_safe_vault_path(vault_path, expected_path)
         if canonical_path.is_symlink() or not canonical_path.is_file():
             raise PulseError("canonical commitment is not a regular file")
         original_writes.append(VaultWrite(Path(expected_path), canonical_path.read_bytes()))

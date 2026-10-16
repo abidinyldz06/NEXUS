@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from hashlib import sha256
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from ..config import NexusConfig
@@ -14,6 +14,7 @@ from ..ids import IdPrefix, is_nexus_id
 from ..index import IndexStore, search_index
 from ..review.store import ReviewStore
 from ..vault import extract_record_payload
+from ..vault.paths import resolve_safe_vault_path
 
 
 def _preview(item: ReviewItem) -> str:
@@ -111,10 +112,14 @@ def record(config: NexusConfig, record_id: str) -> dict[str, Any]:
     relative = PurePosixPath(row["relative_path"])
     if relative.is_absolute() or ".." in relative.parts or not relative.parts:
         raise NexusIndexError("kayıt yolu güvenli değil")
-    path = config.vault_path
+    try:
+        path = resolve_safe_vault_path(config.vault_path, Path(relative.as_posix()))
+    except VaultError as exc:
+        raise NexusIndexError("kayıt yolu güvenli değil") from exc
+    current = config.vault_path
     for part in relative.parts:
-        path = path / part
-        if path.is_symlink():
+        current = current / part
+        if current.is_symlink():
             raise NexusIndexError("kayıt yolu güvenli değil")
     if not path.is_file():
         raise NexusIndexError("kaynak kayıt bulunamadı")

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -12,6 +15,50 @@ from ..errors import NexusIndexError
 from ..migrations import CURRENT_SCHEMA_VERSION, migrate
 
 SEARCH_PROFILE_VERSION = 2
+
+
+def configure_sqlite(connection: sqlite3.Connection, *, writable: bool) -> None:
+    """Apply the same lock and durability pragmas on every NEXUS connection.
+
+    Read-only connections only set ``busy_timeout``. Switching them to WAL would
+    create sidecar files during a read. Writable connections use WAL, then
+    :func:`seal_writable` returns the file to a single rollback database.
+    """
+    connection.execute("PRAGMA busy_timeout = 5000")
+    connection.execute("PRAGMA foreign_keys = ON")
+    if not writable:
+        return
+    connection.execute("PRAGMA synchronous = NORMAL")
+    last_error: sqlite3.OperationalError | None = None
+    for _ in range(50):
+        try:
+            mode = connection.execute("PRAGMA journal_mode = WAL").fetchone()
+        except sqlite3.OperationalError as exc:
+            last_error = exc
+            time.sleep(0.01)
+            continue
+        if mode is not None and mode[0] == "wal":
+            return
+    raise sqlite3.OperationalError("journal_mode=WAL could not be set") from last_error
+
+
+def seal_writable(connection: sqlite3.Connection) -> None:
+    """Checkpoint and drop WAL sidecars so later reads do not create files."""
+    try:
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        connection.execute("PRAGMA journal_mode = DELETE")
+    except sqlite3.Error:
+        pass
+
+
+@contextmanager
+def closing_writable(connection: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """Close a writable connection after checkpointing WAL back to one file."""
+    try:
+        yield connection
+    finally:
+        seal_writable(connection)
+        connection.close()
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,7 +90,7 @@ class IndexStore:
         except sqlite3.Error as exc:
             raise NexusIndexError("cannot open SQLite index") from exc
         self.connection.row_factory = sqlite3.Row
-        self.connection.execute("PRAGMA foreign_keys = ON")
+        configure_sqlite(self.connection, writable=not read_only)
 
     def __enter__(self) -> IndexStore:
         return self
@@ -52,6 +99,8 @@ class IndexStore:
         self.close()
 
     def close(self) -> None:
+        if not self.read_only:
+            seal_writable(self.connection)
         self.connection.close()
 
     def migrate(self) -> int:

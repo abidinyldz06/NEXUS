@@ -19,6 +19,7 @@ from .ids import IdPrefix, is_nexus_id, new_id
 from .index import RebuildResult, rebuild_index
 from .index.rebuild import scan_canonical_records
 from .index.store import IndexedRecord
+from .vault.paths import resolve_safe_vault_path
 from .vault.rebuild_views import MemoryViewEntry, render_memory_view_entries
 
 
@@ -188,7 +189,7 @@ def _append_audit(data_path: Path, payload: dict[str, object]) -> None:
     if directory.is_symlink():
         raise ForgetError("forget audit directory cannot be a symlink")
     os.chmod(directory, 0o700)
-    path = directory / "events.jsonl"
+    path = resolve_safe_vault_path(root, Path("forget") / "events.jsonl")
     if path.is_symlink():
         raise ForgetError("forget audit file cannot be a symlink")
     encoded = (
@@ -240,13 +241,15 @@ def apply_forget(
     if not analysis.plan.can_apply:
         raise ForgetError("canonical record has dependent records; forget refused")
 
-    target_path = config.vault_path / analysis.target.relative_path
+    target_path = resolve_safe_vault_path(config.vault_path, analysis.target.relative_path)
     target_before = _read_regular(target_path)
     expected_hash = analysis.target.content_sha256
     if sha256(target_before).hexdigest() != expected_hash:
         raise ForgetError("canonical record changed after impact analysis")
 
-    view_path = config.vault_path / "Nexus" / "Views" / "Current-Memory.md"
+    view_path = resolve_safe_vault_path(
+        config.vault_path, Path("Nexus") / "Views" / "Current-Memory.md"
+    )
     view_before = _read_regular(view_path) if view_path.exists() else None
     index_before = _read_regular(config.index_path) if config.index_path.exists() else None
     new_view = (

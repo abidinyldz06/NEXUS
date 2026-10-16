@@ -45,6 +45,7 @@ from .segmenter import (
     segment_conversation_v2,
 )
 from .vault import VaultRepository
+from .vault.paths import resolve_safe_vault_path
 from .vault.rebuild_views import current_memory_view_write
 from .vault.renderer import extract_record_payload, extract_written_at, memory_from_payload
 
@@ -268,12 +269,18 @@ def record_canary_write(data_path: Path, ingest_id: str) -> None:
         os.close(descriptor)
 
 
+def _contained_vault_path(base: Path, relative: str | Path) -> Path:
+    """Join a vault-relative path and reject anything that resolves outside it."""
+    resolve_safe_vault_path(base, relative)
+    return base / relative
+
+
 def snapshot_canonical(config: NexusConfig) -> dict[str, Any]:
     """Hash Nexus/ files and the derived index. Does not copy Vault contents."""
     if config.vault_path is None:
         raise IngestV2Error("vault_path is required for canary snapshot")
     files: list[dict[str, Any]] = []
-    root = config.vault_path / "Nexus"
+    root = _contained_vault_path(config.vault_path, "Nexus")
     if root.is_dir() and not root.is_symlink():
         for path in sorted(root.rglob("*")):
             if path.is_symlink() or not path.is_file():
@@ -343,7 +350,7 @@ def _canonical_paths(
         except (NexusError, KeyError, TypeError, ValueError):
             continue
         relative = repository.record_path(memory)
-        path = config.vault_path / relative
+        path = _contained_vault_path(config.vault_path, relative)
         if path.is_file() and not path.is_symlink():
             paths.append(relative.as_posix())
     return paths
@@ -366,7 +373,7 @@ def _tombstone_canonical(
             memory = _memory_record(row)
         except (NexusError, KeyError, TypeError, ValueError):
             continue
-        path = config.vault_path / repository.record_path(memory)
+        path = _contained_vault_path(config.vault_path, repository.record_path(memory))
         if not path.is_file() or path.is_symlink():
             continue
         expected[memory.id] = repository.current_hash(memory)
@@ -667,7 +674,7 @@ def acceptance_report(
     vault_missing_prov = 0
     memory_files = 0
     if config.vault_path is not None:
-        memory_root = config.vault_path / "Nexus" / "Memory"
+        memory_root = _contained_vault_path(config.vault_path, Path("Nexus") / "Memory")
         if memory_root.is_dir() and not memory_root.is_symlink():
             for path in memory_root.rglob("*.md"):
                 if path.is_symlink() or not path.is_file():
@@ -830,7 +837,7 @@ def write_human_review_pack(config: NexusConfig, dest: Path) -> dict[str, Any]:
         raise IngestV2Error("review pack must stay under data_path")
     _prepare_dir(dest)
     os.chmod(dest, 0o700)
-    memory_root = config.vault_path / "Nexus" / "Memory"
+    memory_root = _contained_vault_path(config.vault_path, Path("Nexus") / "Memory")
     copied = 0
     rows: list[str] = [
         "index,nexus_id,memory_type,date,heading_chars,body_chars,provenance_ok,quality_faithful,quality_single_claim,quality_dated,notes"
@@ -1440,7 +1447,7 @@ def _verify_canonical(
         posix = relative.as_posix()
         if not posix.startswith("Nexus/"):
             raise IngestV2Error("namespace violation", failure_class="namespace")
-        path = config.vault_path / relative
+        path = _contained_vault_path(config.vault_path, relative)
         if path.name.endswith(".icloud") or Path(str(path) + ".icloud").exists():
             raise IngestV2Error("icloud stub", failure_class="degraded")
         if not path.is_file() or path.is_symlink():
@@ -1458,7 +1465,7 @@ def _verify_canonical(
 
 def _load_vault_memories(config: NexusConfig, repository: VaultRepository) -> list[Memory]:
     assert config.vault_path is not None
-    root = config.vault_path / "Nexus" / "Memory"
+    root = _contained_vault_path(config.vault_path, Path("Nexus") / "Memory")
     if not root.is_dir():
         return []
     loaded: list[Memory] = []
@@ -1481,7 +1488,9 @@ def _current_memory_view_write(
     by_id = {item.id: item for item in _load_vault_memories(config, repository)}
     for memory in memories:
         by_id[memory.id] = memory
-    view_path = config.vault_path / "Nexus" / "Views" / "Current-Memory.md"
+    view_path = _contained_vault_path(
+        config.vault_path, Path("Nexus") / "Views" / "Current-Memory.md"
+    )
     expected = None
     if view_path.exists():
         if view_path.is_symlink() or not view_path.is_file():
@@ -1506,7 +1515,7 @@ def _write_canonical(
     memories = [_memory_record(row) for row in rows if row["status"] in {"active", "superseded"}]
     expected: dict[str, str] = {}
     for memory in memories:
-        path = config.vault_path / repository.record_path(memory)
+        path = _contained_vault_path(config.vault_path, repository.record_path(memory))
         if path.exists():
             expected[memory.id] = repository.current_hash(memory)
     try:
@@ -1520,7 +1529,7 @@ def _write_canonical(
         raise IngestV2Error("canonical write failed", failure_class="vault_failed") from exc
     verified = _verify_canonical(config, memories, repository)
     view_relative = Path("Nexus/Views/Current-Memory.md")
-    view_path = config.vault_path / view_relative
+    view_path = _contained_vault_path(config.vault_path, view_relative)
     if view_path.name.endswith(".icloud") or Path(str(view_path) + ".icloud").exists():
         raise IngestV2Error("icloud stub", failure_class="degraded")
     if not view_path.is_file() or view_path.is_symlink():
@@ -1554,7 +1563,7 @@ def _missing_canonical_rows(
             memory = _memory_record(record)
         except (NexusError, KeyError, TypeError, ValueError):
             continue
-        path = config.vault_path / repository.record_path(memory)
+        path = _contained_vault_path(config.vault_path, repository.record_path(memory))
         if not path.is_file():
             missing.append(record)
     return missing

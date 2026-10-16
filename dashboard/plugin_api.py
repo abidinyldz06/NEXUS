@@ -10,38 +10,72 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict, StrictBool
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, StrictBool
 
-_CORE_DIR = Path(__file__).resolve().parents[1] / "nexus"
+_CORE_DIR = (Path(__file__).resolve().parents[1] / "nexus").resolve()
 _CORE_NAME = "_hermes_nexus_hub_" + sha256(str(_CORE_DIR).encode()).hexdigest()[:12]
-if _CORE_NAME not in sys.modules:
-    spec = importlib.util.spec_from_file_location(
-        _CORE_NAME,
-        _CORE_DIR / "__init__.py",
-        submodule_search_locations=[str(_CORE_DIR)],
-    )
-    if spec is None or spec.loader is None:
-        raise ImportError("NEXUS core package is unavailable")
-    package = importlib.util.module_from_spec(spec)
-    sys.modules[_CORE_NAME] = package
-    try:
-        spec.loader.exec_module(package)
-    except Exception:
-        sys.modules.pop(_CORE_NAME, None)
-        raise
+_CORE_SUFFIXES = (
+    "config",
+    "hub.service",
+    "errors",
+    "hub.tasks",
+    "hub.routing",
+    "hub.providers",
+    "hub.pilot",
+    "hub.budget",
+    "hub.hermes_agents",
+    "hub.github_status",
+    "hub.operation_status",
+)
 
-_config_module = importlib.import_module(f"{_CORE_NAME}.config")
-_service = importlib.import_module(f"{_CORE_NAME}.hub.service")
-_errors = importlib.import_module(f"{_CORE_NAME}.errors")
-_tasks = importlib.import_module(f"{_CORE_NAME}.hub.tasks")
-_routing = importlib.import_module(f"{_CORE_NAME}.hub.routing")
-_providers = importlib.import_module(f"{_CORE_NAME}.hub.providers")
-_pilot = importlib.import_module(f"{_CORE_NAME}.hub.pilot")
-_budget = importlib.import_module(f"{_CORE_NAME}.hub.budget")
-_hermes_agents = importlib.import_module(f"{_CORE_NAME}.hub.hermes_agents")
-_github_status = importlib.import_module(f"{_CORE_NAME}.hub.github_status")
-_operation_status = importlib.import_module(f"{_CORE_NAME}.hub.operation_status")
+
+def _drop_isolated_core(name: str = _CORE_NAME) -> None:
+    """Remove one isolated package tree so a failed or stale load cannot linger."""
+    prefix = name + "."
+    for key in list(sys.modules):
+        if key == name or key.startswith(prefix):
+            sys.modules.pop(key, None)
+
+
+def _load_isolated_core() -> dict[str, object]:
+    """Load this checkout once under a path-stable name and reuse that cache."""
+    init_file = _CORE_DIR / "__init__.py"
+    cached = sys.modules.get(_CORE_NAME)
+    cached_file = getattr(cached, "__file__", None)
+    if cached is not None and (cached_file is None or Path(cached_file).resolve() != init_file):
+        _drop_isolated_core()
+        cached = None
+    if cached is None:
+        spec = importlib.util.spec_from_file_location(
+            _CORE_NAME,
+            init_file,
+            submodule_search_locations=[str(_CORE_DIR)],
+        )
+        if spec is None or spec.loader is None:
+            raise ImportError("NEXUS core package is unavailable")
+        package = importlib.util.module_from_spec(spec)
+        sys.modules[_CORE_NAME] = package
+        try:
+            spec.loader.exec_module(package)
+        except Exception:
+            _drop_isolated_core()
+            raise
+    return {suffix: importlib.import_module(f"{_CORE_NAME}.{suffix}") for suffix in _CORE_SUFFIXES}
+
+
+_core = _load_isolated_core()
+_config_module = _core["config"]
+_service = _core["hub.service"]
+_errors = _core["errors"]
+_tasks = _core["hub.tasks"]
+_routing = _core["hub.routing"]
+_providers = _core["hub.providers"]
+_pilot = _core["hub.pilot"]
+_budget = _core["hub.budget"]
+_hermes_agents = _core["hub.hermes_agents"]
+_github_status = _core["hub.github_status"]
+_operation_status = _core["hub.operation_status"]
 
 router = APIRouter()
 

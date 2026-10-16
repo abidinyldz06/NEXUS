@@ -34,6 +34,7 @@ from .index.store import IndexedRecord
 from .review import ReviewStore
 from .serialization import to_primitive
 from .vault import VaultRepository, VaultWrite
+from .vault.paths import resolve_safe_vault_path
 from .vault.rebuild_views import MemoryViewEntry, render_memory_view_entries
 
 _MEMORY_REQUIRED_FIELDS = {"statement", "memory_type", "confidence", "impact"}
@@ -659,16 +660,18 @@ def apply_publication(
         )
 
     repository = VaultRepository(config.vault_path)
-    target_path = config.vault_path / repository.record_path(analysis.record)
+    target_path = resolve_safe_vault_path(
+        config.vault_path, repository.record_path(analysis.record)
+    )
     view_path = (
-        config.vault_path / "Nexus" / "Views" / "Current-Memory.md"
+        resolve_safe_vault_path(config.vault_path, Path("Nexus") / "Views" / "Current-Memory.md")
         if analysis.record_kind in {"memory", "correction"}
         else None
     )
     view_before = _read_optional(view_path) if view_path is not None else None
     index_before = _read_optional(config.index_path)
     replaced_path = (
-        config.vault_path / analysis.replaced_record.relative_path
+        resolve_safe_vault_path(config.vault_path, analysis.replaced_record.relative_path)
         if analysis.replaced_record is not None
         else None
     )

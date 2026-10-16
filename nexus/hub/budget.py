@@ -10,11 +10,12 @@ import os
 import re
 import sqlite3
 import stat
-from contextlib import closing
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation, localcontext
 from pathlib import Path
 from uuid import UUID
+
+from ..index.store import closing_writable, configure_sqlite, seal_writable
 
 _GENERATION_ID = re.compile(r"^gen-[A-Za-z0-9_-]{8,80}$")
 _MODEL_NAME = re.compile(r"^[A-Za-z0-9_.:/+-]{1,200}$")
@@ -131,6 +132,7 @@ class PilotBudget:
             raise BudgetError("bütçe dosyası güvenli değil")
         connection = sqlite3.connect(path, timeout=5)
         try:
+            configure_sqlite(connection, writable=True)
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS caps "
@@ -148,6 +150,7 @@ class PilotBudget:
             return connection
         except Exception:
             connection.rollback()
+            seal_writable(connection)
             connection.close()
             raise
 
@@ -161,7 +164,7 @@ class PilotBudget:
             raise BudgetError("bütçe zamanı saat dilimi içermeli")
         day = now.astimezone(UTC).date().isoformat()
         month = day[:7]
-        with closing(self._connect()) as connection, connection:
+        with closing_writable(self._connect()) as connection, connection:
             existing = connection.execute(
                 "SELECT ceiling, status FROM holds WHERE id=?", (request_id,)
             ).fetchone()
@@ -197,7 +200,7 @@ class PilotBudget:
         actual = None if verified_cost_usd is None else _money(verified_cost_usd)
         if not self.path.exists():
             raise BudgetError("rezervasyon bulunamadı")
-        with closing(self._connect()) as connection, connection:
+        with closing_writable(self._connect()) as connection, connection:
             row = connection.execute(
                 "SELECT ceiling, status, actual FROM holds WHERE id=?", (request_id,)
             ).fetchone()
@@ -219,7 +222,7 @@ class PilotBudget:
     def accept_unknown(self, request_id: str) -> dict:
         """Record that the cost is still unknown. This does not open a new job."""
         request_id = _identifier(request_id)
-        with closing(self._connect()) as connection, connection:
+        with closing_writable(self._connect()) as connection, connection:
             row = connection.execute(
                 "SELECT status, actual FROM holds WHERE id=?", (request_id,)
             ).fetchone()
@@ -238,7 +241,7 @@ class PilotBudget:
         request_id = _identifier(request_id)
         if not self.path.is_file():
             return None
-        with closing(self._connect()) as connection:
+        with closing_writable(self._connect()) as connection:
             row = connection.execute(
                 "SELECT status, actual FROM holds WHERE id=?", (request_id,)
             ).fetchone()
@@ -250,7 +253,7 @@ class PilotBudget:
         request_id = _identifier(request_id)
         if not self.path.is_file():
             return None
-        with closing(self._connect()) as connection:
+        with closing_writable(self._connect()) as connection:
             exists = connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='generation_refs'"
             ).fetchone()
@@ -266,7 +269,7 @@ class PilotBudget:
         generation_id = _generation_id(generation_id)
         if source not in {"response", "evidence"}:
             raise BudgetError("generation kaydı kaynağı geçersiz")
-        with closing(self._connect()) as connection, connection:
+        with closing_writable(self._connect()) as connection, connection:
             if not connection.execute("SELECT 1 FROM holds WHERE id=?", (request_id,)).fetchone():
                 raise BudgetError("rezervasyon bulunamadı")
             self._ensure_generation_refs(connection)
@@ -299,7 +302,7 @@ class PilotBudget:
         if source not in {"response", "evidence"}:
             raise BudgetError("generation kaydı kaynağı geçersiz")
         actual = _money(verified_cost_usd)
-        with closing(self._connect()) as connection, connection:
+        with closing_writable(self._connect()) as connection, connection:
             row = connection.execute(
                 "SELECT ceiling, status, actual FROM holds WHERE id=?", (request_id,)
             ).fetchone()
@@ -357,7 +360,7 @@ class PilotBudget:
         """Open one content-free attempt. An existing attempt is not replaced."""
         request_id = _identifier(request_id)
         model = _model_name(model)
-        with closing(self._connect()) as connection, connection:
+        with closing_writable(self._connect()) as connection, connection:
             if not connection.execute("SELECT 1 FROM holds WHERE id=?", (request_id,)).fetchone():
                 raise BudgetError("rezervasyon bulunamadı")
             self._ensure_diagnostics(connection)
@@ -387,7 +390,7 @@ class PilotBudget:
         klass = _diagnostic_class(error_class)
         code = _http_status(http_status)
         actual = None if verified_cost_usd is None else _money(verified_cost_usd)
-        with closing(self._connect()) as connection, connection:
+        with closing_writable(self._connect()) as connection, connection:
             row = connection.execute(
                 "SELECT ceiling, status, actual FROM holds WHERE id=?", (request_id,)
             ).fetchone()
@@ -444,7 +447,7 @@ class PilotBudget:
         request_id = _identifier(request_id)
         if phase not in {"running", "draft_result", "failed", "unknown"}:
             raise BudgetError("işlem durumu geçersiz")
-        with closing(self._connect()) as connection, connection:
+        with closing_writable(self._connect()) as connection, connection:
             if not connection.execute("SELECT 1 FROM holds WHERE id=?", (request_id,)).fetchone():
                 raise BudgetError("rezervasyon bulunamadı")
             connection.execute("CREATE TABLE IF NOT EXISTS outcomes "

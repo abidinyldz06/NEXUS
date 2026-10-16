@@ -9,9 +9,9 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .errors import UnsafeSourceError
+from .errors import UnsafeSourceError, VaultError
 from .fingerprints import sha256_bytes
-
+from .vault.paths import resolve_safe_vault_path
 
 SUPPORTED_SUFFIXES = frozenset({".json", ".jsonl", ".md", ".txt", ".html", ".htm"})
 DEFAULT_MAX_SOURCE_BYTES = 50 * 1024 * 1024
@@ -155,7 +155,11 @@ def discover_inbox(
                 if candidate.is_symlink():
                     rejected.append(RejectedSource(relative, "symlink_rejected"))
                     continue
-                resolved = candidate.resolve(strict=True)
+                try:
+                    resolved = resolve_safe_vault_path(root_resolved, candidate)
+                except VaultError:
+                    rejected.append(RejectedSource(relative, "path_escape"))
+                    continue
                 if not _inside(resolved, root_resolved):
                     rejected.append(RejectedSource(relative, "path_escape"))
                     continue

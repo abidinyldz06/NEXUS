@@ -19,6 +19,7 @@ from ..contracts import (
 )
 from ..errors import VaultError
 from ..fingerprints import sha256_bytes
+from .paths import resolve_safe_vault_path
 from .renderer import extract_record_payload, extract_written_at, memory_from_payload, render_record
 from .transaction import TransactionResult, VaultTransaction, VaultWrite
 
@@ -108,16 +109,18 @@ class VaultRepository:
 
     def restyle_existing_memories(self, *, run_id: str) -> TransactionResult:
         memory_root = self.vault_root / "Nexus" / "Memory"
+        resolve_safe_vault_path(self.vault_root, Path("Nexus") / "Memory")
         if not memory_root.is_dir():
             raise VaultError("Nexus/Memory is missing")
         writes: list[VaultWrite] = []
         for path in sorted(memory_root.rglob("*.md")):
             if path.is_symlink() or not path.is_file():
                 raise VaultError(f"canonical record is not a regular file: {path}")
-            markdown = path.read_text(encoding="utf-8")
-            record = memory_from_payload(extract_record_payload(markdown))
-            expected = sha256_bytes(path.read_bytes())
             relative = path.relative_to(self.vault_root)
+            safe = resolve_safe_vault_path(self.vault_root, relative)
+            markdown = safe.read_text(encoding="utf-8")
+            record = memory_from_payload(extract_record_payload(markdown))
+            expected = sha256_bytes(safe.read_bytes())
             if relative != self.record_path(record):
                 raise VaultError("canonical record path does not match payload")
             writes.append(
@@ -133,7 +136,7 @@ class VaultRepository:
         return self.transaction_factory(self.vault_root).commit(tuple(writes), run_id=run_id)
 
     def current_hash(self, record: CanonicalRecord) -> str:
-        path = self.vault_root / self.record_path(record)
+        path = resolve_safe_vault_path(self.vault_root, self.record_path(record))
         if path.is_symlink() or not path.is_file():
             raise VaultError("canonical record does not exist as a regular file")
         return sha256_bytes(path.read_bytes())

@@ -13,6 +13,7 @@ from pathlib import Path
 from ..errors import VaultConflictError, VaultError, VaultTransactionError
 from ..fingerprints import sha256_bytes
 from ..ids import IdPrefix, is_nexus_id
+from .paths import resolve_safe_vault_path
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +54,7 @@ class VaultTransaction:
             raise VaultError("Vault transaction contains duplicate target paths")
         self._check_preconditions(root, normalized)
 
-        transactions = root / "Nexus" / ".transactions"
+        transactions = resolve_safe_vault_path(root, Path("Nexus") / ".transactions")
         self._assert_safe_components(root, transactions.relative_to(root))
         transactions.mkdir(mode=0o700, parents=True, exist_ok=True)
         if transactions.is_symlink():
@@ -74,7 +75,7 @@ class VaultTransaction:
         try:
             for index, write in enumerate(normalized):
                 key = write.relative_path.as_posix()
-                target = root / write.relative_path
+                target = resolve_safe_vault_path(root, write.relative_path)
                 existing[key] = target.exists()
                 stage_file = staged / f"{index:04d}.tmp"
                 self._write_file(stage_file, write.content, mode=0o600)
@@ -106,7 +107,7 @@ class VaultTransaction:
             )
 
             for index, write in enumerate(normalized):
-                target = root / write.relative_path
+                target = resolve_safe_vault_path(root, write.relative_path)
                 self._ensure_target_parent(root, target.parent)
                 self._before_replace(index, target)
                 self._check_precondition(root, write)
@@ -118,7 +119,9 @@ class VaultTransaction:
                     raise OSError("injected Vault transaction failure")
 
             committed_at = _utc_now()
-            audit_path = root / "Nexus" / "Audit" / "Runs" / f"{run_id}.json"
+            audit_path = resolve_safe_vault_path(
+                root, Path("Nexus") / "Audit" / "Runs" / f"{run_id}.json"
+            )
             self._ensure_target_parent(root, audit_path.parent)
             if audit_path.exists() or audit_path.is_symlink():
                 raise VaultConflictError("run audit already exists")
@@ -170,7 +173,7 @@ class VaultTransaction:
         root = self.vault_root
         if not root.is_absolute() or not root.exists() or not root.is_dir() or root.is_symlink():
             raise VaultError("vault_root must be an existing absolute non-symlink directory")
-        return root
+        return root.resolve()
 
     def _validate_write(self, root: Path, write: VaultWrite) -> VaultWrite:
         path = write.relative_path
@@ -188,6 +191,7 @@ class VaultTransaction:
             or any(ch not in "0123456789abcdef" for ch in write.expected_sha256)
         ):
             raise VaultError("expected_sha256 must be a lowercase SHA-256 digest")
+        resolve_safe_vault_path(root, path)
         return write
 
     def _assert_safe_components(self, root: Path, relative: Path) -> None:
@@ -202,7 +206,7 @@ class VaultTransaction:
             self._check_precondition(root, write)
 
     def _check_precondition(self, root: Path, write: VaultWrite) -> None:
-        target = root / write.relative_path
+        target = resolve_safe_vault_path(root, write.relative_path)
         if target.exists():
             if target.is_symlink() or not target.is_file():
                 raise VaultError("Vault target must be a regular non-symlink file")
@@ -236,7 +240,7 @@ class VaultTransaction:
         for index in reversed(committed_indexes):
             write = writes[index]
             key = write.relative_path.as_posix()
-            target = root / write.relative_path
+            target = resolve_safe_vault_path(root, write.relative_path)
             backup = backups / f"{index:04d}.bak"
             try:
                 expected_new_hash = sha256_bytes(write.content)

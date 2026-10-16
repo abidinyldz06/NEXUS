@@ -13,6 +13,7 @@ from ..contracts import SCHEMA_VERSION
 from ..errors import NexusIndexError, VaultError
 from ..ids import IdPrefix, is_nexus_id
 from ..vault import extract_record_payload
+from ..vault.paths import resolve_safe_vault_path
 from .store import SEARCH_PROFILE_VERSION, IndexedRecord, IndexStore
 
 _CANONICAL_ROOTS = {
@@ -143,6 +144,7 @@ def scan_canonical_records(vault_root: Path) -> tuple[IndexedRecord, ...]:
     if vault_root.is_symlink() or not vault_root.is_dir():
         raise NexusIndexError("vault_path must be an existing non-symlink directory")
     nexus_root = vault_root / "Nexus"
+    resolve_safe_vault_path(vault_root, Path("Nexus"))
     if nexus_root.is_symlink():
         raise NexusIndexError("Nexus canonical root cannot be a symlink")
     records: list[IndexedRecord] = []
@@ -156,6 +158,7 @@ def scan_canonical_records(vault_root: Path) -> tuple[IndexedRecord, ...]:
             if candidate.is_symlink():
                 raise NexusIndexError(f"canonical path contains a symlink: {candidate}")
         for path in sorted(root.rglob("*.md")):
+            resolve_safe_vault_path(vault_root, path.relative_to(vault_root))
             relative = path.relative_to(vault_root)
             current = vault_root
             for component in relative.parts:
@@ -204,6 +207,7 @@ def rebuild_index(vault_root: Path, index_path: Path) -> RebuildResult:
                 store.connection.rollback()
                 raise
             counts = store.counts()
+            store.connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         with temporary_path.open("rb") as handle:
             os.fsync(handle.fileno())
         os.replace(temporary_path, index_path)
