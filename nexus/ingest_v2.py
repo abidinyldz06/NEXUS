@@ -48,8 +48,8 @@ from .vault import VaultRepository
 from .vault.rebuild_views import current_memory_view_write
 from .vault.renderer import extract_record_payload, extract_written_at, memory_from_payload
 
-V2_TARGET_TIMEOUT_SECONDS = 60
-V2_HARD_TIMEOUT_SECONDS = 90
+V2_TARGET_TIMEOUT_SECONDS = 120
+V2_HARD_TIMEOUT_SECONDS = 150
 LONG_UNIT_DEFAULT_SECONDS = 300
 MIN_SEGMENT_CHARS = 500
 MAX_RETRIES = 2

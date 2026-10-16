@@ -318,7 +318,7 @@ class ExtractionContractTests(unittest.TestCase):
         elapsed = time.monotonic() - started
         self.assertEqual("timeout", raised.exception.failure_class)
         self.assertLess(elapsed, 0.45)
-        self.assertEqual(90, __import__("nexus.ingest_v2", fromlist=["V2_HARD_TIMEOUT_SECONDS"]).V2_HARD_TIMEOUT_SECONDS)
+        self.assertEqual(150, __import__("nexus.ingest_v2", fromlist=["V2_HARD_TIMEOUT_SECONDS"]).V2_HARD_TIMEOUT_SECONDS)
 
     def test_timed_out_provider_thread_blocks_overlapping_calls(self) -> None:
         import threading
