@@ -551,6 +551,7 @@ class PipelineV2Tests(unittest.TestCase):
                 self.started_indexes: list[int] = []
                 self.lock = threading.Lock()
                 self.succeed_after_first = False
+                self.hold_first = threading.Event()
 
             def complete_structured(self, **kwargs: object) -> object:
                 payload = json.loads(str(kwargs["input"][0]["text"]).split("\n", 1)[1])  # type: ignore[index]
@@ -559,7 +560,9 @@ class PipelineV2Tests(unittest.TestCase):
                     self.started_indexes.append(index)
                     first = len(self.started_indexes) == 1
                 if first and not self.succeed_after_first:
-                    time.sleep(0.45)
+                    # Hold the timed-out provider thread until the test releases it.
+                    # A fixed sleep can finish before the next segment acquires the lane.
+                    self.hold_first.wait(timeout=30)
                 span_ids = [item["span_id"] for item in payload["spans"]]
                 return type(
                     "Resp",
@@ -625,10 +628,12 @@ class PipelineV2Tests(unittest.TestCase):
                 self.assertEqual(0, by_start[1]["attempt_count"])
                 self.assertIsNone(by_start[1].get("failure_class"))
                 self.assertNotEqual(FAILED_SEGMENT, by_start[1]["status"])
-                deadline = time.monotonic() + 1.0
+                llm.succeed_after_first = True
+                llm.hold_first.set()
+                deadline = time.monotonic() + 5.0
                 while ExtractionService.in_flight_count() and time.monotonic() < deadline:
                     time.sleep(0.02)
-                llm.succeed_after_first = True
+                self.assertEqual(0, ExtractionService.in_flight_count())
                 second = run_conversation(
                     config,
                     source,
@@ -651,6 +656,7 @@ class PipelineV2Tests(unittest.TestCase):
                 self.assertEqual(1, second_row["attempt_count"])
                 self.assertEqual("completed", second.segment_statuses[second_row["segment_id"]])
         finally:
+            llm.hold_first.set()
             v2.V2_TARGET_TIMEOUT_SECONDS = original
             ExtractionService.reset_in_flight_for_tests()
 
@@ -2516,7 +2522,7 @@ class PipelineV2Tests(unittest.TestCase):
             duration = int(last["segment_duration_ms"])
             wall = int(last["segment_wall_ms"])
             self.assertEqual(3, last["attempt_count"])
-            self.assertLess(duration, 40)
+            self.assertGreater(wall - duration, 80)
             self.assertGreater(wall, duration)
 
     def test_human_review_pack_stays_private_and_does_not_declare_quality(self) -> None:
