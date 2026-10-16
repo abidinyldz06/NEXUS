@@ -710,9 +710,17 @@ def acceptance_report(config: NexusConfig) -> dict[str, Any]:
         "shadow_unpublished_rows": shadow_unpublished,
         "canonical_missing_rows": canonical_missing,
         "legacy_unclassified_missing_rows": legacy_unclassified,
+        # ADR 0004: the accepted gate is first-attempt completion p95 against
+        # V2_TARGET_TIMEOUT_SECONDS (120). Total wall p95 stays in
+        # p95_segment_seconds and still includes historical runs.
         "thresholds": {
             "completion_ge_95": bool(completion_pct is not None and completion_pct >= 95),
-            "p95_lt_60": bool(p95_all is not None and p95_all < 60),
+            "p95_le_target": bool(
+                p95_first is not None and p95_first <= V2_TARGET_TIMEOUT_SECONDS
+            ),
+            "p95_target_seconds": V2_TARGET_TIMEOUT_SECONDS,
+            "p95_threshold_metric": "p95_first_attempt_completed_seconds",
+            "p95_threshold_adr": "0004",
             "silent_loss_0": canonical_missing == 0 and legacy_unclassified == 0,
             "duplicate_0": (len(fingerprints) == len(set(fingerprints)))
             and (len(statements) == len(set(statements)))
