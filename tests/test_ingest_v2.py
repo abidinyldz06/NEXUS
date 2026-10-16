@@ -1766,6 +1766,14 @@ class PipelineV2Tests(unittest.TestCase):
             self.assertTrue(all(value == float(LONG_UNIT_DEFAULT_SECONDS) for value in llm.timeouts))
             self.assertEqual(len(llm.timeouts), len(llm.uses))
             self.assertTrue(all(item["human_triggered"] for item in llm.uses))
+            rows = [
+                json.loads(line)
+                for line in ingest_log_path(root / "data").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            completed = [row for row in rows if row.get("segment_status") == "completed"]
+            self.assertTrue(completed)
+            self.assertTrue(all(row.get("long_unit") is True for row in completed))
 
     def test_carry_forward_is_read_only_and_survives_resume(self) -> None:
         source = conversation(
