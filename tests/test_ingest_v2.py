@@ -1305,7 +1305,7 @@ class PipelineV2Tests(unittest.TestCase):
             self.assertEqual([90], llm.timeouts)
             self.assertFalse((root / "data" / "ingest").exists())
 
-    def test_flag_on_shadow_uses_60_second_target_without_vault_writes(self) -> None:
+    def test_flag_on_shadow_uses_120_second_target_without_vault_writes(self) -> None:
         class CaptureLlm:
             def __init__(self) -> None:
                 self.timeouts: list[float] = []
@@ -1368,7 +1368,7 @@ class PipelineV2Tests(unittest.TestCase):
                 code = args.func(args)
             payload = json.loads(stream.getvalue())
             self.assertEqual(0, code)
-            self.assertEqual([60.0], llm.timeouts)
+            self.assertEqual([120.0], llm.timeouts)
             self.assertFalse(payload["vault_written"])
             self.assertFalse(payload["candidates_published"])
             self.assertFalse(list(vault.rglob("mem_*.md")))
@@ -2422,8 +2422,8 @@ class PipelineV2Tests(unittest.TestCase):
                 write_canonical=True,
             )
             payload = acceptance_report(config)
-            self.assertEqual(90, payload["timeout_cap_seconds"])
-            self.assertEqual(90, V2_HARD_TIMEOUT_SECONDS)
+            self.assertEqual(150, payload["timeout_cap_seconds"])
+            self.assertEqual(150, V2_HARD_TIMEOUT_SECONDS)
             self.assertEqual(1, payload["unique_conversations"])
             self.assertEqual(100.0, payload["completion_pct"])
             self.assertFalse(payload["a8_all_required"])
@@ -2604,7 +2604,7 @@ class PipelineV2Tests(unittest.TestCase):
         self.assertEqual(3000, args.max_segment_chars)
         self.assertEqual(4, args.max_messages)
         self.assertEqual(80, args.max_segments)
-        self.assertEqual(90, __import__("nexus.ingest_v2", fromlist=["V2_HARD_TIMEOUT_SECONDS"]).V2_HARD_TIMEOUT_SECONDS)
+        self.assertEqual(150, __import__("nexus.ingest_v2", fromlist=["V2_HARD_TIMEOUT_SECONDS"]).V2_HARD_TIMEOUT_SECONDS)
 
 
 class PilotMatrixTests(unittest.TestCase):

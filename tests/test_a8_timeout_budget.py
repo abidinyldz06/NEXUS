@@ -1,4 +1,4 @@
-"""A8 timeout defaults stay put until a documented budget change is accepted."""
+"""A8 timeout budget: ADR 0004 accepted 16.10.2026 — 120s target / 150s hard cap. Guard stays: values must not drift from the accepted ADR."""
 
 from __future__ import annotations
 
@@ -20,8 +20,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class TimeoutBudgetTests(unittest.TestCase):
     def test_defaults_are_not_silently_raised(self) -> None:
-        self.assertEqual(V2_TARGET_TIMEOUT_SECONDS, 60)
-        self.assertEqual(V2_HARD_TIMEOUT_SECONDS, 90)
+        self.assertEqual(V2_TARGET_TIMEOUT_SECONDS, 120)
+        self.assertEqual(V2_HARD_TIMEOUT_SECONDS, 150)
         self.assertEqual(LONG_UNIT_DEFAULT_SECONDS, 300)
         self.assertLessEqual(V2_TARGET_TIMEOUT_SECONDS, V2_HARD_TIMEOUT_SECONDS)
 

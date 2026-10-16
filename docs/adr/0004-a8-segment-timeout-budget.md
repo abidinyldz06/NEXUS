@@ -1,6 +1,6 @@
 # ADR 0004: A8 leftover segment timeouts need a documented budget, not a silent one
 
-Status: proposed. Defaults in code stay 60s target / 90s hard cap / 300s human-triggered long-unit. This note does not change them and does not authorize a rerun.
+Status: accepted (16 October 2026 — Abidin approved the documented raise; the Q4 plan's measurement trigger fired: first-attempt p95 82s exceeded the 60s target across 50+ segments). Code defaults now carry the accepted values: 120s target / 150s hard cap / 300s human-triggered long-unit (unchanged). This ADR is the record of the change; no silent drift. Reruns remain human-approved only.
 
 ## Evidence (2026-10-15, read-only)
 
