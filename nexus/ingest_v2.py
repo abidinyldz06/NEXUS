@@ -551,8 +551,16 @@ def _percentile(values: list[float], percentile: float) -> float | None:
     return float(ordered[lower] + (ordered[upper] - ordered[lower]) * (rank - lower))
 
 
-def acceptance_report(config: NexusConfig) -> dict[str, Any]:
+def acceptance_report(
+    config: NexusConfig, *, first_attempt_window: int = 50
+) -> dict[str, Any]:
     """PII-free A8 rollup from checkpoints, ingest log, ledger and Vault."""
+    if (
+        not isinstance(first_attempt_window, int)
+        or isinstance(first_attempt_window, bool)
+        or first_attempt_window < 1
+    ):
+        raise IngestV2Error("first-attempt window must be a positive integer")
     data_path = config.data_path
     ckpt_dir = data_path / "ingest" / "v2" / "checkpoints"
     conv_worst: dict[str, str] = {}
@@ -593,6 +601,7 @@ def acceptance_report(config: NexusConfig) -> dict[str, Any]:
     leftover_durations: list[float] = []
     non_leftover: list[float] = []
     log_dup = 0
+    parsed_rows: list[dict[str, Any]] = []
     log_path = ingest_log_path(data_path)
     if log_path.is_file() and not log_path.is_symlink():
         for line in log_path.read_text(encoding="utf-8").splitlines():
@@ -602,35 +611,47 @@ def acceptance_report(config: NexusConfig) -> dict[str, Any]:
                 row = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            log_dup += int(row.get("duplicate_prevented_count") or row.get("duplicates_prevented") or 0)
-            duration = row.get("segment_duration_ms")
-            if not isinstance(duration, (int, float)) or duration < 0:
-                continue
-            seconds = float(duration) / 1000
-            status = row.get("segment_status")
-            attempts = int(row.get("attempt_count") or 0)
-            timeouts = int(row.get("timeout_count") or 0)
-            leftover = (
-                status == FAILED_SEGMENT
-                and attempts >= MAX_ATTEMPTS
-                and timeouts >= MAX_ATTEMPTS
-                and seconds >= 500
-            )
-            if leftover:
-                leftover_durations.append(seconds)
-            else:
-                non_leftover.append(seconds)
-            if status == "completed":
-                completed_durations.append(seconds)
-                if attempts == 1:
-                    first_attempt_completed.append(seconds)
-            elif status == FAILED_SEGMENT:
-                failed_durations.append(seconds)
+            if isinstance(row, dict):
+                parsed_rows.append(row)
+    lane_keys = _long_unit_segment_keys(parsed_rows)
+    first_attempt_series: list[tuple[float, bool]] = []
+    for row in parsed_rows:
+        log_dup += int(row.get("duplicate_prevented_count") or row.get("duplicates_prevented") or 0)
+        duration = row.get("segment_duration_ms")
+        if not isinstance(duration, (int, float)) or duration < 0:
+            continue
+        seconds = float(duration) / 1000
+        status = row.get("segment_status")
+        attempts = int(row.get("attempt_count") or 0)
+        timeouts = int(row.get("timeout_count") or 0)
+        leftover = (
+            status == FAILED_SEGMENT
+            and attempts >= MAX_ATTEMPTS
+            and timeouts >= MAX_ATTEMPTS
+            and seconds >= 500
+        )
+        if leftover:
+            leftover_durations.append(seconds)
+        else:
+            non_leftover.append(seconds)
+        if status == "completed":
+            completed_durations.append(seconds)
+            if attempts == 1:
+                first_attempt_completed.append(seconds)
+                first_attempt_series.append((seconds, _row_is_long_unit(row, lane_keys)))
+        elif status == FAILED_SEGMENT:
+            failed_durations.append(seconds)
     all_durations = completed_durations + failed_durations
     p95_all = _percentile(all_durations, 95)
     p95_completed = _percentile(completed_durations, 95)
     p95_first = _percentile(first_attempt_completed, 95)
     p95_excluding_leftover = _percentile(non_leftover, 95)
+    windowed = first_attempt_series[-first_attempt_window:]
+    routine_samples = [seconds for seconds, lane in windowed if not lane]
+    lane_samples = [seconds for seconds, lane in windowed if lane]
+    p95_routine = _percentile(routine_samples, 95)
+    p50_routine = _percentile(routine_samples, 50)
+    p95_lane = _percentile(lane_samples, 95)
 
     records = load_ledger(data_path) if ledger_path(data_path).is_file() else []
     fingerprints = [str(row.get("fingerprint")) for row in records if row.get("fingerprint")]
@@ -693,6 +714,12 @@ def acceptance_report(config: NexusConfig) -> dict[str, Any]:
         "p95_segment_seconds": None if p95_all is None else round(p95_all, 3),
         "p95_completed_segment_seconds": None if p95_completed is None else round(p95_completed, 3),
         "p95_first_attempt_completed_seconds": None if p95_first is None else round(p95_first, 3),
+        "first_attempt_window": first_attempt_window,
+        "routine_first_attempt_samples": len(routine_samples),
+        "p50_routine_first_attempt_seconds": None if p50_routine is None else round(p50_routine, 3),
+        "p95_routine_first_attempt_seconds": None if p95_routine is None else round(p95_routine, 3),
+        "long_unit_first_attempt_samples": len(lane_samples),
+        "p95_long_unit_first_attempt_seconds": None if p95_lane is None else round(p95_lane, 3),
         "p95_excluding_leftover_seconds": None
         if p95_excluding_leftover is None
         else round(p95_excluding_leftover, 3),
@@ -710,9 +737,21 @@ def acceptance_report(config: NexusConfig) -> dict[str, Any]:
         "shadow_unpublished_rows": shadow_unpublished,
         "canonical_missing_rows": canonical_missing,
         "legacy_unclassified_missing_rows": legacy_unclassified,
+        # ADR 0004: routine gate is the last-N first-attempt completion p95
+        # against V2_TARGET_TIMEOUT_SECONDS. The long-unit lane is a separate
+        # budget and does not move that gate. Historical durations stay above.
         "thresholds": {
             "completion_ge_95": bool(completion_pct is not None and completion_pct >= 95),
-            "p95_lt_60": bool(p95_all is not None and p95_all < 60),
+            "p95_le_target": bool(
+                p95_routine is not None and p95_routine <= V2_TARGET_TIMEOUT_SECONDS
+            ),
+            "p95_target_seconds": V2_TARGET_TIMEOUT_SECONDS,
+            "p95_threshold_metric": "routine_first_attempt_window",
+            "p95_threshold_adr": "0004",
+            "p95_le_long_unit_budget": bool(
+                p95_lane is not None and p95_lane <= LONG_UNIT_DEFAULT_SECONDS
+            ),
+            "long_unit_budget_seconds": LONG_UNIT_DEFAULT_SECONDS,
             "silent_loss_0": canonical_missing == 0 and legacy_unclassified == 0,
             "duplicate_0": (len(fingerprints) == len(set(fingerprints)))
             and (len(statements) == len(set(statements)))
@@ -1604,6 +1643,40 @@ def _logged_tokens(segment: ConversationSegment, extractor: object) -> int:
     return _token_estimate(segment)
 
 
+def _logged_long_unit(extractor: object) -> bool | None:
+    """True when this attempt used the human long-unit lane. Routine stays unset."""
+    return True if getattr(extractor, "long_unit", False) is True else None
+
+
+def _long_unit_segment_keys(rows: list[dict[str, Any]]) -> set[tuple[str, str]]:
+    """Segment identities already marked as long-unit, including marker-only rows."""
+    keys: set[tuple[str, str]] = set()
+    for row in rows:
+        flag = row.get("long_unit")
+        conversation_id = row.get("conversation_id")
+        if not isinstance(conversation_id, str) or not conversation_id:
+            continue
+        segment_id: object = None
+        if flag is True:
+            segment_id = row.get("segment_id")
+        elif isinstance(flag, dict):
+            segment_id = flag.get("segment_id") or row.get("segment_id")
+        if isinstance(segment_id, str) and segment_id:
+            keys.add((conversation_id, segment_id))
+    return keys
+
+
+def _row_is_long_unit(row: dict[str, Any], keys: set[tuple[str, str]]) -> bool:
+    flag = row.get("long_unit")
+    if flag is True or isinstance(flag, dict):
+        return True
+    conversation_id = row.get("conversation_id")
+    segment_id = row.get("segment_id")
+    if isinstance(conversation_id, str) and isinstance(segment_id, str):
+        return (conversation_id, segment_id) in keys
+    return False
+
+
 def _observation(**values: Any) -> dict[str, Any]:
     base: dict[str, Any] = {key: None for key in _OBSERVATION_KEYS}
     base.update(values)
@@ -2143,6 +2216,7 @@ def run_conversation(
                         attempt_count=attempts,
                         retry_count=max(0, attempts - 1),
                         timeout_count=timeouts,
+                        long_unit=_logged_long_unit(extractor),
                         writes="none",
                         final_status="paused",
                     ),
@@ -2195,6 +2269,7 @@ def run_conversation(
                         attempt_count=attempts,
                         retry_count=0,
                         timeout_count=timeouts,
+                        long_unit=_logged_long_unit(extractor),
                         writes="none",
                         final_status="paused",
                     ),
@@ -2289,6 +2364,7 @@ def run_conversation(
                     attempt_count=attempts,
                     retry_count=0,
                     timeout_count=timeouts,
+                    long_unit=_logged_long_unit(extractor),
                     error_class="timeout",
                     writes="none",
                     final_status="timeout_shrink",
@@ -2334,6 +2410,7 @@ def run_conversation(
                     attempt_count=attempts,
                     retry_count=max(0, attempts - 1),
                     timeout_count=timeouts,
+                    long_unit=_logged_long_unit(extractor),
                     error_class=failure_class,
                     errors=[{"segment_id": segment.segment_id, "failure_class": failure_class}],
                     writes="none",
@@ -2455,6 +2532,7 @@ def run_conversation(
                 attempt_count=attempts,
                 retry_count=max(0, attempts - 1),
                 timeout_count=timeouts,
+                long_unit=_logged_long_unit(extractor),
                 candidate_count=len(outcome.candidates),
                 accepted_count=accepted,
                 rejected_count=rejected,
